@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AetherCut AI: editor de video autónomo con Gemini, poda de silencios, B-Roll, subtítulos y Shorts.">
+    <title>AetherCut AI | Autonomous Video Editor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css?v=3">
+</head>
+<body>
+<div class="shell">
+
+    <!-- TOP BAR -->
+    <header class="topbar">
+        <div class="who">
+            <div class="avatar"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg></div>
+            <div>
+                <h1 class="brand">AetherCut AI</h1>
+                <div class="handle">@autonomous.editor</div>
+            </div>
+        </div>
+        <div class="search">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+            <span>Search any clip, cue or segment</span>
+            <kbd>/</kbd>
+        </div>
+        <div class="top-actions">
+            <span class="chip-model"><i></i> gemini-flash-latest</span>
+            <button class="round-btn" aria-label="Notificaciones" type="button">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <main class="grid">
+
+        <!-- ============ COLUMN 1: PIPELINE / PORTFOLIO ============ -->
+        <section class="col">
+            <article class="card">
+                <div class="card-head">
+                    <h2>Pipeline</h2>
+                    <button class="mini-pill" type="button">+ Run</button>
+                </div>
+
+                <div class="triple">
+                    <div>
+                        <span class="lbl">Silence cut</span>
+                        <strong class="num" id="dispSilence">1.5s</strong>
+                    </div>
+                    <div>
+                        <span class="lbl">B-Roll</span>
+                        <strong class="num" id="kpiBroll">0</strong>
+                    </div>
+                    <div>
+                        <span class="lbl">Saved</span>
+                        <strong class="num" id="kpiSaved">0s</strong>
+                    </div>
+                </div>
+
+                <!-- Dot matrix (se llena con el progreso real) -->
+                <div class="dotmatrix" id="dotMatrix" aria-label="Progreso del pipeline"></div>
+                <div class="legend">
+                    <span><i class="sq a"></i>Gemini</span>
+                    <span><i class="sq b"></i>B-Roll</span>
+                    <span><i class="sq c"></i>Render</span>
+                    <span><i class="sq d"></i>Master</span>
+                </div>
+
+                <div class="folders">
+                    <div class="folder"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Inputs</span><em class="pos">ready</em></div>
+                    <div class="folder"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Assets</span><em class="pos">ready</em></div>
+                    <div class="folder"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Outputs</span><em class="pos">ready</em></div>
+                    <div class="folder"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Temp</span><em class="neg">auto-clean</em></div>
+                </div>
+
+                <div class="list-head"><span>Stages</span><span class="sort">Sort by Order</span></div>
+                <ul class="stages">
+                    <li id="stepGemini">
+                        <span class="ico">G</span>
+                        <div class="meta"><b>Gemini analysis</b><small>Native video ingestion</small></div>
+                        <div class="val"><b class="st">Idle</b><small>step 1</small></div>
+                    </li>
+                    <li id="stepAssets">
+                        <span class="ico">B</span>
+                        <div class="meta"><b>B-Roll orchestrator</b><small>Parallel stock download</small></div>
+                        <div class="val"><b class="st">Idle</b><small>step 2</small></div>
+                    </li>
+                    <li id="stepCards">
+                        <span class="ico">V</span>
+                        <div class="meta"><b>Web fact-check</b><small>Verify claims + build cards</small></div>
+                        <div class="val"><b class="st">Idle</b><small>step 3</small></div>
+                    </li>
+                    <li id="stepRender">
+                        <span class="ico">M</span>
+                        <div class="meta"><b>MoviePy assembly</b><small>Cuts + fades + overlays</small></div>
+                        <div class="val"><b class="st">Idle</b><small>step 4</small></div>
+                    </li>
+                    <li id="stepSubs">
+                        <span class="ico">F</span>
+                        <div class="meta"><b>FFmpeg master</b><small>Burn captions + Shorts</small></div>
+                        <div class="val"><b class="st">Idle</b><small>step 5</small></div>
+                    </li>
+                </ul>
+            </article>
+        </section>
+
+        <!-- ============ COLUMN 2: INGESTION + CHARTS ============ -->
+        <section class="col">
+            <article class="card">
+                <form id="uploadForm">
+                    <div class="card-head">
+                        <h2>Ingest</h2>
+                        <button class="mini-pill" type="button" id="browseTrigger">+ Add video</button>
+                    </div>
+
+                    <div class="drop" id="dropzone">
+                        <input type="file" id="videoFileInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" hidden>
+                        <div class="drop-ico">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
+                        <p class="drop-t">Drop raw footage here</p>
+                        <p class="drop-s">MP4 · MOV · MKV · WEBM</p>
+                        <div class="file-chip" id="selectedFileBadge" style="display:none;">
+                            <i></i><span id="selectedFileName">video.mp4</span><b id="removeFileBtn" role="button" aria-label="Quitar archivo">&times;</b>
+                        </div>
+                    </div>
+
+                    <div class="toggles">
+                        <label class="tg"><input type="checkbox" id="enableBRoll" checked><span><b>Auto B-Roll</b><em>+stock</em></span></label>
+                        <label class="tg"><input type="checkbox" id="enableCards" checked><span><b>Info cards</b><em>+web verified</em></span></label>
+                        <label class="tg"><input type="checkbox" id="enableCaptions"><span><b>Captions</b><em>optional · Whisper</em></span></label>
+                        <label class="tg"><input type="checkbox" id="enableShorts" checked><span><b>Shorts 9:16</b><em>+vertical</em></span></label>
+                    </div>
+
+                    <div class="slider-box">
+                        <div class="slider-top"><span>Smart cut threshold</span><b id="silenceVal">1.5s</b></div>
+                        <input type="range" id="silenceThreshold" min="0.8" max="3.0" step="0.1" value="1.5">
+                        <div class="ticks"><span>0.8s</span><span>1.5s</span><span>2.2s</span><span>3.0s</span></div>
+                    </div>
+
+                    <button type="submit" class="cta" id="startBtn" disabled>
+                        <span>Execute autonomous edit</span>
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    </button>
+                </form>
+            </article>
+
+            <article class="card terminal-card">
+                <div class="card-head">
+                    <h2>Live Terminal</h2>
+                    <span class="mini-pill ghost">stdout</span>
+                </div>
+                <div class="terminal-window" id="terminalLog">
+                    <div><span class="sys-time">[sys]</span> System initialized. Ready to process.</div>
+                </div>
+            </article>
+        </section>
+
+        <!-- ============ COLUMN 3: ASSISTANT + RESULTS ============ -->
+        <section class="col">
+            <article class="card assistant">
+                <div class="card-head">
+                    <div class="ai-id">
+                        <span class="ai-dot"></span>
+                        <h2>AI Assistant</h2>
+                    </div>
+                    <span class="mini-pill ghost">Live</span>
+                </div>
+
+                <div class="chat" id="chatFeed">
+                    <div class="msg me"><p>Give me a forecast for this video.</p><time>09:41</time></div>
+                    <div class="msg ai"><p>Ready. Drop a clip and I will cut silences, place B-Roll at the exact mention, burn captions and extract a vertical Short.</p><time>09:41</time></div>
+                </div>
+
+                <div class="prog" id="assistantProgressWrap" style="display:none;">
+                    <div class="prog-top"><span id="pipelineStatusText">Starting agents...</span><b id="progressPctText">0%</b></div>
+                    <div class="track"><div class="fill" id="progressBarFill" style="width:0%"></div></div>
+                </div>
+
+                <div class="composer"><span>Enter a message...</span><i>↑</i></div>
+            </article>
+
+            <article class="card" id="resultsSection" style="display:none;">
+                <div class="card-head">
+                    <h2>Mastered outputs</h2>
+                    <a href="#" class="mini-pill link" id="downloadMasterBtn" download>Download master</a>
+                </div>
+
+                <div class="players">
+                    <div>
+                        <span class="lbl">Master 16:9</span>
+                        <div class="frame"><video id="masterVideoPlayer" controls playsinline></video></div>
+                    </div>
+                    <div id="shortContainer">
+                        <div class="short-top"><span class="lbl">Short 9:16</span><a href="#" class="dl" id="downloadShortBtn" download>Download</a></div>
+                        <div class="frame tall"><video id="shortVideoPlayer" controls playsinline></video></div>
+                    </div>
+                </div>
+
+                <div class="kpis">
+                    <div><span class="lbl">Silences cut</span><strong class="pos" id="statCuts">0</strong></div>
+                    <div><span class="lbl">B-Rolls</span><strong class="pos" id="statBRolls">0</strong></div>
+                    <div><span class="lbl">Cards</span><strong class="pos" id="statCards">0</strong></div>
+                    <div><span class="lbl">Time saved</span><strong class="pos" id="statTimeSaved">0s</strong></div>
+                </div>
+
+                <div class="facts-wrap" id="factsWrap" style="display:none;">
+                    <div class="list-head"><span>Fact-check</span><span class="sort" id="factsSummary"></span></div>
+                    <ul class="facts" id="factsList"></ul>
+                </div>
+            </article>
+        </section>
+    </main>
+</div>
+<script src="/static/js/app.js?v=3"></script>
+</body>
+</html>
