@@ -1,41 +1,51 @@
+"""Módulo de renderizado de tarjetas gráficas (Info Cards) de alto impacto visual.
+
+Inspirado en el diseño limpio y moderno de tarjetas UI con transición suave (gradient fade)
+entre la imagen y los textos, micro-badges tipo píldora flotante con indicadores vectoriales,
+y tipografía bold de máximo contraste y legibilidad broadcast sobre cualquier video.
+"""
+
+from __future__ import annotations
+
+import math
 import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from core.models import InfoCard
 
 FONT_DIR = Path("C:/Windows/Fonts")
 
-# Paleta premium de alto contraste y legibilidad broadcast
-BG = (8, 12, 20, 242)            # Fondo oscuro de máxima legibilidad
-BG_ALT = (14, 18, 30, 248)       # Contenedores secundarios translúcidos
-BORDER = (56, 189, 248, 160)     # Borde cristal con brillo cian elegante
-BORDER_ACCENT = (99, 102, 241, 240) # Índigo vibrante
-TXT = (255, 255, 255, 255)       # Blanco puro de máximo contraste
-MUTED = (241, 245, 249, 255)     # Blanco pizarra ultra-legible sobre cualquier fondo de video
-DIM = (148, 163, 184, 255)       # Gris claro para metadatos legibles
-GREEN = (52, 211, 153, 255)      # Esmeralda neón / Verificado
-CHIP_BG = (16, 185, 129, 70)
-BLUE_ACCENT = (56, 189, 248, 255) # Cyan eléctrico
-AMBER = (251, 191, 36, 255)      # Ámbar destacados
+# Paleta para badges e indicadores
+PALETTE = {
+    "green": (52, 211, 153, 255),    # Esmeralda neón / Verificado
+    "cyan": (56, 189, 248, 255),     # Cyan eléctrico
+    "amber": (251, 191, 36, 255),    # Ámbar / Alerta
+    "red": (248, 113, 113, 255),     # Rojo suave / Corrección
+    "purple": (168, 85, 247, 255),   # Violeta / Concepto
+    "slate": (148, 163, 184, 255),   # Pizarra neutra
+}
 
 KIND_LABELS = {
-    "ley": "✓ LEY / NORMATIVA",
-    "cifra": "📊 ESTADÍSTICA / DATO",
-    "fecha": "📅 CRONOLOGÍA",
-    "persona": "👤 PERFIL / BIOGRAFÍA",
-    "lugar": "📍 UBICACIÓN",
-    "organizacion": "🏛️ INSTITUCIÓN",
-    "organización": "🏛️ INSTITUCIÓN",
-    "hardware": "⚙️ ESPECIFICACIÓN",
-    "concepto": "💡 CONCEPTO CLAVE",
-    "dato": "✓ DATO VERIFICADO",
-    "confirmacion": "✓ CONFIRMADO",
-    "confirmación": "✓ CONFIRMADO",
-    "tip": "💡 TIP PRO",
-    "advertencia": "⚠️ ALERTA",
+    "ley": ("LEY / NORMATIVA", "cyan"),
+    "normativa": ("LEY / NORMATIVA", "cyan"),
+    "articulo": ("ARTÍCULO LEGAL", "cyan"),
+    "cifra": ("ESTADÍSTICA", "amber"),
+    "estadistica": ("ESTADÍSTICA", "amber"),
+    "fecha": ("CRONOLOGÍA", "purple"),
+    "persona": ("PERFIL", "purple"),
+    "lugar": ("UBICACIÓN", "cyan"),
+    "organizacion": ("INSTITUCIÓN", "cyan"),
+    "organización": ("INSTITUCIÓN", "cyan"),
+    "hardware": ("ESPECIFICACIÓN", "slate"),
+    "concepto": ("CONCEPTO CLAVE", "purple"),
+    "dato": ("DATO CLAVE", "cyan"),
+    "confirmacion": ("CONFIRMADO", "green"),
+    "confirmación": ("CONFIRMADO", "green"),
+    "tip": ("TIP PRO", "amber"),
+    "advertencia": ("ALERTA", "red"),
 }
 
 
@@ -43,24 +53,29 @@ def _font(names: List[str], size: int) -> ImageFont.FreeTypeFont:
     for name in names:
         path = FONT_DIR / name
         if path.exists():
-            return ImageFont.truetype(str(path), size)
+            try:
+                return ImageFont.truetype(str(path), size)
+            except Exception:
+                pass
     return ImageFont.load_default()
 
 
 class InfoCardRenderer:
     """
-    Renderizador de tarjetas gráficas premium estilo Platzi y Nate Gentile:
-    - Reference Callouts: Foto real, etiqueta verificada, titular y resumen.
-    - Browser Mockup: Marco tipo navegador con botones macOS, barra de dirección y titular de prensa/wiki.
-    - Stat Highlight: Métrica gigante destacada (+78%, USD 50M) con barra de contexto.
-    - Tech Spec: Ficha técnica con borde de acento e ícono.
+    Renderizador de tarjetas gráficas modernas y limpias:
+    - Cabecera con imagen (o aura mesh) con transición suave (gradient fade) hacia el fondo blanco.
+    - Badges flotantes tipo píldora oscura con indicadores luminosos (verde, cyan, ámbar, violeta).
+    - Titular bold limpio y de gran contraste (charcoal / dark slate).
+    - Párrafo explicativo con interlineado generoso.
+    - Pie de fuentes minimalista sin botones de acción.
+    - Sombra ambiental suave y borde sutil de 1px para destacar sobre cualquier escena de video.
     """
 
     def __init__(self, frame_w: int, frame_h: int):
         portrait = frame_h > frame_w
-        # Escala adecuada para que sea muy legible en 1080p sin tapar el centro de la pantalla
-        self.card_w = int(frame_w * (0.86 if portrait else 0.34))
-        self.card_w = max(self.card_w, 380)
+        # Escala adecuada para que sea muy legible sin tapar excesivamente la pantalla
+        self.card_w = int(frame_w * (0.84 if portrait else 0.35))
+        self.card_w = max(self.card_w, 420)
         self.s = self.card_w / 640.0
 
     def _px(self, v: float) -> int:
@@ -68,7 +83,9 @@ class InfoCardRenderer:
 
     @staticmethod
     def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int, max_lines: int) -> List[str]:
-        words, lines, cur = text.split(), [], ""
+        words = (text or "").split()
+        lines = []
+        cur = ""
         for w in words:
             trial = f"{cur} {w}".strip()
             if draw.textlength(trial, font=font) <= max_w:
@@ -88,520 +105,315 @@ class InfoCardRenderer:
         img = img.convert("RGB")
         ratio = max(w / img.width, h / img.height)
         img = img.resize((int(img.width * ratio) + 1, int(img.height * ratio) + 1), Image.LANCZOS)
-        left, top = (img.width - w) // 2, (img.height - h) // 3
+        left = (img.width - w) // 2
+        top = (img.height - h) // 3
         return img.crop((left, top, left + w, top + h))
 
+    def _build_badges(self, card: InfoCard) -> List[Tuple[str, str]]:
+        badges: List[Tuple[str, str]] = []
+
+        verdict = (card.verdict or "").lower()
+        if verdict == "contradicted":
+            badges.append(("CORRECCIÓN", "red"))
+        elif verdict == "supported":
+            badges.append(("VERIFICADO", "green"))
+        elif verdict == "insufficient":
+            badges.append(("EN REVISIÓN", "amber"))
+
+        kind = (card.kind or "dato").lower()
+        if kind in KIND_LABELS:
+            badges.append(KIND_LABELS[kind])
+
+        if card.stat_value:
+            badges.append((card.stat_value[:18], "amber"))
+        elif card.sources and card.sources[0].domain:
+            badges.append((card.sources[0].domain[:20], "slate"))
+
+        # Limitar a máximo 4 badges para no saturar la cabecera
+        return badges[:4]
+
+    def _render_modern_card(
+        self,
+        headline: str,
+        body: str,
+        badges: List[Tuple[str, str]],
+        image_path: Optional[str] = None,
+        source_domain: str = "Registro oficial",
+        highlight_color: Optional[Tuple[int, int, int]] = None,
+        out_path: Optional[Path] = None,
+    ) -> Path:
+        """Renderiza la tarjeta con el diseño exacto: imagen + gradient fade + píldoras + textos."""
+        w = self.card_w
+        pad_x = self._px(30)
+        inner_w = w - 2 * pad_x
+        radius = self._px(28)
+
+        f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(13))
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(30))
+        f_body = _font(["segoeui.ttf", "arial.ttf"], self._px(19))
+        f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(13))
+
+        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+        title_lines = self._wrap(probe, headline, f_title, inner_w, 2)
+        body_lines = self._wrap(probe, body, f_body, inner_w, 4)
+
+        title_lh = f_title.size + self._px(6)
+        body_lh = f_body.size + self._px(8)
+
+        has_photo = bool(image_path and Path(image_path).exists())
+        photo_h = self._px(250) if has_photo else self._px(170)
+
+        text_section_h = (
+            (len(title_lines) * title_lh)
+            + self._px(10)
+            + (len(body_lines) * body_lh)
+            + self._px(20)
+            + f_src.size
+            + self._px(34)
+        )
+        total_h = photo_h + text_section_h
+
+        ss = 2
+        W, H = w * ss, total_h * ss
+        card = Image.new("RGBA", (W, H), (255, 255, 255, 255))
+
+        # 1. Cabecera superior: Foto o Mesh gradient
+        if has_photo:
+            try:
+                raw_photo = Image.open(image_path).convert("RGB")
+                photo = self._cover(raw_photo, W, photo_h * ss).convert("RGBA")
+            except Exception as exc:
+                print(f"[CardRenderer] Error cargando imagen {image_path}: {exc}")
+                has_photo = False
+
+        if not has_photo:
+            photo = Image.new("RGBA", (W, photo_h * ss), (15, 23, 42, 255))
+            p_draw = ImageDraw.Draw(photo)
+            for row in range(photo_h * ss):
+                ratio = row / (photo_h * ss)
+                r = int(18 + 24 * ratio)
+                g = int(28 + 36 * ratio)
+                b = int(48 + 68 * ratio)
+                p_draw.line((0, row, W, row), fill=(r, g, b, 255))
+
+        # 2. Máscara de transición suave (Smoothstep gradient fade) hacia el blanco
+        mask = Image.new("L", (W, photo_h * ss), 255)
+        fade_start = int(photo_h * ss * 0.38)
+        fade_len = max(1, (photo_h * ss) - fade_start)
+        m_data = []
+        for y in range(photo_h * ss):
+            if y < fade_start:
+                a = 255
+            else:
+                t = (y - fade_start) / fade_len
+                s = 3 * (t ** 2) - 2 * (t ** 3)
+                a = int(255 * (1.0 - s))
+            m_data.extend([a] * W)
+        mask.putdata(m_data)
+
+        card.paste(photo, (0, 0), mask)
+
+        # 3. Badges flotantes estilo píldora oscura con punto luminoso
+        d = ImageDraw.Draw(card)
+        bx = pad_x * ss
+        by = self._px(18) * ss
+        badge_h = self._px(28) * ss
+        dot_r = self._px(4) * ss
+
+        for b_text, b_color in badges:
+            text_w = int(d.textlength(b_text, font=f_badge))
+            bw = text_w + self._px(36) * ss
+            if bx + bw > (W - pad_x * ss):
+                bx = pad_x * ss
+                by += badge_h + self._px(8) * ss
+
+            # Píldora con fondo de cristal oscuro y borde translúcido
+            d.rounded_rectangle(
+                (bx, by, bx + bw, by + badge_h),
+                radius=badge_h // 2,
+                fill=(15, 23, 42, 210),
+                outline=(255, 255, 255, 55),
+                width=ss,
+            )
+
+            # Punto vector luminoso
+            accent_col = PALETTE.get(b_color, PALETTE["cyan"])
+            dot_cx = bx + self._px(14) * ss
+            dot_cy = by + badge_h // 2
+            d.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=accent_col)
+
+            # Texto de la píldora
+            d.text((bx + self._px(25) * ss, dot_cy), b_text, font=f_badge, fill=(255, 255, 255, 255), anchor="lm")
+            bx += bw + self._px(8) * ss
+
+        # 4. Sección de texto (Titular y Cuerpo)
+        ty = (photo_h + self._px(12)) * ss
+        title_color = highlight_color or (15, 23, 42, 255)
+        for line in title_lines:
+            d.text((pad_x * ss, ty), line, font=f_title, fill=title_color)
+            ty += title_lh * ss
+        ty += self._px(8) * ss
+
+        for line in body_lines:
+            d.text((pad_x * ss, ty), line, font=f_body, fill=(51, 65, 85, 255))
+            ty += body_lh * ss
+        ty += self._px(16) * ss
+
+        # 5. Pie de metadatos (limpio, sin botones)
+        foot_text = f"Fuente oficial • {source_domain}"
+        dot_fy = ty + (f_src.size // 2) * ss
+        d.ellipse(
+            (pad_x * ss, dot_fy - self._px(3) * ss, pad_x * ss + self._px(6) * ss, dot_fy + self._px(3) * ss),
+            fill=(100, 116, 139, 255),
+        )
+        d.text((pad_x * ss + self._px(14) * ss, ty), foot_text, font=f_src, fill=(100, 116, 139, 255), anchor="lt")
+
+        # 6. Redimensionar para antialiasing de precisión
+        card = card.resize((w, total_h), Image.LANCZOS)
+
+        # 7. Máscara de esquinas redondeadas
+        card_mask = Image.new("L", (w, total_h), 0)
+        ImageDraw.Draw(card_mask).rounded_rectangle((0, 0, w - 1, total_h - 1), radius=radius, fill=255)
+
+        # 8. Sombra suave para despegar la tarjeta del video
+        margin = self._px(28)
+        shadow = Image.new("RGBA", (w + 2 * margin, total_h + 2 * margin), (0, 0, 0, 0))
+        s_draw = ImageDraw.Draw(shadow)
+        s_draw.rounded_rectangle(
+            (margin, margin + self._px(6), margin + w, margin + total_h + self._px(6)),
+            radius=radius,
+            fill=(0, 0, 0, 75),
+        )
+        shadow = shadow.filter(ImageFilter.GaussianBlur(self._px(14)))
+
+        final_img = Image.new("RGBA", (w + 2 * margin, total_h + 2 * margin), (0, 0, 0, 0))
+        final_img.paste(shadow, (0, 0), shadow)
+        final_img.paste(card, (margin, margin), card_mask)
+
+        # 9. Borde sutil de 1px para nitidez máxima
+        border_layer = Image.new("RGBA", (w + 2 * margin, total_h + 2 * margin), (0, 0, 0, 0))
+        b_draw = ImageDraw.Draw(border_layer)
+        b_draw.rounded_rectangle(
+            (margin, margin, margin + w - 1, margin + total_h - 1),
+            radius=radius,
+            outline=(226, 232, 240, 220),
+            width=1,
+        )
+        final_img = Image.alpha_composite(final_img, border_layer)
+
+        target_out = out_path or Path("card_output.png")
+        target_out.parent.mkdir(parents=True, exist_ok=True)
+        final_img.save(target_out, "PNG")
+        return target_out
+
     def render(self, card: InfoCard, out_path: Path) -> str:
-        """Elige el diseño según card_style o tipo de dato."""
+        """Elige los contenidos y genera la tarjeta con el diseño moderno unificado."""
+        domain = card.sources[0].domain if card.sources else "Registro oficial"
+        badges = self._build_badges(card)
+
+        # 1. Contradicción / Dato Errado
         if card.verdict == "contradicted":
             if getattr(card, "is_myth", False):
                 return self._render_myth_cards(card, out_path)
-            return str(self._render_correction_card(card, out_path))
-        if card.verdict == "insufficient":
-            return str(self._render_unverifiable_card(card, out_path))
-            
-        style = (getattr(card, "card_style", None) or "reference").lower()
-        kind = (card.kind or "").lower()
-        if style == "mockup_browser" or kind in ("ley", "articulo", "noticia"):
-            return str(self._render_browser_mockup(card, out_path))
-        if (style == "stat_highlight" or kind == "cifra") and self._stat_text(card):
-            return str(self._render_stat_highlight(card, out_path))
-        return str(self._render_reference_callout(card, out_path))
+            headline = card.headline
+            body = (
+                f"Afirmación en video: «{card.claim}»\n\n"
+                f"Dato real verificado: {card.correction or card.corrected_value or card.note}"
+            )
+            return str(self._render_modern_card(
+                headline=headline,
+                body=body,
+                badges=[("CORRECCIÓN", "red"), ("DATO OFICIAL", "green")] + badges[1:],
+                image_path=card.image_path,
+                source_domain=card.correction_source or domain,
+                out_path=out_path,
+            ))
 
-    @staticmethod
-    def _stat_text(card: InfoCard) -> str:
-        if card.stat_value:
-            return card.stat_value
-        m = re.search(r"([+\-]?(?:US\$|\$|USD\s?)?\d[\d.,]*\s?%?)", card.body or "")
-        return m.group(1).strip() if m else ""
+        # 2. Información insuficiente / Alerta
+        if card.verdict == "insufficient":
+            headline = card.headline
+            body = card.note or "No se encontraron registros ni evidencia oficial concluyente que respalden esta afirmación."
+            return str(self._render_modern_card(
+                headline=headline,
+                body=body,
+                badges=[("EN REVISIÓN", "amber"), ("SIN REGISTRO", "slate")] + badges[1:],
+                image_path=card.image_path,
+                source_domain=domain,
+                out_path=out_path,
+            ))
+
+        # 3. Métrica destacada / Estadística
+        style = (getattr(card, "card_style", None) or "reference").lower()
+        if (style == "stat_highlight" or card.kind == "cifra") and card.stat_value:
+            headline = card.headline
+            body = f"Cifra confirmada: {card.stat_value}. {card.body or card.claim}"
+            return str(self._render_modern_card(
+                headline=headline,
+                body=body,
+                badges=[("ESTADÍSTICA", "amber"), (card.stat_value[:18], "cyan")] + badges[1:],
+                image_path=card.image_path,
+                source_domain=domain,
+                out_path=out_path,
+            ))
+
+        # 4. Referencia estándar (con foto o sin foto)
+        headline = card.headline
+        body = card.body or card.claim
+        return str(self._render_modern_card(
+            headline=headline,
+            body=body,
+            badges=badges,
+            image_path=card.image_path,
+            source_domain=domain,
+            out_path=out_path,
+        ))
 
     def render_photo_frame(self, image_path: str, label: str, out_path: Path) -> Optional[Path]:
-        """Foto real enmarcada como tarjeta flotante (para B-Roll de imagen), con chip del concepto."""
+        """Foto real enmarcada con el nuevo diseño flotante y badge del concepto."""
         try:
-            pad = self._px(12)
-            w = int(self.card_w * 1.05)
-            photo_w = w - 2 * pad
-            photo_h = int(photo_w * 9 / 16)
-            f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(17))
-            chip_h = self._px(34)
-            h = pad + photo_h + self._px(10) + chip_h + pad
-
-            ss = 2
-            canvas = Image.new("RGBA", (w * ss, h * ss), (0, 0, 0, 0))
-            ImageDraw.Draw(canvas).rounded_rectangle(
-                (0, 0, w * ss - 1, h * ss - 1), radius=self._px(22) * ss, fill=BG, outline=BORDER, width=2 * ss)
-            canvas = canvas.resize((w, h), Image.LANCZOS)
-            d = ImageDraw.Draw(canvas)
-
-            photo = self._cover(Image.open(image_path), photo_w, photo_h).convert("RGBA")
-            mask = Image.new("L", photo.size, 0)
-            ImageDraw.Draw(mask).rounded_rectangle((0, 0, photo_w - 1, photo_h - 1), radius=self._px(14), fill=255)
-            canvas.paste(photo, (pad, pad), mask)
-
-            y = pad + photo_h + self._px(10)
-            text = label.strip()[:48]
-            d.ellipse((pad + self._px(4), y + chip_h // 2 - self._px(5), pad + self._px(14), y + chip_h // 2 + self._px(5)), fill=BLUE_ACCENT)
-            d.text((pad + self._px(24), y + chip_h // 2), text, font=f_chip, fill=TXT, anchor="lm")
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            canvas.save(out_path, "PNG")
-            return out_path
+            return self._render_modern_card(
+                headline=label.strip(),
+                body="Apoyo visual contextual integrado para ilustrar el argumento expuesto.",
+                badges=[("APOYO VISUAL", "cyan"), ("FOTO REAL", "green")],
+                image_path=image_path,
+                source_domain="Registro visual",
+                out_path=out_path,
+            )
         except Exception as exc:
             print(f"[CardRenderer] No se pudo enmarcar la foto: {exc}")
             return None
 
-    # ---------------------------------------------------------
-    # 1. Estilo Reference Callout (Nate Gentile / Platzi estándar)
-    # ---------------------------------------------------------
-    def _render_reference_callout(self, card: InfoCard, out_path: Path) -> Path:
-        pad = self._px(22)
-        inner_w = self.card_w - 2 * pad
-
-        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(30))
-        f_body = _font(["segoeuib.ttf", "segoeui.ttf", "arialbd.ttf"], self._px(21))
-        f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
-
-        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
-        title_lines = self._wrap(probe, card.headline, f_title, inner_w, 2)
-        body_lines = self._wrap(probe, card.body or card.claim, f_body, inner_w, 4)
-
-        has_photo = bool(card.image_path and Path(card.image_path).exists())
-        photo_h = self._px(230) if has_photo else 0
-        chip_h = self._px(28)
-        title_lh = f_title.size + self._px(6)
-        body_lh = f_body.size + self._px(7)
-
-        h = pad
-        if photo_h:
-            h += photo_h + self._px(14)
-        h += chip_h + self._px(12)
-        h += len(title_lines) * title_lh + self._px(8)
-        h += len(body_lines) * body_lh + self._px(14)
-        h += self._px(1) + self._px(12) + f_src.size + pad
-
-        # Supermuestreo 2x
-        ss = 2
-        W, H = self.card_w * ss, h * ss
-        canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d = ImageDraw.Draw(canvas)
-        radius = self._px(24) * ss
-
-        # Fondo translúcido con gradiente de borde
-        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=radius, fill=BG, outline=BORDER, width=2 * ss)
-        # Glow superior sutil
-        d.line((radius, 1, W - radius, 1), fill=BORDER_ACCENT, width=3 * ss)
-
-        canvas = canvas.resize((self.card_w, h), Image.LANCZOS)
-        d = ImageDraw.Draw(canvas)
-
-        y = pad
-        if photo_h:
-            try:
-                photo = self._cover(Image.open(card.image_path), inner_w, photo_h).convert("RGBA")
-                mask = Image.new("L", photo.size, 0)
-                ImageDraw.Draw(mask).rounded_rectangle(
-                    (0, 0, photo.width - 1, photo.height - 1), radius=self._px(16), fill=255
-                )
-                canvas.paste(photo, (pad, y), mask)
-            except Exception as exc:
-                print(f"[CardRenderer] Foto falló: {exc}")
-            y += photo_h + self._px(14)
-
-        # Chips
-        chip_w = int(d.textlength("VERIFICADO", font=f_chip)) + self._px(36)
-        d.rounded_rectangle((pad, y, pad + chip_w, y + chip_h), radius=chip_h // 2, fill=CHIP_BG, outline=(52, 211, 153, 90))
-        cy = y + chip_h // 2
-        d.ellipse((pad + self._px(11), cy - self._px(4), pad + self._px(19), cy + self._px(4)), fill=GREEN)
-        d.text((pad + self._px(26), cy), "VERIFICADO", font=f_chip, fill=GREEN, anchor="lm")
-
-        kind_text = KIND_LABELS.get((card.kind or "dato").lower(), "REFERENCIA")
-        d.text((self.card_w - pad, cy), kind_text, font=f_chip, fill=DIM, anchor="rm")
-        y += chip_h + self._px(12)
-
-        for line in title_lines:
-            d.text((pad, y), line, font=f_title, fill=TXT)
-            y += title_lh
-        y += self._px(6)
-
-        for line in body_lines:
-            d.text((pad, y), line, font=f_body, fill=MUTED)
-            y += body_lh
-        y += self._px(14)
-
-        d.line((pad, y, self.card_w - pad, y), fill=BORDER, width=max(1, self._px(1)))
-        y += self._px(12)
-        domain = card.sources[0].domain if card.sources else "Fuente oficial"
-        extra = f" (+{len(card.sources) - 1} fuentes)" if len(card.sources) > 1 else ""
-        d.text((pad, y), f"Fuente: {domain}{extra}", font=f_src, fill=DIM)
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        canvas.save(out_path, "PNG")
-        return out_path
-
-    # ---------------------------------------------------------
-    # 2. Estilo Mockup Browser (Nate Gentile: ventana de artículo)
-    # ---------------------------------------------------------
-    def _render_browser_mockup(self, card: InfoCard, out_path: Path) -> Path:
-        pad = self._px(20)
-        inner_w = self.card_w - 2 * pad
-
-        f_url = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(28))
-        f_body = _font(["segoeuib.ttf", "segoeui.ttf", "arialbd.ttf"], self._px(21))
-        f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
-
-        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
-        title_lines = self._wrap(probe, card.headline, f_title, inner_w, 2)
-        body_lines = self._wrap(probe, card.body or card.claim, f_body, inner_w, 4)
-
-        has_photo = bool(card.image_path and Path(card.image_path).exists())
-        photo_h = self._px(190) if has_photo else 0
-        header_bar_h = self._px(36)
-        title_lh = f_title.size + self._px(5)
-        body_lh = f_body.size + self._px(6)
-
-        h = header_bar_h + pad
-        if photo_h:
-            h += photo_h + self._px(14)
-        h += len(title_lines) * title_lh + self._px(8)
-        h += len(body_lines) * body_lh + self._px(14)
-        h += self._px(1) + self._px(10) + f_src.size + pad
-
-        ss = 2
-        W, H = self.card_w * ss, h * ss
-        canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d = ImageDraw.Draw(canvas)
-        radius = self._px(22) * ss
-
-        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=radius, fill=BG, outline=BORDER, width=2 * ss)
-        canvas = canvas.resize((self.card_w, h), Image.LANCZOS)
-        d = ImageDraw.Draw(canvas)
-
-        # Barra estilo navegador macOS
-        d.rounded_rectangle((0, 0, self.card_w, header_bar_h), radius=0, fill=BG_ALT)
-        d.line((0, header_bar_h, self.card_w, header_bar_h), fill=BORDER, width=1)
-
-        # 3 botones macOS (rojo, amarillo, verde)
-        dot_r = self._px(5)
-        cy = header_bar_h // 2
-        d.ellipse((pad, cy - dot_r, pad + 2 * dot_r, cy + dot_r), fill=(239, 68, 68, 255))
-        d.ellipse((pad + self._px(16), cy - dot_r, pad + self._px(16) + 2 * dot_r, cy + dot_r), fill=(245, 158, 11, 255))
-        d.ellipse((pad + self._px(32), cy - dot_r, pad + self._px(32) + 2 * dot_r, cy + dot_r), fill=(16, 185, 129, 255))
-
-        # Barra de dirección URL en el mockup
-        bar_x = pad + self._px(52)
-        bar_w = self.card_w - bar_x - pad
-        d.rounded_rectangle((bar_x, self._px(6), bar_x + bar_w, header_bar_h - self._px(6)), radius=self._px(6), fill=(30, 30, 38, 255))
-        domain = card.sources[0].domain if card.sources else "es.wikipedia.org"
-        d.text((bar_x + self._px(12), cy), f"https://{domain}/doc", font=f_url, fill=MUTED, anchor="lm")
-
-        y = header_bar_h + pad
-        if photo_h:
-            try:
-                photo = self._cover(Image.open(card.image_path), inner_w, photo_h).convert("RGBA")
-                mask = Image.new("L", photo.size, 0)
-                ImageDraw.Draw(mask).rounded_rectangle(
-                    (0, 0, photo.width - 1, photo.height - 1), radius=self._px(12), fill=255
-                )
-                canvas.paste(photo, (pad, y), mask)
-            except Exception as exc:
-                print(f"[CardRenderer] Foto mockup falló: {exc}")
-            y += photo_h + self._px(14)
-
-        for line in title_lines:
-            d.text((pad, y), line, font=f_title, fill=TXT)
-            y += title_lh
-        y += self._px(6)
-
-        for line in body_lines:
-            d.text((pad, y), line, font=f_body, fill=MUTED)
-            y += body_lh
-        y += self._px(14)
-
-        d.line((pad, y, self.card_w - pad, y), fill=BORDER, width=max(1, self._px(1)))
-        y += self._px(10)
-        d.text((pad, y), f"Referencia confirmada • {domain}", font=f_src, fill=BLUE_ACCENT)
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        canvas.save(out_path, "PNG")
-        return out_path
-
-    # ---------------------------------------------------------
-    # 3. Estilo Stat / Cifra Gigante (Platzi: números impactantes)
-    # ---------------------------------------------------------
-    def _render_stat_highlight(self, card: InfoCard, out_path: Path) -> Path:
-        pad = self._px(22)
-        inner_w = self.card_w - 2 * pad
-
-        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
-        f_num = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(48)) # Número gigante
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(26))
-        f_body = _font(["segoeuib.ttf", "segoeui.ttf", "arialbd.ttf"], self._px(21))
-        f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
-
-        # Intentar extraer la cifra destacada o usar la primera palabra clave
-        stat_text = self._stat_text(card) or "DATO"
-
-        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
-        body_lines = self._wrap(probe, card.body or card.claim, f_body, inner_w, 3)
-
-        num_lh = f_num.size + self._px(8)
-        body_lh = f_body.size + self._px(6)
-        chip_h = self._px(28)
-
-        h = pad + chip_h + self._px(12) + num_lh + self._px(6) + f_title.size + self._px(12)
-        h += len(body_lines) * body_lh + self._px(16) + self._px(1) + self._px(12) + f_src.size + pad
-
-        ss = 2
-        W, H = self.card_w * ss, h * ss
-        canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d = ImageDraw.Draw(canvas)
-        radius = self._px(24) * ss
-
-        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=radius, fill=BG, outline=BORDER, width=2 * ss)
-        # Línea de acento verde/cyan brillante a la izquierda estilo dashboard Platzi
-        d.line((1, radius, 1, H - radius), fill=BLUE_ACCENT, width=6 * ss)
-
-        canvas = canvas.resize((self.card_w, h), Image.LANCZOS)
-        d = ImageDraw.Draw(canvas)
-
-        y = pad
-        # Chip
-        d.rounded_rectangle((pad, y, pad + self._px(130), y + chip_h), radius=chip_h // 2, fill=(56, 189, 248, 30), outline=(56, 189, 248, 100))
-        d.text((pad + self._px(65), y + chip_h // 2), "MÉTRICA / DATO", font=f_chip, fill=BLUE_ACCENT, anchor="mm")
-        y += chip_h + self._px(12)
-
-        # Cifra gigante
-        d.text((pad, y), stat_text, font=f_num, fill=AMBER)
-        y += num_lh
-
-        # Titular del dato
-        d.text((pad, y), card.headline, font=f_title, fill=TXT)
-        y += f_title.size + self._px(12)
-
-        for line in body_lines:
-            d.text((pad, y), line, font=f_body, fill=MUTED)
-            y += body_lh
-        y += self._px(14)
-
-        d.line((pad, y, self.card_w - pad, y), fill=BORDER, width=max(1, self._px(1)))
-        y += self._px(12)
-        domain = card.sources[0].domain if card.sources else "Dato verificado"
-        d.text((pad, y), f"Fuente: {domain} • Registro verificado", font=f_src, fill=DIM)
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        canvas.save(out_path, "PNG")
-        return out_path
-
-    # ---------------------------------------------------------
-    # 4. Estilo Correction / Dato Errado
-    # ---------------------------------------------------------
-    def _render_correction_card(self, card: InfoCard, out_path: Path) -> Path:
-        pad = self._px(22)
-        inner_w = self.card_w - 2 * pad
-
-        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(14))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(26))
-        f_claim = _font(["segoeui.ttf", "arial.ttf"], self._px(16))
-        f_body = _font(["segoeui.ttf", "arial.ttf"], self._px(18))
-        f_src = _font(["segoeui.ttf", "arial.ttf"], self._px(14))
-
-        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
-        title_lines = self._wrap(probe, card.corrected_value or card.headline, f_title, inner_w, 2)
-        claim_lines = self._wrap(probe, f"Dijo: \"{card.claim}\"", f_claim, inner_w, 2)
-        body_lines = self._wrap(probe, card.correction, f_body, inner_w, 4)
-
-        chip_h = self._px(28)
-        title_lh = f_title.size + self._px(6)
-        claim_lh = f_claim.size + self._px(4)
-        body_lh = f_body.size + self._px(6)
-
-        h = pad + chip_h + self._px(12)
-        h += len(title_lines) * title_lh + self._px(8)
-        h += len(claim_lines) * claim_lh + self._px(12)
-        h += len(body_lines) * body_lh + self._px(14)
-        h += self._px(1) + self._px(12) + f_src.size + pad
-
-        ss = 2
-        W, H = self.card_w * ss, h * ss
-        canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d = ImageDraw.Draw(canvas)
-        radius = self._px(24) * ss
-
-        # Red styling for correction
-        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=radius, fill=(24, 12, 12, 180), outline=(220, 38, 38, 200), width=2 * ss)
-        d.line((1, radius, 1, H - radius), fill=(239, 68, 68, 255), width=6 * ss)
-
-        canvas = canvas.resize((self.card_w, h), Image.LANCZOS)
-        d = ImageDraw.Draw(canvas)
-
-        y = pad
-        # Chip DATO ERRADO
-        d.rounded_rectangle((pad, y, pad + self._px(145), y + chip_h), radius=chip_h // 2, fill=(239, 68, 68, 40), outline=(239, 68, 68, 120))
-        d.ellipse((pad + self._px(11), y + chip_h // 2 - self._px(4), pad + self._px(19), y + chip_h // 2 + self._px(4)), fill=(239, 68, 68, 255))
-        d.text((pad + self._px(26), y + chip_h // 2), "DATO ERRADO", font=f_chip, fill=(239, 68, 68, 255), anchor="lm")
-        y += chip_h + self._px(12)
-
-        # Title (Corrected Value)
-        for line in title_lines:
-            d.text((pad, y), line, font=f_title, fill=TXT)
-            y += title_lh
-        y += self._px(6)
-        
-        # What they said (Claim)
-        for line in claim_lines:
-            d.text((pad, y), line, font=f_claim, fill=(156, 163, 175, 255))
-            d.line((pad, y + claim_lh // 2, pad + d.textlength(line, font=f_claim), y + claim_lh // 2), fill=(156, 163, 175, 255), width=1) # Strikethrough
-            y += claim_lh
-        y += self._px(12)
-
-        # Correction text
-        for line in body_lines:
-            d.text((pad, y), line, font=f_body, fill=TXT)
-            y += body_lh
-        y += self._px(14)
-
-        d.line((pad, y, self.card_w - pad, y), fill=(239, 68, 68, 100), width=max(1, self._px(1)))
-        y += self._px(12)
-        domain = card.correction_source or (card.sources[0].domain if card.sources else "Dato verificado")
-        d.text((pad, y), f"Corrección verificada: {domain}", font=f_src, fill=(239, 68, 68, 255))
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        canvas.save(out_path, "PNG")
-        return out_path
-
-    # ---------------------------------------------------------
-    # 5. Estilo Unverifiable / Información no verificable
-    # ---------------------------------------------------------
-    def _render_unverifiable_card(self, card: InfoCard, out_path: Path) -> Path:
-        pad = self._px(22)
-        inner_w = self.card_w - 2 * pad
-
-        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(14))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(26))
-        f_body = _font(["segoeui.ttf", "arial.ttf"], self._px(18))
-
-        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
-        title_lines = self._wrap(probe, card.headline, f_title, inner_w, 2)
-        body_lines = self._wrap(probe, card.body or "No se pudo verificar esta información con fuentes confiables.", f_body, inner_w, 4)
-
-        chip_h = self._px(28)
-        title_lh = f_title.size + self._px(6)
-        body_lh = f_body.size + self._px(6)
-
-        h = pad + chip_h + self._px(12)
-        h += len(title_lines) * title_lh + self._px(8)
-        h += len(body_lines) * body_lh + self._px(14)
-        h += pad
-
-        ss = 2
-        W, H = self.card_w * ss, h * ss
-        canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d = ImageDraw.Draw(canvas)
-        radius = self._px(24) * ss
-
-        # Gray/Orange styling for unverifiable
-        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=radius, fill=(24, 24, 28, 180), outline=(156, 163, 175, 200), width=2 * ss)
-        d.line((1, radius, 1, H - radius), fill=(245, 158, 11, 255), width=6 * ss)
-
-        canvas = canvas.resize((self.card_w, h), Image.LANCZOS)
-        d = ImageDraw.Draw(canvas)
-
-        y = pad
-        # Chip NO VERIFICABLE
-        d.rounded_rectangle((pad, y, pad + self._px(160), y + chip_h), radius=chip_h // 2, fill=(245, 158, 11, 40), outline=(245, 158, 11, 120))
-        d.ellipse((pad + self._px(11), y + chip_h // 2 - self._px(4), pad + self._px(19), y + chip_h // 2 + self._px(4)), fill=(245, 158, 11, 255))
-        d.text((pad + self._px(26), y + chip_h // 2), "NO VERIFICABLE", font=f_chip, fill=(251, 191, 36, 255), anchor="lm")
-        y += chip_h + self._px(12)
-
-        # Title
-        for line in title_lines:
-            d.text((pad, y), line, font=f_title, fill=TXT)
-            y += title_lh
-        y += self._px(6)
-        
-        # Body text
-        for line in body_lines:
-            d.text((pad, y), line, font=f_body, fill=MUTED)
-            y += body_lh
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        canvas.save(out_path, "PNG")
-        return out_path
-
-    # ---------------------------------------------------------
-    # 6. Estilo Mito vs Realidad (Gamificado)
-    # ---------------------------------------------------------
     def _render_myth_cards(self, card: InfoCard, out_path: Path) -> str:
-        # Renderiza dos tarjetas: la primera "MITO" (naranja/roja) y la segunda "REALIDAD" (verde/azul).
-        # Devuelve las rutas separadas por "|".
+        """Renderiza dos tarjetas: la primera 'MITO' y la segunda 'REALIDAD'."""
         path_mito = out_path.with_name(f"{out_path.stem}_mito.png")
         path_real = out_path.with_name(f"{out_path.stem}_real.png")
-        
-        pad = self._px(22)
-        inner_w = self.card_w - 2 * pad
-        
-        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(16))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(28))
-        f_body = _font(["segoeui.ttf", "arial.ttf"], self._px(20))
-        
-        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
-        mito_lines = self._wrap(probe, f"\"{card.claim}\"", f_title, inner_w, 4)
-        real_lines = self._wrap(probe, card.correction or card.corrected_value, f_body, inner_w, 5)
-        
-        chip_h = self._px(32)
-        title_lh = f_title.size + self._px(6)
-        body_lh = f_body.size + self._px(6)
-        
+
+        domain = card.correction_source or (card.sources[0].domain if card.sources else "Registro oficial")
+
         # Tarjeta 1: MITO
-        h_mito = pad + chip_h + self._px(14) + len(mito_lines) * title_lh + pad
-        ss = 2
-        W, H_mito = self.card_w * ss, h_mito * ss
-        cv_mito = Image.new("RGBA", (W, H_mito), (0, 0, 0, 0))
-        d_m = ImageDraw.Draw(cv_mito)
-        d_m.rounded_rectangle((0, 0, W - 1, H_mito - 1), radius=self._px(24) * ss, fill=(24, 12, 12, 180), outline=(245, 158, 11, 200), width=2 * ss)
-        cv_mito = cv_mito.resize((self.card_w, h_mito), Image.LANCZOS)
-        d_m = ImageDraw.Draw(cv_mito)
-        
-        y = pad
-        d_m.rounded_rectangle((pad, y, pad + self._px(90), y + chip_h), radius=chip_h // 2, fill=(245, 158, 11, 40), outline=(245, 158, 11, 150))
-        d_m.text((pad + self._px(45), y + chip_h // 2), "MITO", font=f_chip, fill=(251, 191, 36, 255), anchor="mm")
-        y += chip_h + self._px(14)
-        for line in mito_lines:
-            d_m.text((pad, y), line, font=f_title, fill=TXT)
-            y += title_lh
-        cv_mito.save(path_mito, "PNG")
-        
+        self._render_modern_card(
+            headline="Mito Popular",
+            body=f"«{card.claim}»",
+            badges=[("MITO", "red"), ("EN REVISIÓN", "amber")],
+            image_path=card.image_path,
+            source_domain=domain,
+            out_path=path_mito,
+        )
+
         # Tarjeta 2: REALIDAD
-        h_real = pad + chip_h + self._px(14) + len(real_lines) * body_lh + self._px(12) + pad
-        W, H_real = self.card_w * ss, h_real * ss
-        cv_real = Image.new("RGBA", (W, H_real), (0, 0, 0, 0))
-        d_r = ImageDraw.Draw(cv_real)
-        d_r.rounded_rectangle((0, 0, W - 1, H_real - 1), radius=self._px(24) * ss, fill=(12, 24, 18, 180), outline=(16, 185, 129, 200), width=2 * ss)
-        cv_real = cv_real.resize((self.card_w, h_real), Image.LANCZOS)
-        d_r = ImageDraw.Draw(cv_real)
-        
-        y = pad
-        d_r.rounded_rectangle((pad, y, pad + self._px(140), y + chip_h), radius=chip_h // 2, fill=(16, 185, 129, 40), outline=(16, 185, 129, 150))
-        d_r.text((pad + self._px(70), y + chip_h // 2), "REALIDAD", font=f_chip, fill=(52, 211, 153, 255), anchor="mm")
-        y += chip_h + self._px(14)
-        for line in real_lines:
-            d_r.text((pad, y), line, font=f_body, fill=TXT)
-            y += body_lh
-        d_r.line((pad, y, self.card_w - pad, y), fill=(16, 185, 129, 100), width=1)
-        y += self._px(12)
-        domain = card.correction_source or (card.sources[0].domain if card.sources else "Web")
-        f_src = _font(["segoeui.ttf", "arial.ttf"], self._px(14))
-        d_r.text((pad, y), f"Fuente: {domain}", font=f_src, fill=(52, 211, 153, 255))
-        
-        cv_real.save(path_real, "PNG")
-        
+        self._render_modern_card(
+            headline=card.headline or "Realidad Verificada",
+            body=card.correction or card.corrected_value or card.body,
+            badges=[("REALIDAD", "green"), ("DATO OFICIAL", "cyan")],
+            image_path=card.image_path,
+            source_domain=domain,
+            out_path=path_real,
+        )
+
         return f"{path_mito}|{path_real}"
 
     def render_all(self, cards: List[InfoCard], workdir: Path) -> List[InfoCard]:
         for card in cards:
-            # Cuando una afirmación no logra verificarse, también se muestra la
-            # advertencia para no dar una certeza que las fuentes no respaldan.
             if not card.enabled or card.verdict not in ("supported", "contradicted", "insufficient"):
                 continue
             try:
