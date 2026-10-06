@@ -76,19 +76,24 @@ class InfoCardRenderer:
 
     @staticmethod
     def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int, max_lines: int) -> List[str]:
-        words = (text or "").split()
-        lines = []
-        cur = ""
-        for w in words:
-            trial = f"{cur} {w}".strip()
-            if draw.textlength(trial, font=font) <= max_w:
-                cur = trial
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = w
-        if cur:
-            lines.append(cur)
+        lines: List[str] = []
+        paragraphs = (text or "").split("\n")
+        for p in paragraphs:
+            p = p.strip()
+            if not p:
+                continue
+            words = p.split()
+            cur = ""
+            for w in words:
+                trial = f"{cur} {w}".strip()
+                if draw.textlength(trial, font=font) <= max_w:
+                    cur = trial
+                else:
+                    if cur:
+                        lines.append(cur)
+                    cur = w
+            if cur:
+                lines.append(cur)
         if len(lines) > max_lines:
             lines = lines[:max_lines]
             lines[-1] = lines[-1].rstrip(" .,;:") + "…"
