@@ -37,7 +37,7 @@ class InfoCard(BaseModel):
     card_id: str = Field(description="Identificador único (ej. card_1)")
     start_sec: float = Field(ge=0.0, description="Segundo en que se menciona el dato")
     end_sec: float = Field(gt=0.0, description="Segundo de fin de la tarjeta (duración 4 a 7 s)")
-    kind: str = Field(default="dato", description="ley, cifra, fecha, persona, lugar, organizacion, hardware, concepto o dato")
+    kind: str = Field(default="dato", description="ley, cifra, fecha, persona, lugar, organizacion, hardware, concepto, complemento, refuerzo o dato")
     card_style: str = Field(default="reference", description="reference (Platzi/Nate Gentile callout), stat_highlight (gran cifra/porcentaje), mockup_browser (ventana de artículo/wiki), tech_spec (especificaciones técnicas)")
     headline: str = Field(description="Titular corto o nombre del concepto/término/persona/ley (máx. 60 caracteres)")
     claim: str = Field(description="Afirmación EXACTA que hace el hablante, parafraseada sin añadir datos propios")

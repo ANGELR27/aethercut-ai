@@ -33,16 +33,17 @@ REGLAS CRÍTICAS DE EDICIÓN:
      2. TÉRMINOS DESCONOCIDOS / ABREVIACIONES / INSTITUCIONES: Si menciona un término raro, una sigla (ej. "FMI", "AFIP") o una institución, crea una tarjeta para EXPLICAR QUÉ SIGNIFICA (definición).
      3. DATOS Y CIFRAS: Confirmar estadísticas, porcentajes o muestreos.
      4. CIERRE O DEBATE DE ARGUMENTOS: Si el orador plantea o intenta cerrar un argumento sobre un tema debatible, extrae el argumento (`claim`) para que el avatar intervenga y lo aclare con datos y muestreos contrastados.
-   - 'kind': persona | organizacion | lugar | ley | concepto | hardware | definicion (=> tarjeta de ENTIDAD/DEFINICIÓN: explica qué/quién es)
-             cifra | fecha | dato                                         (=> tarjeta de DATO: confirma o desmiente un hecho)
+     5. COMPLEMENTO Y REFUERZO DE DATOS (NUEVO MODO ENRIQUECEDOR): Si el orador expone una problemática, idea o argumento acertado pero que se puede enriquecer con datos que se le escaparon, crea tarjeta con kind: 'complemento' o 'refuerzo'. Busca datos de alto impacto (estudios científicos, estadísticas globales, datos de la NASA u organismos de referencia) que conecten y refuercen la idea del orador.
+   - 'kind': persona | organizacion | lugar | ley | concepto | hardware | definicion | complemento | refuerzo (=> tarjeta de ENTIDAD/DEFINICIÓN/COMPLEMENTO)
+             cifra | fecha | dato                                                                               (=> tarjeta de DATO: confirma o desmiente un hecho)
    - 'card_style': 'reference' (persona/lugar/organización/concepto), 'stat_highlight' (cifras, porcentajes, años),
                    'mockup_browser' (leyes, noticias, normas), 'tech_spec' (hardware/términos técnicos).
-   - 'headline': el nombre concreto (ej. 'Patricia Bullrich', 'FMI', 'Ley 26.743').
-   - 'claim': MUY IMPORTANTE -> redacta el HECHO verificable en sí o la pregunta que hace. Para términos raros, escribe el término (ej. "Fondo Monetario Internacional"). SIN mencionar al hablante.
+   - 'headline': el nombre concreto (ej. 'Patricia Bullrich', 'FMI', 'Ley 26.743', 'Estudio Global de Tránsito').
+   - 'claim': MUY IMPORTANTE -> redacta el HECHO verificable en sí o la idea a complementar. Para términos raros, escribe el término (ej. "Fondo Monetario Internacional"). SIN mencionar al hablante.
        MAL:  "Danann interroga sobre la figura de femicidio."
        BIEN: "El femicidio está tipificado como agravante en el Código Penal."
    - NO crees tarjetas para chistes u opiniones puramente subjetivas.
-   - 'search_query': consulta web en español para encontrar fuentes o definiciones.
+   - 'search_query': consulta web en español para encontrar fuentes, estudios de impacto o datos que refuercen la idea.
    - 'image_query': consulta para una FOTO REAL del tema o logo.
    - Duración: 6.5 a 10.0 segundos, para que el espectador alcance a leer fuentes y contexto.
    - "screen_position": usa "auto" salvo que veas claramente que el hablante ocupa un lado; entonces usa el lado contrario (upper_left, upper_right, lower_left o lower_right).

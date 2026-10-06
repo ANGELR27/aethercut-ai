@@ -63,9 +63,19 @@ class AvatarNarrator:
             idx = abs(hash(card.card_id or stat)) % len(templates)
             return templates[idx]
 
-        # 3. Confirmado / Ley / Ciencia
+        # 3. Confirmado / Complemento / Ley / Ciencia
         if verdict == "supported":
             kind = (card.kind or "dato").lower()
+            if kind in ("complemento", "refuerzo", "dato_extra", "impacto", "contexto"):
+                detail = card.body or card.claim
+                detail_short = " ".join(detail.split()[:14]).rstrip(".,;") if detail else ""
+                templates = [
+                    f"¡Tal cual! Y para reforzar la idea: hay un dato clave que se le escapó al orador. Sobre {clean_headline}: {detail_short}. ¡Punto extra para el análisis!",
+                    f"¡Exacto amigazo! Y súmale esto que pocos saben: sobre {clean_headline}, los registros confirman que {detail_short}. La realidad termina de sellar el punto.",
+                    f"¡Pará la oreja ahí! El orador tiene toda la razón, y para ponerle la firma: {detail_short}. ¡Dato mata relato, mi gente!",
+                ]
+                idx = abs(hash(card.card_id or clean_headline)) % len(templates)
+                return templates[idx]
             if kind in ("ley", "normativa", "articulo"):
                 return f"¡Bien ahí! Por fin alguien que le atina a las normas: {clean_headline} está 100% blindado por el marco legal vigente. Punto para el expositor."
             return f"¡Exacto amigazo! Punto clavado y con sustento: los estudios técnicos y registros oficiales respaldan plenamente {clean_headline}. Así da gusto debatir."
@@ -110,18 +120,16 @@ TU MISIÓN:
 Crear una intervención hablada CORTA, AMIGABLE, CHISTOSA, IRÓNICA Y MUY ENRIQUECEDORA (entre 20 y 35 palabras, 1 o 2 oraciones).
 
 ESTRUCTURA OBLIGATORIA (CON CHISPA Y JUEGUITO):
-1. GANCHO IRÓNICO O AMIGABLE (humor cómplice):
-   - "¡Ojo amiguito! Se te acaba de escapar un dato que no es tan cierto..."
-   - "Suena poético el discurso, pero la realidad y los números tienen otros planes..."
-   - "¡Paren las rotativas un segundo! Venía invicto el argumento hasta que revisamos los datos..."
-   - "Mucho entusiasmo en esa frase, pero cuidado: los números acaban de dejar el punto en jaque..."
+1. GANCHO SEGÚN EL CASO:
+   - Si es corrección/error: "¡Ojo amiguito! Se te acaba de escapar un dato que no es tan cierto...", "Suena poético el discurso, pero la realidad y los números tienen otros planes...", "¡Paren las rotativas un segundo! Venía invicto el argumento hasta que..."
+   - Si es COMPLEMENTO / REFUERZO DE DATOS (el orador tiene razón o plantea un buen tema): "¡Tal cual! Y para reforzar la idea, ojo al dato clave que se le escapó al orador...", "¡Exacto amigazo! Y súmale esto que pocos saben sobre el tema...", "¡Punto clave! Y para ponerle la firma al argumento, mira este dato demoledor..."
 2. EL DATO INCREÍBLE / ENRIQUECEDOR:
-   - Introduce un dato contundente, una cifra reveladora o una fuente de peso que sustente el punto (ej. citar estudios técnicos, la NASA, organismos oficiales, el Código Penal, muestreos internacionales o la cifra exacta).
+   - Introduce un dato contundente, una cifra reveladora o una fuente de peso que sustente o complemente el punto (ej. estudios científicos, la NASA, organismos oficiales, el Código Penal, muestreos de China/EE.UU., o estadísticas de impacto).
 3. REMATE CON JUEGUITO / PUNTADA FINAL:
    - "¡Dato mata relato, mi gente!"
-   - "Así que mejor chequear la fuente antes de prometer tanto."
-   - "¡Se nos cayó la teoría en vivo!"
-   - "Punto para la ciencia y el rigor."
+   - "¡Punto extra para el análisis!"
+   - "La realidad termina de sellar el punto."
+   - "¡Se nos cayó la teoría en vivo!" (solo si es refutación).
 
 REGLAS ESTRICTAS:
 - No seas acartonado, formal ni aburrido. Usa lenguaje fresco, amigable y con picardía.
