@@ -8,30 +8,34 @@ from core.models import InfoCard
 
 FONT_DIR = Path("C:/Windows/Fonts")
 
-# Paleta premium Nate Gentile / Platzi (True Glassmorphism)
-BG = (10, 10, 14, 160)           # Transparente oscuro (Glass)
-BG_ALT = (18, 18, 24, 180)       # Contenedores secundarios translúcidos
-BORDER = (80, 85, 100, 180)      # Borde más visible para efecto cristal
-BORDER_ACCENT = (99, 102, 241, 220) # Indigo sutil Nate Gentile
-TXT = (255, 255, 255, 255)       # Blanco puro
-MUTED = (190, 195, 210, 255)     # Gris texto explicativo brillante
-DIM = (120, 130, 140, 255)       # Metadatos
-GREEN = (52, 211, 153, 255)      # Esmeralda / Verificado
-CHIP_BG = (16, 185, 129, 60)
-BLUE_ACCENT = (56, 189, 248, 255) # Cyan Platzi
+# Paleta premium de alto contraste y legibilidad broadcast
+BG = (8, 12, 20, 242)            # Fondo oscuro de máxima legibilidad
+BG_ALT = (14, 18, 30, 248)       # Contenedores secundarios translúcidos
+BORDER = (56, 189, 248, 160)     # Borde cristal con brillo cian elegante
+BORDER_ACCENT = (99, 102, 241, 240) # Índigo vibrante
+TXT = (255, 255, 255, 255)       # Blanco puro de máximo contraste
+MUTED = (241, 245, 249, 255)     # Blanco pizarra ultra-legible sobre cualquier fondo de video
+DIM = (148, 163, 184, 255)       # Gris claro para metadatos legibles
+GREEN = (52, 211, 153, 255)      # Esmeralda neón / Verificado
+CHIP_BG = (16, 185, 129, 70)
+BLUE_ACCENT = (56, 189, 248, 255) # Cyan eléctrico
 AMBER = (251, 191, 36, 255)      # Ámbar destacados
 
 KIND_LABELS = {
-    "ley": "LEY / NORMATIVA",
-    "cifra": "ESTADÍSTICA / DATO",
-    "fecha": "CRONOLOGÍA",
-    "persona": "PERFIL / BIOGRAFÍA",
-    "lugar": "UBICACIÓN",
-    "organizacion": "INSTITUCIÓN",
-    "organización": "INSTITUCIÓN",
-    "hardware": "ESPECIFICACIÓN TÉCNICA",
-    "concepto": "GLOSARIO / CONCEPTO",
-    "dato": "REFERENCIA VERIFICADA",
+    "ley": "✓ LEY / NORMATIVA",
+    "cifra": "📊 ESTADÍSTICA / DATO",
+    "fecha": "📅 CRONOLOGÍA",
+    "persona": "👤 PERFIL / BIOGRAFÍA",
+    "lugar": "📍 UBICACIÓN",
+    "organizacion": "🏛️ INSTITUCIÓN",
+    "organización": "🏛️ INSTITUCIÓN",
+    "hardware": "⚙️ ESPECIFICACIÓN",
+    "concepto": "💡 CONCEPTO CLAVE",
+    "dato": "✓ DATO VERIFICADO",
+    "confirmacion": "✓ CONFIRMADO",
+    "confirmación": "✓ CONFIRMADO",
+    "tip": "💡 TIP PRO",
+    "advertencia": "⚠️ ALERTA",
 }
 
 
@@ -152,10 +156,10 @@ class InfoCardRenderer:
         pad = self._px(22)
         inner_w = self.card_w - 2 * pad
 
-        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(14))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(28))
-        f_body = _font(["segoeui.ttf", "arial.ttf"], self._px(19))
-        f_src = _font(["segoeui.ttf", "arial.ttf"], self._px(15))
+        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(30))
+        f_body = _font(["segoeuib.ttf", "segoeui.ttf", "arialbd.ttf"], self._px(21))
+        f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
 
         probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
         title_lines = self._wrap(probe, card.headline, f_title, inner_w, 2)
@@ -241,10 +245,10 @@ class InfoCardRenderer:
         pad = self._px(20)
         inner_w = self.card_w - 2 * pad
 
-        f_url = _font(["segoeui.ttf", "arial.ttf"], self._px(14))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(26))
-        f_body = _font(["segoeui.ttf", "arial.ttf"], self._px(18))
-        f_src = _font(["segoeui.ttf", "arial.ttf"], self._px(14))
+        f_url = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(28))
+        f_body = _font(["segoeuib.ttf", "segoeui.ttf", "arialbd.ttf"], self._px(21))
+        f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
 
         probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
         title_lines = self._wrap(probe, card.headline, f_title, inner_w, 2)
@@ -329,11 +333,11 @@ class InfoCardRenderer:
         pad = self._px(22)
         inner_w = self.card_w - 2 * pad
 
-        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(14))
-        f_num = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(46)) # Número gigante
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(24))
-        f_body = _font(["segoeui.ttf", "arial.ttf"], self._px(18))
-        f_src = _font(["segoeui.ttf", "arial.ttf"], self._px(14))
+        f_chip = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
+        f_num = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(48)) # Número gigante
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(26))
+        f_body = _font(["segoeuib.ttf", "segoeui.ttf", "arialbd.ttf"], self._px(21))
+        f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(15))
 
         # Intentar extraer la cifra destacada o usar la primera palabra clave
         stat_text = self._stat_text(card) or "DATO"

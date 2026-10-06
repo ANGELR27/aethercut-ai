@@ -55,13 +55,35 @@ class VisualAnalyzer:
             print(f"[VisualAnalyzer] OpenCV no está disponible: {exc}")
             return 0
 
-        cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
-        face_cascade = cv2.CascadeClassifier(str(cascade_path))
-        if face_cascade.empty():
+        cascade_dir = Path(cv2.data.haarcascades)
+        classifiers = []
+        for name in ["haarcascade_frontalface_alt2.xml", "haarcascade_frontalface_default.xml", "haarcascade_profileface.xml"]:
+            cp = cascade_dir / name
+            if cp.exists():
+                clf = cv2.CascadeClassifier(str(cp))
+                if not clf.empty():
+                    classifiers.append(clf)
+
+        if not classifiers:
             return 0
         capture = cv2.VideoCapture(str(video_path))
         if not capture.isOpened():
             return 0
+
+        def detect_best_face(frame_gray):
+            faces = []
+            for clf in classifiers:
+                f_list = clf.detectMultiScale(frame_gray, scaleFactor=1.1, minNeighbors=4, minSize=(32, 32))
+                if len(f_list):
+                    faces.extend(list(f_list))
+            # Detección de perfil invertido (rostro mirando a la izquierda)
+            if len(classifiers) >= 3:
+                flipped = cv2.flip(frame_gray, 1)
+                flip_faces = classifiers[2].detectMultiScale(flipped, scaleFactor=1.1, minNeighbors=4, minSize=(32, 32))
+                W_img = frame_gray.shape[1]
+                for (fx, fy, fw, fh) in flip_faces:
+                    faces.append((W_img - fx - fw, fy, fw, fh))
+            return max(faces, key=lambda f: int(f[2]) * int(f[3])) if faces else None
 
         placed = 0
         try:
@@ -70,24 +92,21 @@ class VisualAnalyzer:
                     raise CancellationRequested()
                 if not card.enabled or card.screen_position != "auto":
                     continue
-                # Un instante posterior evita elegir un fotograma de transición.
                 capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, card.start_sec + 0.25) * 1000)
                 ok, frame = capture.read()
                 if not ok or frame is None:
                     continue
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=5, minSize=(36, 36))
-                if len(faces) == 0:
+                best = detect_best_face(gray)
+                if best is None:
                     continue
-                x, _y, w, h = max(faces, key=lambda face: int(face[2]) * int(face[3]))
+                x, _y, w, h = best
                 center = (float(x) + float(w) / 2) / max(1, frame.shape[1])
                 if center < 0.44:
                     card.screen_position = "lower_right"
                 elif center > 0.56:
                     card.screen_position = "lower_left"
                 else:
-                    # Con el hablante centrado, se conserva una esquina inferior
-                    # consistente, lejos de subtítulos situados en el centro.
                     card.screen_position = "upper_right"
                 placed += 1
         finally:
@@ -95,20 +114,26 @@ class VisualAnalyzer:
         return placed
 
     def dominant_face_focus(self, video_path: Path, start_sec: float, end_sec: float,
-                            samples: int = 5) -> float:
+                            samples: int = 8) -> float:
         """Devuelve el centro horizontal del rostro dominante de un clip.
 
-        Muestrea varios puntos y usa la mediana para ignorar transiciones o
-        detecciones puntuales equivocadas. El valor 0.5 conserva el encuadre
-        centrado cuando el video no contiene una cara reconocible.
+        Muestrea múltiples fotogramas y utiliza clasificadores frontal y de perfil
+        con suavizado y filtro de mediana para encuadrar verticalmente con precisión.
         """
         try:
             import cv2
         except Exception:
             return 0.5
-        cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
-        detector = cv2.CascadeClassifier(str(cascade_path))
-        if detector.empty():
+        cascade_dir = Path(cv2.data.haarcascades)
+        classifiers = []
+        for name in ["haarcascade_frontalface_alt2.xml", "haarcascade_frontalface_default.xml", "haarcascade_profileface.xml"]:
+            cp = cascade_dir / name
+            if cp.exists():
+                clf = cv2.CascadeClassifier(str(cp))
+                if not clf.empty():
+                    classifiers.append(clf)
+
+        if not classifiers:
             return 0.5
         capture = cv2.VideoCapture(str(video_path))
         if not capture.isOpened():
@@ -125,9 +150,20 @@ class VisualAnalyzer:
                 if not ok or frame is None:
                     continue
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = detector.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=5, minSize=(36, 36))
-                if len(faces):
-                    x, _y, w, h = max(faces, key=lambda face: int(face[2]) * int(face[3]))
+                faces = []
+                for clf in classifiers:
+                    f_list = clf.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(32, 32))
+                    if len(f_list):
+                        faces.extend(list(f_list))
+                if len(classifiers) >= 3:
+                    flipped = cv2.flip(gray, 1)
+                    flip_faces = classifiers[2].detectMultiScale(flipped, scaleFactor=1.1, minNeighbors=4, minSize=(32, 32))
+                    W_img = frame.shape[1]
+                    for (fx, fy, fw, fh) in flip_faces:
+                        faces.append((W_img - fx - fw, fy, fw, fh))
+
+                if faces:
+                    x, _y, w, h = max(faces, key=lambda f: int(f[2]) * int(f[3]))
                     centers.append((float(x) + float(w) / 2) / max(1, frame.shape[1]))
         finally:
             capture.release()

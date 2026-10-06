@@ -214,6 +214,28 @@ async def run_export_task(task_id: str) -> None:
         def progress(message: str, fraction: float) -> None:
             update_task_state(task_id, "render", 10.0 + 85.0 * fraction, message)
 
+        # Preparar Avatar Copilot para las tarjetas si no existen aún
+        from core.avatar_narrator import AvatarNarrator
+        from core.avatar_renderer import AvatarRenderer
+        narrator = AvatarNarrator()
+        avatar_rnd = AvatarRenderer(badge_size=320)
+        for card in plan.info_cards:
+            if card.enabled and card.verdict in ("supported", "contradicted", "insufficient"):
+                if not getattr(card, "avatar_video_path", None) or not Path(card.avatar_video_path).exists():
+                    try:
+                        if not card.avatar_spoken_text:
+                            card.avatar_spoken_text = narrator.craft_dialogue(card)
+                        audio_file = store.workdir / f"{card.card_id}_voice.mp3"
+                        _p, dur = await narrator.synthesize(card.avatar_spoken_text, audio_file)
+                        card.avatar_audio_path = str(audio_file)
+                        video_file = store.workdir / f"{card.card_id}_avatar.webm"
+                        rendered = avatar_rnd.render_reaction_clip(dur + 0.4, video_file)
+                        if rendered:
+                            card.avatar_video_path = str(rendered)
+                            card.avatar_enabled = True
+                    except Exception as exc:
+                        safe_log(f"[Export] Avatar en reexportación: {exc}")
+
         update_task_state(task_id, "render", 8.0, "Reexportando el proyecto guardado con tus cambios.")
         loop = asyncio.get_running_loop()
         render_info = await loop.run_in_executor(
