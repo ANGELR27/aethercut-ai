@@ -15,7 +15,9 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
     PIXABAY_API_KEY: str = os.getenv("PIXABAY_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+    # 3.6 responde de forma estable para estos proyectos. Los modelos más nuevos
+    # siguen disponibles como respaldo, pero pueden estar saturados con frecuencia.
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
     # Parámetros de edición
     MAX_SILENCE_DURATION_SEC: float = float(os.getenv("MAX_SILENCE_DURATION_SEC", "1.5"))
@@ -28,11 +30,12 @@ class Settings:
     OUTPUTS_DIR: Path = STORAGE_DIR / "outputs"
     TEMP_DIR: Path = STORAGE_DIR / "temp"
     ASSETS_DIR: Path = STORAGE_DIR / "assets"
+    PROJECTS_DIR: Path = STORAGE_DIR / "projects"
 
     @classmethod
     def ensure_directories(cls) -> None:
         """Crea automáticamente los directorios requeridos si no existen."""
-        for path in [cls.STORAGE_DIR, cls.INPUTS_DIR, cls.OUTPUTS_DIR, cls.TEMP_DIR, cls.ASSETS_DIR]:
+        for path in [cls.STORAGE_DIR, cls.INPUTS_DIR, cls.OUTPUTS_DIR, cls.TEMP_DIR, cls.ASSETS_DIR, cls.PROJECTS_DIR]:
             path.mkdir(parents=True, exist_ok=True)
 
 # Instancia singleton accesible

@@ -102,7 +102,7 @@ class WikiMediaClient:
 
     async def download_image(self, url: str, destination: Path) -> bool:
         try:
-            async with _session({"User-Agent": USER_AGENT}, 25) as session:
+            async with _session({"User-Agent": USER_AGENT}, 12) as session:
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         return False

@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+from threading import Event
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -8,13 +9,13 @@ from config.settings import settings
 from core.models import CaptionItem, HighlightClip, VideoEditingPlan
 from core.subtitle_generator import SubtitleGenerator
 from core.timeline import TimelineMapper
+from process_runner import run_process
 
 ProgressCb = Optional[Callable[[str, float], None]]
 
 VIDEO_EXT = (".mp4", ".mov", ".webm", ".mkv")
-# Para hardware AMD Ryzen/Radeon, usamos AMF. Si fallara por drivers, se puede revertir a libx264.
-ENC_FINAL = ["-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_i", "21", "-qp_p", "21", "-pix_fmt", "yuv420p"]
-ENC_INTERMEDIATE = ["-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_i", "17", "-qp_p", "17", "-pix_fmt", "yuv420p"]
+ENC_FINAL = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
+ENC_INTERMEDIATE = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-pix_fmt", "yuv420p"]
 
 
 def probe_size(path: Path) -> Tuple[int, int]:
@@ -42,14 +43,19 @@ class VideoRenderEngine:
     Cada overlay se desplaza en el tiempo con setpts, así su fade-in/out ocurre en el momento exacto.
     """
 
-    def __init__(self, fps: int = 30):
+    def __init__(self, fps: int = 30, cancel_event: Optional[Event] = None):
         self.fps = fps
+        self.cancel_event = cancel_event
 
-    @staticmethod
-    def _run(cmd: List[str], desc: str) -> bool:
+    def _run(self, cmd: List[str], desc: str) -> bool:
         print(f"[RenderEngine] {desc}...")
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, encoding="utf-8", errors="replace")
+        try:
+            proc = run_process(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding="utf-8", errors="replace",
+                               cancel_event=self.cancel_event)
+        except FileNotFoundError:
+            print("[RenderEngine] No se encontró FFmpeg. Instálalo y asegúrate de que ffmpeg y ffprobe estén en PATH.")
+            return False
         if proc.returncode != 0:
             print(f"[RenderEngine] {desc} falló:\n{proc.stderr[-1200:]}")
             return False
@@ -65,7 +71,9 @@ class VideoRenderEngine:
                 cmd = ["ffmpeg", "-y", "-ss", f"{seg.start_sec:.3f}", "-i", str(input_video),
                        "-t", f"{seg.end_sec - seg.start_sec:.3f}"]
             cmd += [*ENC_INTERMEDIATE, "-c:a", "aac", "-b:a", "192k", str(out)]
-            return out if self._run(cmd, "Normalizando video (sin silencios que cortar)") else input_video
+            if not self._run(cmd, "Normalizando video (sin silencios que cortar)") or not out.exists():
+                raise RuntimeError("FFmpeg no pudo preparar el video para el render.")
+            return out
 
         # El grafo se escribe en un archivo: con cientos de cortes la línea de comandos excede el límite de Windows.
         parts, pairs = [], []
@@ -80,9 +88,13 @@ class VideoRenderEngine:
 
         cmd = ["ffmpeg", "-y", "-i", str(input_video), "-filter_complex_script", str(script),
                "-map", "[vc]", "-map", "[ac]", *ENC_INTERMEDIATE, "-c:a", "aac", "-b:a", "192k", str(out)]
-        ok = self._run(cmd, f"Smart Cut de {len(keep)} tramos")
-        script.unlink(missing_ok=True)
-        return out if ok and out.exists() else input_video
+        try:
+            ok = self._run(cmd, f"Smart Cut de {len(keep)} tramos")
+        finally:
+            script.unlink(missing_ok=True)
+        if not ok or not out.exists():
+            raise RuntimeError("FFmpeg no pudo aplicar los cortes de silencio; no se generó una edición válida.")
+        return out
 
     # ------------------------------------------------------------------ overlays
     @staticmethod
@@ -91,7 +103,7 @@ class VideoRenderEngine:
         items: List[Dict] = []
 
         for card in plan.info_cards:
-            if card.verdict not in ("supported", "contradicted", "insufficient") or not card.card_path:
+            if not card.enabled or card.verdict not in ("supported", "contradicted", "insufficient") or not card.card_path:
                 continue
             
             # Comprobar que todos los paths existan (para el mito vs realidad hay dos separados por |)
@@ -102,16 +114,17 @@ class VideoRenderEngine:
             placed = mapper.map_first(card.start_sec, card.end_sec)
             if placed:
                 s = placed[0]
-                d = min(max(placed[1] - s, 4.5), 7.0, total - s)
+                d = min(max(float(card.display_duration_sec), 4.5), 12.0, total - s)
                 if d >= 2.5:
+                    position = card.screen_position or "auto"
                     if len(paths) == 2:
-                        items.append({"kind": "card", "path": paths[0], "start": s, "dur": 1.5})
-                        items.append({"kind": "card", "path": paths[1], "start": s + 1.5, "dur": d - 1.5})
+                        items.append({"kind": "card", "path": paths[0], "start": s, "dur": 1.5, "position": position})
+                        items.append({"kind": "card", "path": paths[1], "start": s + 1.5, "dur": d - 1.5, "position": position})
                     else:
-                        items.append({"kind": "card", "path": paths[0], "start": s, "dur": d})
+                        items.append({"kind": "card", "path": paths[0], "start": s, "dur": d, "position": position})
 
         for cue in plan.b_rolls:
-            if cue.download_status != "COMPLETED" or not cue.local_file_path:
+            if not cue.enabled or cue.download_status != "COMPLETED" or not cue.local_file_path:
                 continue
             path = Path(cue.local_file_path)
             if not path.exists():
@@ -132,7 +145,8 @@ class VideoRenderEngine:
         zone_free: Dict[str, float] = {}
         final = []
         for it in items:
-            zone = "full" if it["kind"] == "video" else ("right" if it["kind"] == "card" else "left")
+            position = it.get("position", "auto")
+            zone = "full" if it["kind"] == "video" else (position if it["kind"] == "card" and position != "auto" else ("right" if it["kind"] == "card" else "left"))
             blockers = [zone, "full"] if zone != "full" else ["full", "right", "left"]
             if any(zone_free.get(z, -1) > it["start"] for z in blockers):
                 continue
@@ -177,11 +191,15 @@ class VideoRenderEngine:
                 )
                 slide = int(W * 0.04)
                 ease = f"pow(1-min((t-{s:.3f})/0.45\\,1)\\,3)"  # ease-out cúbico
+                position = it.get("position", "auto")
                 if it["kind"] == "card":
-                    pos_x = f"W-w-{margin_x}+{slide}*{ease}"
+                    right = position in ("auto", "upper_right", "lower_right")
+                    upper = position in ("auto", "upper_left", "upper_right")
+                    pos_x = f"W-w-{margin_x}+{slide}*{ease}" if right else f"{margin_x}-{slide}*{ease}"
+                    pos_y = str(margin_y) if upper else f"H-h-{margin_y}"
                 else:
                     pos_x = f"{margin_x}-{slide}*{ease}"
-                pos_y = str(margin_y)
+                    pos_y = str(margin_y)
             nxt = f"b{i}"
             chains.append(
                 f"[{cur}][o{i}]overlay=x='{pos_x}':y='{pos_y}':eof_action=pass:"
@@ -213,14 +231,20 @@ class VideoRenderEngine:
         script.write_text(";\n".join(chains), encoding="utf-8")
         cmd += ["-filter_complex_script", str(script), "-map", f"[{cur}]", "-map", audio_map,
                 *ENC_FINAL, "-c:a", "aac", "-movflags", "+faststart", str(out)]
-        ok = self._run(cmd, f"Componiendo {len(overlays)} overlays" + (" + subtítulos" if ass_file else ""))
-        script.unlink(missing_ok=True)
+        try:
+            ok = self._run(cmd, f"Componiendo {len(overlays)} overlays" + (" + subtítulos" if ass_file else ""))
+        finally:
+            script.unlink(missing_ok=True)
         return ok and out.exists()
 
     # ------------------------------------------------------------------ API principal
     def render(self, input_video: Path, plan: VideoEditingPlan, mapper: TimelineMapper, workdir: Path,
                out: Path, captions_provider: Optional[Callable[[Path], List[CaptionItem]]] = None,
                progress: ProgressCb = None) -> Dict:
+        # El motor también se usa al reexportar un proyecto guardado. No dependemos de
+        # que el llamador haya creado antes su directorio temporal.
+        workdir.mkdir(parents=True, exist_ok=True)
+        out.parent.mkdir(parents=True, exist_ok=True)
         say = progress or (lambda m, p: None)
 
         say("Smart Cut con FFmpeg (eliminando silencios)...", 0.05)
@@ -256,7 +280,7 @@ class VideoRenderEngine:
             say("Reintentando sin overlays...", 0.85)
             ok = self.compose(cut, [], ass_file, out)
         if not ok:
-            shutil.copy(cut, out)
+            raise RuntimeError("FFmpeg no pudo componer el video final después de los reintentos.")
         return {"overlays": overlays, "captions": len(captions)}
 
     # ------------------------------------------------------------------ shorts

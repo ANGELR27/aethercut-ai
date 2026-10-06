@@ -596,7 +596,9 @@ class InfoCardRenderer:
 
     def render_all(self, cards: List[InfoCard], workdir: Path) -> List[InfoCard]:
         for card in cards:
-            if card.verdict not in ("supported", "contradicted", "insufficient"):
+            # Cuando una afirmación no logra verificarse, también se muestra la
+            # advertencia para no dar una certeza que las fuentes no respaldan.
+            if not card.enabled or card.verdict not in ("supported", "contradicted", "insufficient"):
                 continue
             try:
                 card.card_path = str(self.render(card, workdir / f"{card.card_id}_card.png"))

@@ -48,5 +48,6 @@ class TimelineMapper:
             for s, e in self.map_range(cap.start_sec, cap.end_sec):
                 if e - s >= 0.2:
                     out.append(CaptionItem(start_sec=round(s, 3), end_sec=round(e, 3),
-                                           text=cap.text, highlight_words=cap.highlight_words))
+                                           text=cap.text, highlight_words=cap.highlight_words,
+                                           speaker_id=cap.speaker_id, censor_words=cap.censor_words))
         return out

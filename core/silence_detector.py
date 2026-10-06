@@ -1,8 +1,11 @@
 import re
 import subprocess
+from threading import Event
 from typing import List, Optional, Tuple
 
+from cancellation import CancellationRequested
 from core.models import ActionType, TimelineSegment
+from process_runner import run_process
 
 _START = re.compile(r"silence_start:\s*(-?[\d.]+)")
 _END = re.compile(r"silence_end:\s*(-?[\d.]+)")
@@ -16,9 +19,11 @@ class SilenceDetector:
     Se deja un colchón (padding) a cada lado de cada corte para no comerse el inicio/fin de palabras.
     """
 
-    def __init__(self, noise_db: float = -32.0, padding_sec: float = 0.15):
+    def __init__(self, noise_db: float = -32.0, padding_sec: float = 0.15,
+                 cancel_event: Optional[Event] = None):
         self.noise_db = noise_db
         self.padding_sec = padding_sec
+        self.cancel_event = cancel_event
 
     def detect(self, video_path, min_silence_sec: float) -> Optional[List[Tuple[float, float]]]:
         cmd = [
@@ -27,8 +32,11 @@ class SilenceDetector:
             "-f", "null", "-",
         ]
         try:
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  text=True, encoding="utf-8", errors="replace", timeout=900)
+            proc = run_process(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding="utf-8", errors="replace", timeout=900,
+                               cancel_event=self.cancel_event)
+        except CancellationRequested:
+            raise
         except Exception as exc:
             print(f"[SilenceDetector] FFmpeg no pudo analizar el audio: {exc}")
             return None
@@ -48,8 +56,11 @@ class SilenceDetector:
             silences.append((starts[-1], float("inf")))
         return silences
 
-    def build_timeline(self, video_path, duration: float, min_silence_sec: float) -> Optional[List[TimelineSegment]]:
+    def build_timeline(self, video_path, duration: float, min_silence_sec: float,
+                       cancel_event: Optional[Event] = None) -> Optional[List[TimelineSegment]]:
         """Construye segmentos KEEP/CUT_SILENCE contiguos a partir del audio. None si no se pudo detectar."""
+        if cancel_event is not None:
+            self.cancel_event = cancel_event
         raw = self.detect(video_path, min_silence_sec)
         if raw is None:
             return None

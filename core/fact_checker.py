@@ -114,21 +114,35 @@ class FactChecker:
     async def fetch_real_image(self, query: str, dest_stem: str, wiki_url: Optional[str] = None) -> Optional[str]:
         """Foto real: primero Wikipedia, luego imágenes web. Siempre validada con Pillow."""
         candidates = [wiki_url] if wiki_url else []
-        candidates += await asyncio.to_thread(self._web_image_search, query)
-        for i, url in enumerate(candidates[:5]):
+        try:
+            candidates += await asyncio.wait_for(
+                asyncio.to_thread(self._web_image_search, query), timeout=12
+            )
+        except asyncio.TimeoutError:
+            safe_log(f"[FactChecker] La búsqueda de imágenes tardó demasiado para '{query}'.")
+        # La foto es decorativa; dos fuentes suficientes evitan bloquear una
+        # edición si un servidor de imágenes deja de responder.
+        for i, url in enumerate(candidates[:2]):
             dest = self.workdir / f"{dest_stem}_{i}.img"
             if await self.wiki.download_image(url, dest) and _valid_image(dest):
                 return str(dest)
             dest.unlink(missing_ok=True)
         return None
 
-    async def _gather_evidence(self, card: InfoCard):
+    async def _gather_evidence(self, card: InfoCard, progress: Optional[Callable[[str], None]] = None):
         queries = [card.search_query]
         if card.headline and card.headline.lower() not in card.search_query.lower():
             queries.append(card.headline)
         web: List[Dict[str, str]] = []
         for q in queries:
-            web += await asyncio.to_thread(self._web_search, q)
+            if progress:
+                progress(f"Buscando información para «{card.headline}»: {q}")
+            try:
+                web += await asyncio.wait_for(asyncio.to_thread(self._web_search, q), timeout=12)
+            except asyncio.TimeoutError:
+                safe_log(f"[FactChecker] La búsqueda web tardó demasiado para '{q}'.")
+        if progress:
+            progress(f"Consultando Wikipedia para «{card.headline}».")
         wiki = await self.wiki.search(card.image_query or card.headline)
 
         seen, evidence = set(), []
@@ -142,24 +156,31 @@ class FactChecker:
         return evidence[:9], wiki
 
     # ---------- veredicto ----------
-    def _judge(self, card: InfoCard, evidence: List[Dict[str, str]], mode: str) -> Dict:
+    def _judge(self, card: InfoCard, evidence: List[Dict[str, str]], mode: str,
+               progress: Optional[Callable[[str], None]] = None) -> Dict:
         numbered = "\n".join(
             f"[{i}] {e['title']} ({_domain(e['url'])}): {e['text'][:450]}"
             for i, e in enumerate(evidence, start=1)
         )
         prompt = JUDGE_PROMPT.format(mode=mode, headline=card.headline, claim=card.claim, evidence=numbered)
-        return JSONValidator.extract_and_parse(self.llm.generate(prompt, json_mode=True, use_search=True))
+        # El juez solo debe usar los fragmentos recopilados y luego citados en la tarjeta.
+        return JSONValidator.extract_and_parse(
+            self.llm.generate(prompt, json_mode=True, progress=progress, max_models=1)
+        )
 
-    async def verify_card(self, card: InfoCard) -> InfoCard:
+    async def verify_card(self, card: InfoCard,
+                          progress: Optional[Callable[[str], None]] = None) -> InfoCard:
         async with self._sem:
             mode = "entidad" if (card.kind or "").lower() in ENTITY_KINDS else "dato"
-            evidence, wiki = await self._gather_evidence(card)
+            evidence, wiki = await self._gather_evidence(card, progress)
             if not evidence:
                 card.verdict, card.note = "insufficient", "La búsqueda web no devolvió resultados."
                 return card
 
             try:
-                result = await asyncio.to_thread(self._judge, card, evidence, mode)
+                if progress:
+                    progress(f"Contrastando «{card.claim}» con {len(evidence)} fuentes recopiladas.")
+                result = await asyncio.to_thread(self._judge, card, evidence, mode, progress)
             except Exception as exc:
                 card.verdict, card.note = "insufficient", f"No se pudo verificar: {str(exc)[:90]}"
                 return card
@@ -202,6 +223,8 @@ class FactChecker:
                 card.corrected_value = corrected_val[:20]
                 card.correction_source = card.sources[0].domain
 
+            if progress:
+                progress(f"Buscando imagen de apoyo para «{card.headline}».")
             card.image_path = await self.fetch_real_image(
                 card.image_query or card.headline, f"{card.card_id}_photo",
                 wiki.image_url if wiki else None,
@@ -216,14 +239,11 @@ class FactChecker:
         labels = {"supported": "confirmado en la web", "contradicted": "FALSO, se descarta",
                   "insufficient": "sin evidencia, se descarta"}
 
-        sem = asyncio.Semaphore(10)
-
         async def run(card: InfoCard) -> InfoCard:
-            async with sem:
-                result = await self.verify_card(card)
-                if progress:
-                    progress(f"Dato '{card.headline}': {labels.get(result.verdict, result.verdict)}")
-                return result
+            result = await self.verify_card(card, progress)
+            if progress:
+                progress(f"Dato '{card.headline}': {labels.get(result.verdict, result.verdict)}")
+            return result
 
         plan.info_cards = list(await asyncio.gather(*[run(c) for c in plan.info_cards]))
         ok = sum(1 for c in plan.info_cards if c.verdict == "supported")

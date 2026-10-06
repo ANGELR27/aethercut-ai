@@ -3,218 +3,202 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="AetherCut AI: editor de video autónomo con Gemini, poda de silencios, B-Roll, subtítulos y Shorts.">
-    <title>AetherCut AI | Autonomous Video Editor</title>
+    <meta name="description" content="AetherCut AI analiza, recorta y prepara videos para compartir.">
+    <title>AetherCut AI | Editor de video</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=3">
+    <link rel="stylesheet" href="/static/css/style.css?v=5">
 </head>
 <body>
 <div class="shell">
-
-    <!-- TOP BAR -->
     <header class="topbar">
-        <div class="who">
-            <div class="avatar"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg></div>
+        <div class="brand-lockup">
+            <div class="avatar" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+            </div>
             <div>
-                <h1 class="brand">AetherCut AI</h1>
-                <div class="handle">@autonomous.editor</div>
+                <h1>AetherCut <span>AI</span></h1>
+                <p>Edición inteligente para video</p>
             </div>
         </div>
-        <div class="search">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
-            <span>Search any clip, cue or segment</span>
-            <kbd>/</kbd>
-        </div>
-        <div class="top-actions">
-            <span class="chip-model"><i></i> gemini-flash-latest</span>
-            <button class="round-btn" aria-label="Notificaciones" type="button">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
-            </button>
-        </div>
+        <div class="top-note"><i></i> Análisis con Gemini · avance por etapas</div>
     </header>
 
-    <main class="grid">
-
-        <!-- ============ COLUMN 1: PIPELINE / PORTFOLIO ============ -->
-        <section class="col">
-            <article class="card">
-                <div class="card-head">
-                    <h2>Pipeline</h2>
-                    <button class="mini-pill" type="button">+ Run</button>
+    <main class="workspace">
+        <aside class="controls-column">
+            <section class="card ingest-card">
+                <div class="section-heading">
+                    <span class="section-kicker">PREPARAR</span>
+                    <h2>Tu video</h2>
+                    <p>Elige el archivo y decide qué quieres incluir en la edición.</p>
                 </div>
 
-                <div class="triple">
-                    <div>
-                        <span class="lbl">Silence cut</span>
-                        <strong class="num" id="dispSilence">1.5s</strong>
-                    </div>
-                    <div>
-                        <span class="lbl">B-Roll</span>
-                        <strong class="num" id="kpiBroll">0</strong>
-                    </div>
-                    <div>
-                        <span class="lbl">Saved</span>
-                        <strong class="num" id="kpiSaved">0s</strong>
-                    </div>
-                </div>
-
-                <!-- Dot matrix (se llena con el progreso real) -->
-                <div class="dotmatrix" id="dotMatrix" aria-label="Progreso del pipeline"></div>
-                <div class="legend">
-                    <span><i class="sq a"></i>Gemini</span>
-                    <span><i class="sq b"></i>B-Roll</span>
-                    <span><i class="sq c"></i>Render</span>
-                    <span><i class="sq d"></i>Master</span>
-                </div>
-
-                <div class="folders">
-                    <div class="folder"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Inputs</span><em class="pos">ready</em></div>
-                    <div class="folder"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Assets</span><em class="pos">ready</em></div>
-                    <div class="folder"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Outputs</span><em class="pos">ready</em></div>
-                    <div class="folder"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Temp</span><em class="neg">auto-clean</em></div>
-                </div>
-
-                <div class="list-head"><span>Stages</span><span class="sort">Sort by Order</span></div>
-                <ul class="stages">
-                    <li id="stepGemini">
-                        <span class="ico">G</span>
-                        <div class="meta"><b>Gemini analysis</b><small>Native video ingestion</small></div>
-                        <div class="val"><b class="st">Idle</b><small>step 1</small></div>
-                    </li>
-                    <li id="stepAssets">
-                        <span class="ico">B</span>
-                        <div class="meta"><b>B-Roll orchestrator</b><small>Parallel stock download</small></div>
-                        <div class="val"><b class="st">Idle</b><small>step 2</small></div>
-                    </li>
-                    <li id="stepCards">
-                        <span class="ico">V</span>
-                        <div class="meta"><b>Web fact-check</b><small>Verify claims + build cards</small></div>
-                        <div class="val"><b class="st">Idle</b><small>step 3</small></div>
-                    </li>
-                    <li id="stepRender">
-                        <span class="ico">M</span>
-                        <div class="meta"><b>MoviePy assembly</b><small>Cuts + fades + overlays</small></div>
-                        <div class="val"><b class="st">Idle</b><small>step 4</small></div>
-                    </li>
-                    <li id="stepSubs">
-                        <span class="ico">F</span>
-                        <div class="meta"><b>FFmpeg master</b><small>Burn captions + Shorts</small></div>
-                        <div class="val"><b class="st">Idle</b><small>step 5</small></div>
-                    </li>
-                </ul>
-            </article>
-        </section>
-
-        <!-- ============ COLUMN 2: INGESTION + CHARTS ============ -->
-        <section class="col">
-            <article class="card">
                 <form id="uploadForm">
-                    <div class="card-head">
-                        <h2>Ingest</h2>
-                        <button class="mini-pill" type="button" id="browseTrigger">+ Add video</button>
-                    </div>
-
-                    <div class="drop" id="dropzone">
-                        <input type="file" id="videoFileInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" hidden>
-                        <div class="drop-ico">
-                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <fieldset id="uploadControls">
+                        <input type="file" id="videoFileInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-msvideo,.m4v" hidden>
+                        <button class="drop" id="dropzone" type="button" aria-label="Seleccionar o soltar un video">
+                            <span class="drop-ico" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+                            </span>
+                            <span class="drop-main">Suelta tu video aquí</span>
+                            <span class="drop-sub">o <u>busca un archivo</u></span>
+                            <span class="format-note">MP4 · MOV · MKV · WEBM · AVI · M4V · hasta 2 GB</span>
+                        </button>
+                        <div class="file-chip" id="selectedFileBadge" hidden>
+                            <span class="file-mark" aria-hidden="true">▶</span>
+                            <span id="selectedFileName">video.mp4</span>
+                            <button id="removeFileBtn" type="button" aria-label="Quitar video">×</button>
                         </div>
-                        <p class="drop-t">Drop raw footage here</p>
-                        <p class="drop-s">MP4 · MOV · MKV · WEBM</p>
-                        <div class="file-chip" id="selectedFileBadge" style="display:none;">
-                            <i></i><span id="selectedFileName">video.mp4</span><b id="removeFileBtn" role="button" aria-label="Quitar archivo">&times;</b>
+
+                        <div class="option-heading"><h3>Elementos de edición</h3><span>Activa lo que necesites</span></div>
+                        <div class="toggles">
+                            <label class="tg"><input type="checkbox" id="enableBRoll" checked><span class="toggle-copy"><b>B-Roll</b><em>Apoyos visuales</em></span><i class="switch" aria-hidden="true"></i></label>
+                            <label class="tg"><input type="checkbox" id="enableCards" checked><span class="toggle-copy"><b>Tarjetas</b><em>Datos con fuentes</em></span><i class="switch" aria-hidden="true"></i></label>
+                            <label class="tg"><input type="checkbox" id="enableCaptions"><span class="toggle-copy"><b>Subtítulos</b><em>Transcripción local</em></span><i class="switch" aria-hidden="true"></i></label>
+                            <label class="tg"><input type="checkbox" id="enableShorts" checked><span class="toggle-copy"><b>Short vertical</b><em>Formato 9:16</em></span><i class="switch" aria-hidden="true"></i></label>
                         </div>
-                    </div>
 
-                    <div class="toggles">
-                        <label class="tg"><input type="checkbox" id="enableBRoll" checked><span><b>Auto B-Roll</b><em>+stock</em></span></label>
-                        <label class="tg"><input type="checkbox" id="enableCards" checked><span><b>Info cards</b><em>+web verified</em></span></label>
-                        <label class="tg"><input type="checkbox" id="enableCaptions"><span><b>Captions</b><em>optional · Whisper</em></span></label>
-                        <label class="tg"><input type="checkbox" id="enableShorts" checked><span><b>Shorts 9:16</b><em>+vertical</em></span></label>
-                    </div>
+                        <div class="slider-box">
+                            <div class="slider-top"><label for="silenceThreshold">Cortar pausas mayores a</label><b id="silenceVal">1.5 s</b></div>
+                            <input type="range" id="silenceThreshold" min="0.8" max="3.0" step="0.1" value="1.5">
+                            <div class="ticks"><span>0.8 s</span><span>3.0 s</span></div>
+                        </div>
 
-                    <div class="slider-box">
-                        <div class="slider-top"><span>Smart cut threshold</span><b id="silenceVal">1.5s</b></div>
-                        <input type="range" id="silenceThreshold" min="0.8" max="3.0" step="0.1" value="1.5">
-                        <div class="ticks"><span>0.8s</span><span>1.5s</span><span>2.2s</span><span>3.0s</span></div>
-                    </div>
-
-                    <button type="submit" class="cta" id="startBtn" disabled>
-                        <span>Execute autonomous edit</span>
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                    </button>
+                        <button type="submit" class="cta" id="startBtn" disabled>
+                            <span id="startBtnText">Selecciona un video</span>
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>
+                        </button>
+                    </fieldset>
                 </form>
-            </article>
-
-            <article class="card terminal-card">
-                <div class="card-head">
-                    <h2>Live Terminal</h2>
-                    <span class="mini-pill ghost">stdout</span>
+                <p class="local-note">El análisis del contenido se envía a Gemini. Las opciones web consultan sus fuentes cuando están activadas.</p>
+            </section>
+            <section class="card projects-card" id="savedProjectsCard" hidden>
+                <div class="section-heading compact-heading">
+                    <span class="section-kicker">PROYECTOS GUARDADOS</span>
+                    <h2>Continuar una edición</h2>
                 </div>
-                <div class="terminal-window" id="terminalLog">
-                    <div><span class="sys-time">[sys]</span> System initialized. Ready to process.</div>
-                </div>
-            </article>
-        </section>
+                <div id="savedProjectsList" class="saved-projects"></div>
+            </section>
+        </aside>
 
-        <!-- ============ COLUMN 3: ASSISTANT + RESULTS ============ -->
-        <section class="col">
-            <article class="card assistant">
-                <div class="card-head">
-                    <div class="ai-id">
-                        <span class="ai-dot"></span>
-                        <h2>AI Assistant</h2>
+        <section class="main-column" aria-label="Estado y resultados">
+            <section class="card status-card" aria-labelledby="statusTitle">
+                <div class="status-topline">
+                    <span class="section-kicker">SESIÓN DE EDICIÓN</span>
+                    <button class="cancel-task" id="cancelTaskBtn" type="button" hidden>Cancelar</button>
+                    <span id="connectionStatus" class="live-badge"><i></i><span>Listo</span></span>
+                </div>
+                <div class="current-work">
+                    <div class="work-indicator" id="workIndicator" aria-hidden="true"><span></span></div>
+                    <div class="work-copy">
+                        <h2 id="statusTitle">Carga un video para empezar</h2>
+                        <p id="pipelineStatusText">Aquí verás qué etapa está activa y la última acción reportada por el proceso.</p>
                     </div>
-                    <span class="mini-pill ghost">Live</span>
+                    <strong class="progress-number" id="progressPctText">0%</strong>
                 </div>
 
-                <div class="chat" id="chatFeed">
-                    <div class="msg me"><p>Give me a forecast for this video.</p><time>09:41</time></div>
-                    <div class="msg ai"><p>Ready. Drop a clip and I will cut silences, place B-Roll at the exact mention, burn captions and extract a vertical Short.</p><time>09:41</time></div>
+                <div class="progress-track" role="progressbar" aria-label="Progreso de la edición" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div class="progress-fill" id="progressBarFill"></div>
                 </div>
+                <div class="progress-meta"><span id="jobFileName">Sin archivo seleccionado</span><span>Avance por etapas</span><span id="lastUpdateText">En espera</span></div>
 
-                <div class="prog" id="assistantProgressWrap" style="display:none;">
-                    <div class="prog-top"><span id="pipelineStatusText">Starting agents...</span><b id="progressPctText">0%</b></div>
-                    <div class="track"><div class="fill" id="progressBarFill" style="width:0%"></div></div>
+                <ol class="phase-track" aria-label="Etapas de edición">
+                    <li id="phase-input"><span class="phase-dot">1</span><span>Preparar</span></li>
+                    <li id="phase-analyze"><span class="phase-dot">2</span><span>Analizar</span></li>
+                    <li id="phase-cut"><span class="phase-dot">3</span><span>Detectar pausas</span></li>
+                    <li id="phase-enrich"><span class="phase-dot">4</span><span>Buscar recursos</span></li>
+                    <li id="phase-render"><span class="phase-dot">5</span><span>Renderizar</span></li>
+                </ol>
+
+                <div class="time-row">
+                    <div><span id="totalElapsedLabel">Tiempo total</span><b id="totalElapsed">00:00</b></div>
+                    <div><span>En esta etapa</span><b id="stageElapsed">00:00</b></div>
+                    <div><span>Última señal</span><b id="signalAge">—</b></div>
                 </div>
+                <p class="wait-note" id="waitNote" hidden></p>
+            </section>
 
-                <div class="composer"><span>Enter a message...</span><i>↑</i></div>
-            </article>
-
-            <article class="card" id="resultsSection" style="display:none;">
-                <div class="card-head">
-                    <h2>Mastered outputs</h2>
-                    <a href="#" class="mini-pill link" id="downloadMasterBtn" download>Download master</a>
-                </div>
-
-                <div class="players">
+            <section class="card studio-card" id="studioSection" hidden aria-labelledby="studioTitle">
+                <div class="activity-heading studio-heading">
                     <div>
-                        <span class="lbl">Master 16:9</span>
-                        <div class="frame"><video id="masterVideoPlayer" controls playsinline></video></div>
+                        <span class="section-kicker">MESA DE EDICIÓN</span>
+                        <h2 id="studioTitle">Plan que está construyendo AetherCut</h2>
                     </div>
-                    <div id="shortContainer">
-                        <div class="short-top"><span class="lbl">Short 9:16</span><a href="#" class="dl" id="downloadShortBtn" download>Download</a></div>
-                        <div class="frame tall"><video id="shortVideoPlayer" controls playsinline></video></div>
+                    <span class="activity-count" id="studioSummary">Esperando análisis</span>
+                </div>
+                <p class="studio-intro" id="studioIntro">Aquí aparecerán los elementos en el momento exacto en que el sistema los detecte.</p>
+                <div class="studio-grid">
+                    <div class="preview-pane">
+                        <div class="preview-stage">
+                            <video id="projectPreview" controls muted playsinline preload="metadata"></video>
+                            <div class="preview-empty" id="previewEmpty">La previsualización se prepara junto al análisis.</div>
+                        </div>
+                        <div class="time-readout"><span id="previewCurrentTime">00:00</span><span id="previewDuration">00:00</span></div>
+                        <input id="timelineCursor" class="timeline-cursor" type="range" min="0" max="1" value="0" step="0.1" aria-label="Posición de la previsualización">
+                    </div>
+                    <aside class="inspector-pane" aria-live="polite">
+                        <span class="section-kicker">INSPECTOR</span>
+                        <div id="editorInspector" class="editor-inspector">
+                            <b>Selecciona un elemento de la línea de tiempo</b>
+                            <p>Podrás cambiar su momento, duración, posición o retirarlo antes de una nueva exportación.</p>
+                        </div>
+                    </aside>
+                </div>
+                <div class="timeline-legend" aria-hidden="true"><span class="legend-card">Tarjetas</span><span class="legend-broll">B-Roll</span><span class="legend-short">Shorts</span><span class="legend-cut">Pausas</span></div>
+                <div class="timeline-scroll">
+                    <div class="timeline-ruler" id="timelineRuler"></div>
+                    <div class="timeline-tracks" id="timelineTracks" aria-label="Línea de tiempo editable"></div>
+                </div>
+                <div class="studio-actions">
+                    <span id="editorSaveState" class="editor-save-state">Los cambios se guardan en este proyecto.</span>
+                    <div class="studio-buttons">
+                        <button id="saveTimelineBtn" class="secondary-cta" type="button" disabled>Guardar cambios</button>
+                        <button id="exportTimelineBtn" class="secondary-cta" type="button" disabled>Exportar versión</button>
                     </div>
                 </div>
+            </section>
 
-                <div class="kpis">
-                    <div><span class="lbl">Silences cut</span><strong class="pos" id="statCuts">0</strong></div>
-                    <div><span class="lbl">B-Rolls</span><strong class="pos" id="statBRolls">0</strong></div>
-                    <div><span class="lbl">Cards</span><strong class="pos" id="statCards">0</strong></div>
-                    <div><span class="lbl">Time saved</span><strong class="pos" id="statTimeSaved">0s</strong></div>
+            <section class="card activity-card" aria-labelledby="activityTitle">
+                <div class="activity-heading">
+                    <div>
+                        <span class="section-kicker">SEÑALES DEL PROCESO</span>
+                        <h2 id="activityTitle">Actividad</h2>
+                    </div>
+                    <span class="activity-count" id="activityCount">0 eventos</span>
                 </div>
+                <div class="activity-feed" id="activityFeed" role="log" aria-live="polite" aria-relevant="additions">
+                    <div class="empty-activity" id="emptyActivity">
+                        <span aria-hidden="true">◷</span>
+                        <p>Cuando inicie el trabajo, aquí aparecerá cada acción reportada.</p>
+                    </div>
+                </div>
+            </section>
 
-                <div class="facts-wrap" id="factsWrap" style="display:none;">
-                    <div class="list-head"><span>Fact-check</span><span class="sort" id="factsSummary"></span></div>
+            <section class="card results-card" id="resultsSection" hidden>
+                <div class="activity-heading result-heading">
+                    <div><span class="section-kicker">LISTO PARA REVISAR</span><h2>Resultados</h2></div>
+                    <a href="#" class="download-link" id="downloadMasterBtn" download>Descargar video ↗</a>
+                </div>
+                <div class="players">
+                    <div class="master-player"><span class="media-label">Video editado · 16:9</span><video id="masterVideoPlayer" controls playsinline></video></div>
+                    <div id="shortContainer"><div class="media-label">Short · 9:16 <a href="#" class="download-link small" id="downloadShortBtn" download>Descargar ↗</a></div><video id="shortVideoPlayer" class="short-player" controls playsinline></video></div>
+                </div>
+                <div class="shorts-list" id="shortsList" hidden></div>
+                <div class="result-stats">
+                    <div><b id="statCuts">0</b><span>pausas cortadas</span></div>
+                    <div><b id="statBRolls">0</b><span>apoyos visuales</span></div>
+                    <div><b id="statCards">0</b><span>tarjetas mostradas</span></div>
+                    <div><b id="statTimeSaved">0 s</b><span>tiempo ahorrado</span></div>
+                </div>
+                <div class="facts-wrap" id="factsWrap" hidden>
+                    <div class="facts-heading"><h3>Datos revisados</h3><span id="factsSummary"></span></div>
                     <ul class="facts" id="factsList"></ul>
                 </div>
-            </article>
+            </section>
         </section>
     </main>
 </div>
-<script src="/static/js/app.js?v=3"></script>
+<script src="/static/js/app.js?v=5"></script>
 </body>
 </html>

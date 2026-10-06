@@ -22,7 +22,8 @@ REGLAS CRÍTICAS DE EDICIÓN:
      1 o 2 palabras de alto impacto de cada frase (se resaltarán en color en los subtítulos).
 
 4. SHORT EXTRACTION (Clips Verticales de Alto Impacto):
-   - Extrae entre 1 y 3 fragmentos autónomos de 20 a 50 segundos con hook inicial impactante y virality_score (1-100).
+   - Extrae todos los fragmentos autónomos que realmente tengan potencial. No inventes una cuota: pueden ser 2 o 15.
+   - La duración depende del contenido: desde 15 hasta 70 segundos si el segmento mantiene contexto, gancho y cierre.
 
 5. TARJETAS DE REFERENCIA (ESTILO PLATZI / NATE GENTILE):
    - La tarjeta aparece en el segundo EXACTO en que se pronuncia la entidad o el dato. PRECISIÓN ABSOLUTA: usa la transcripción del audio mentalmente para fijar `start_sec` en el instante exacto en que la persona pronuncia la palabra.
@@ -42,7 +43,9 @@ REGLAS CRÍTICAS DE EDICIÓN:
    - NO crees tarjetas para chistes u opiniones puramente subjetivas.
    - 'search_query': consulta web en español para encontrar fuentes o definiciones.
    - 'image_query': consulta para una FOTO REAL del tema o logo.
-   - Duración: 4.0 a 6.0 segundos. Deja vacíos verdict, body, sources, image_path, card_path, stat_value, correction, corrected_value, correction_source.
+   - Duración: 6.5 a 10.0 segundos, para que el espectador alcance a leer fuentes y contexto.
+   - "screen_position": usa "auto" salvo que veas claramente que el hablante ocupa un lado; entonces usa el lado contrario (upper_left, upper_right, lower_left o lower_right).
+   - Deja vacíos verdict, body, sources, image_path, card_path, stat_value, correction, corrected_value, correction_source.
 
 ESPECIFICACIÓN DE SALIDA:
 Devuelve ÚNICA Y EXCLUSIVAMENTE el JSON estructurado válido según el siguiente esquema (sin explicaciones adicionales, sin markdown adicional fuera del bloque JSON):

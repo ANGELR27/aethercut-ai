@@ -20,6 +20,7 @@ class BRollCue(BaseModel):
     local_file_path: Optional[str] = Field(default=None, description="Ruta local del asset descargado")
     download_status: str = Field(default="PENDING", description="PENDING, DOWNLOADING, COMPLETED, FAILED")
     frame_path: Optional[str] = Field(default=None, description="Interno: foto enmarcada como tarjeta flotante")
+    enabled: bool = Field(default=True, description="Permite retirar un apoyo visual desde el editor")
 
 class SourceRef(BaseModel):
     """Fuente web real que respalda una tarjeta informativa."""
@@ -54,6 +55,9 @@ class InfoCard(BaseModel):
     corrected_value: str = Field(default="", description="Lo completa el verificador: dato real preciso (cifra, fecha, nombre correcto)")
     correction_source: str = Field(default="", description="Lo completa el verificador: dominio de la fuente autoritativa de la corrección")
     is_myth: bool = Field(default=False, description="Si la afirmación es un mito popular, pon true para habilitar tarjeta gamificada.")
+    enabled: bool = Field(default=True, description="Permite al editor ocultar la tarjeta sin borrar su investigación")
+    screen_position: str = Field(default="auto", description="auto, upper_left, upper_right, lower_left o lower_right")
+    display_duration_sec: float = Field(default=7.0, ge=4.5, le=12.0, description="Tiempo visible para que la tarjeta pueda leerse")
 
 class CaptionItem(BaseModel):
     """Segmento de subtítulo con temporización para subtitulado dinámico."""

@@ -1,20 +1,25 @@
 import asyncio
 import shutil
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from config.settings import settings
+from cancellation import CancellationRequested
 from core.asset_providers import AssetProviderFactory  # noqa: F401  (usado por AssetOrchestrator)
 from core.card_renderer import InfoCardRenderer
 from core.fact_checker import FactChecker
 from core.gemini_analyzer import GeminiVideoAnalyzer
 from core.llm import LLMClient, safe_log
 from core.models import ActionType, VideoEditingPlan
+from core.project_store import ProjectStore, editor_snapshot
 from core.orchestrator import AssetOrchestrator
 from core.render_engine import VideoRenderEngine
 from core.silence_detector import SilenceDetector
 from core.timeline import TimelineMapper
 from core.transcriber import WhisperTranscriber, highlight_terms_from_plan
+from core.visual_analysis import VisualAnalyzer
 from utils.file_manager import FileManager
 
 StateCb = Callable[..., None]
@@ -36,60 +41,146 @@ class VideoPipeline:
     Gemini (plan) -> silencios reales (audio) -> [B-Roll || verificación web + tarjetas] -> render -> subtítulos -> Short.
     """
 
-    def __init__(self, task_id: str, input_file: Path, options: PipelineOptions, on_state: StateCb):
+    def __init__(self, task_id: str, input_file: Path, options: PipelineOptions, on_state: StateCb,
+                 cancel_event: Optional[threading.Event] = None,
+                 project_store: Optional[ProjectStore] = None):
         self.task_id = task_id
         self.input_file = input_file
         self.opt = options
         self.on_state = on_state
-        self.workdir = settings.TEMP_DIR / task_id
+        self.cancel_event = cancel_event or threading.Event()
+        self.project_store = project_store or ProjectStore(task_id)
+        self.workdir = self.project_store.workdir
         self.workdir.mkdir(parents=True, exist_ok=True)
 
     def _state(self, step: str, progress: float, message: str, **extra: Any) -> None:
         self.on_state(step, progress, message, **extra)
 
+    def _publish_plan(self, plan: VideoEditingPlan, step: str, progress: float, message: str) -> None:
+        """Guarda una versión editable y actualiza el editor mientras trabaja."""
+        self.project_store.save_plan(plan, status=step)
+        self._state(step, progress, message, editor=editor_snapshot(plan))
+
+    async def _run_with_heartbeat(self, loop, fn, step: str, progress: float,
+                                  activity: str, last_signal=None, interval: int = 10):
+        """Mantiene visible una espera real cuando una tarea síncrona ocupa el worker."""
+        if self.cancel_event.is_set():
+            raise CancellationRequested()
+        future = loop.run_in_executor(None, fn)
+        started = time.monotonic()
+        while not future.done():
+            cancelling = self.cancel_event.is_set()
+            await asyncio.wait((future,), timeout=1 if cancelling else interval)
+            if future.done():
+                break
+            if self.cancel_event.is_set():
+                self._state("cancelling", progress,
+                            "Cancelación solicitada; esperando que termine la operación actual de forma segura.")
+                continue
+            elapsed = int(time.monotonic() - (last_signal[0] if last_signal else started))
+            if elapsed >= interval:
+                self._state(
+                    step,
+                    progress,
+                    activity,
+                    heartbeat=True,
+                    waiting_seconds=elapsed,
+                )
+        if self.cancel_event.is_set():
+            try:
+                future.result()
+            except Exception:
+                pass
+            raise CancellationRequested()
+        return future.result()
+
     async def run(self) -> Dict[str, Any]:
         loop = asyncio.get_running_loop()
-        try:
-            return await self._run(loop)
-        finally:
-            shutil.rmtree(self.workdir, ignore_errors=True)  # no saturar el disco con temporales
+        return await self._run(loop)
 
     async def _run(self, loop) -> Dict[str, Any]:
         opt = self.opt
-        meta = FileManager.get_media_metadata(self.input_file)
+        self._state("inspect", 1.0, "Leyendo duración y resolución del video con FFprobe.")
+        meta = await self._run_with_heartbeat(
+            loop, lambda: FileManager.get_media_metadata(self.input_file, self.cancel_event),
+            "inspect", 1.0, "FFprobe está leyendo la duración y resolución",
+        )
         duration = float(meta.get("duration") or 0.0)
         if duration <= 0:
             raise RuntimeError("No se pudo leer la duración del video. ¿El archivo está dañado?")
         frame_w, frame_h = meta.get("width") or 1920, meta.get("height") or 1080
 
+        # Los videos grandes se reducen solo para Gemini. El original no se
+        # modifica y se usa más adelante para los cortes y la exportación.
+        analysis_file = self.input_file
+        if self.input_file.stat().st_size > 150 * 1024 * 1024:
+            proxy = self.workdir / "analysis_proxy.mp4"
+            self._state("inspect", 3.0,
+                        "Creando una copia ligera para analizar el contenido sin subir el original completo.")
+            analysis_file = await self._run_with_heartbeat(
+                loop,
+                lambda: FileManager.create_analysis_proxy(self.input_file, proxy, self.cancel_event),
+                "inspect", 3.0, "FFmpeg está creando la copia ligera para el análisis",
+            )
+            proxy_mb = analysis_file.stat().st_size / 1024 / 1024
+            self._state("inspect", 5.0,
+                        f"Copia de análisis lista ({proxy_mb:.0f} MB). El render final conservará el video original.")
+            self.project_store.set_status("inspect", preview_file=str(analysis_file.resolve()))
+            self._state("inspect", 5.0, "La previsualización ligera está lista para el editor.",
+                        preview_url=f"/api/projects/{self.task_id}/preview")
+        else:
+            self.project_store.set_status("inspect", preview_file=str(self.input_file.resolve()))
+            self._state("inspect", 5.0, "El archivo está listo para previsualizar en el editor.",
+                        preview_url=f"/api/projects/{self.task_id}/preview")
+
         # ---- 0.5 Whisper Transcription (Full Text for LLM and Subtitles) ----
-        self._state("transcribe", 2.0, "Transcribiendo el video para asegurar extracción exhaustiva...")
+        self._state("transcribe", 2.0, "Preparando transcripción local para apoyar el análisis.")
         transcript_text = None
         whisper_caps = None
         if opt.captions:
             try:
-                whisper_caps = await loop.run_in_executor(None, lambda: WhisperTranscriber().transcribe(self.input_file, []))
+                whisper_caps = await self._run_with_heartbeat(
+                    loop, lambda: WhisperTranscriber().transcribe(self.input_file, [], cancel_event=self.cancel_event),
+                    "transcribe", 2.0, "Whisper está transcribiendo el audio",
+                )
                 if whisper_caps:
                     transcript_text = "\n".join(f"[{c.start_sec:.1f}-{c.end_sec:.1f}] {c.text}" for c in whisper_caps)
+            except CancellationRequested:
+                raise
             except Exception as exc:
                 safe_log(f"[Pipeline] Error en Whisper pre-análisis: {exc}")
+                self._state("transcribe", 5.0, f"No se pudo completar Whisper; Gemini continuará con el video. ({str(exc)[:100]})")
+        else:
+            self._state("transcribe", 5.0, "Transcripción de subtítulos desactivada; se continúa sin Whisper.")
 
         # ---- 1. Gemini ----
         llm = LLMClient()
-        self._state("gemini", 8.0, "Gemini: escaneando línea por línea la transcripción y el video...")
+        self._state("gemini", 8.0, "Enviando el video y las instrucciones a Gemini para proponer cortes y momentos clave.")
         analyzer = GeminiVideoAnalyzer(llm=llm)
-        # Permitir hasta 40 tarjetas (sin límite artificial bajo) para extraer absolutamente todo
-        calculated_cards = max(8, int(duration // 15)) if opt.cards else 0
-        if calculated_cards > 40: calculated_cards = 40
-        plan: VideoEditingPlan = await loop.run_in_executor(
-            None,
-            lambda: analyzer.analyze_video(
-                self.input_file, opt.silence_threshold,
+        # Las tarjetas disparan búsquedas, contrastes y composición. Un máximo
+        # editorial evita que un clip corto quede esperando decenas de consultas
+        # y sigue cubriendo los momentos realmente relevantes.
+        calculated_cards = min(10, max(2, round(duration / 30))) if opt.cards else 0
+        gemini_signal = [time.monotonic()]
+
+        def gemini_progress(message: str) -> None:
+            gemini_signal[0] = time.monotonic()
+            self._state("gemini", 12.0, message)
+
+        plan: VideoEditingPlan = await self._run_with_heartbeat(
+            loop, lambda: analyzer.analyze_video(
+                analysis_file, opt.silence_threshold,
                 max_cards=calculated_cards,
-                progress=lambda m: self._state("gemini", 12.0, m),
-                transcript=transcript_text
+                progress=gemini_progress,
+                transcript=transcript_text,
+                cancel_event=self.cancel_event,
             ),
+            "gemini", 12.0, "Gemini está analizando el video",
+            last_signal=gemini_signal,
         )
+        self._publish_plan(plan, "gemini", 25.0,
+                    f"Plan recibido: {len(plan.timeline)} tramos, {len(plan.b_rolls)} apoyos visuales, "
+                    f"{len(plan.info_cards)} datos y {len(plan.highlights)} momentos para Shorts.")
         if not opt.broll:
             plan.b_rolls = []
         if not opt.cards:
@@ -100,16 +191,21 @@ class VideoPipeline:
             plan.highlights = []
 
         # ---- 2. Silencios reales del audio (sobrescribe la estimación de Gemini) ----
-        self._state("gemini", 26.0, "Detectando silencios reales en el audio...")
-        detected = await loop.run_in_executor(
-            None, lambda: SilenceDetector().build_timeline(self.input_file, duration, opt.silence_threshold)
+        self._state("silence", 26.0, f"Analizando la pista de audio; buscando pausas mayores a {opt.silence_threshold:.1f} s.")
+        detected = await self._run_with_heartbeat(
+            loop, lambda: SilenceDetector().build_timeline(
+                self.input_file, duration, opt.silence_threshold, cancel_event=self.cancel_event),
+            "silence", 26.0, "FFmpeg está recorriendo la pista de audio",
         )
         if detected:
             plan.timeline = detected
-            self._state("gemini", 28.0, "Silencios detectados desde el audio (precisión de milisegundos).")
+            cut_count = sum(1 for segment in detected if segment.action == ActionType.CUT_SILENCE)
+            self._state("silence", 30.0, f"Audio analizado: {cut_count} pausas cumplen el umbral y se marcaron para corte.")
         else:
             safe_log("[Pipeline] No se pudo analizar el audio; se usa la línea de tiempo de Gemini.")
+            self._state("silence", 30.0, "No se detectaron pausas con FFmpeg; se conserva la propuesta de Gemini.")
         plan.total_original_duration_sec = duration
+        self._publish_plan(plan, "silence", 30.0, "La línea de tiempo se actualizó con las pausas detectadas.")
 
         # ---- 2.5 Sincronización y Subtítulos ----
         if whisper_caps:
@@ -140,16 +236,67 @@ class VideoPipeline:
                     
             plan.captions = whisper_caps
 
+        # ---- 2.6 Lectura visual local (cortes de plano + lado del hablante) ----
+        # Se ejecuta sobre la copia ligera cuando existe. No consume Gemini ni
+        # altera los tiempos: las tarjetas siguen entrando al decir la frase.
+        self._state("visual", 31.0, "Detectando cambios de plano y el lado del hablante para ubicar las tarjetas.")
+        visual = VisualAnalyzer(cancel_event=self.cancel_event)
+        scene_cuts = await self._run_with_heartbeat(
+            loop, lambda: visual.detect_scene_cuts(analysis_file),
+            "visual", 31.0, "PySceneDetect está buscando cambios de plano",
+        )
+        positioned_cards = await self._run_with_heartbeat(
+            loop, lambda: visual.place_cards_away_from_speaker(analysis_file, plan.info_cards),
+            "visual", 31.0, "OpenCV está comprobando dónde aparece el hablante",
+        )
+        self._state(
+            "visual", 32.0,
+            f"Análisis visual listo: {len(scene_cuts)} cambios de plano y {positioned_cards} tarjetas ubicadas fuera del hablante.",
+            scene_cuts=scene_cuts,
+        )
+        self._publish_plan(plan, "visual", 32.0, "Las tarjetas ya respetan el encuadre detectado.")
+
         # ---- 3. B-Roll y verificación web en paralelo ----
-        self._state("broll", 32.0, "Buscando B-Rolls y verificando datos en la web...")
+        self._state("enrich", 32.0, "Investigando fuentes y buscando recursos visuales para los momentos seleccionados.")
         tasks = []
         if plan.b_rolls:
-            tasks.append(AssetOrchestrator(target_dir=self.workdir / "assets").process_all_brolls(plan))
+            def asset_progress(event: str, data: Dict[str, Any]) -> None:
+                concept = data.get("concept", data.get("cue_id", "recurso"))
+                if event == "broll_downloading":
+                    message = f"Buscando B-Roll para «{concept}» en los proveedores configurados."
+                elif event == "broll_completed":
+                    message = f"B-Roll descargado para «{concept}» ({data.get('provider', 'proveedor web')})."
+                else:
+                    message = f"No se encontró B-Roll para «{concept}»; se omitirá ese apoyo."
+                self._state("enrich", 32.0, message)
+
+            tasks.append(AssetOrchestrator(target_dir=self.workdir / "assets").process_all_brolls(
+                plan, progress_callback=asset_progress
+            ))
         if plan.info_cards:
             checker = FactChecker(llm, self.workdir)
-            tasks.append(checker.verify_plan(plan, progress=lambda m: self._state("cards", 40.0, m)))
+            tasks.append(checker.verify_plan(plan, progress=lambda m: self._state("enrich", 32.0, m)))
         if tasks:
-            await asyncio.gather(*tasks)
+            pending = [asyncio.create_task(task) for task in tasks]
+            try:
+                while any(not task.done() for task in pending):
+                    if self.cancel_event.is_set():
+                        self._state("cancelling", 44.0,
+                                    "Cancelación solicitada; deteniendo las búsquedas web activas.")
+                        for task in pending:
+                            task.cancel()
+                        await asyncio.gather(*pending, return_exceptions=True)
+                        raise CancellationRequested()
+                    await asyncio.wait(pending, timeout=1)
+                await asyncio.gather(*pending)
+            except Exception:
+                for task in pending:
+                    if not task.done():
+                        task.cancel()
+                raise
+        else:
+            self._state("enrich", 44.0, "No hay B-Roll ni datos para contrastar; se omite la búsqueda web.")
+        self._publish_plan(plan, "enrich", 44.0, "Investigación y recursos incorporados a la línea de tiempo.")
 
         # ---- 4. Tarjetas (solo las confirmadas) + fotos enmarcadas ----
         self._state("cards", 46.0, "Diseñando tarjetas informativas...")
@@ -163,11 +310,13 @@ class VideoPipeline:
                     framed = renderer.render_photo_frame(p, cue.concept, self.workdir / f"{cue.cue_id}_frame.png")
                     cue.frame_path = str(framed) if framed else None
 
-        await loop.run_in_executor(None, design)
+        await self._run_with_heartbeat(loop, design, "cards", 47.0,
+                                       "Diseñando tarjetas y preparando los apoyos visuales")
+        self._publish_plan(plan, "cards", 49.0, "Tarjetas listas para previsualizar y editar.")
 
         # ---- 5. Render (Smart Cut + overlays + subtítulos opcionales) ----
         mapper = TimelineMapper.from_plan_segments(plan.timeline, duration)
-        engine = VideoRenderEngine(fps=30)
+        engine = VideoRenderEngine(fps=30, cancel_event=self.cancel_event)
         final_master = settings.OUTPUTS_DIR / f"{self.task_id}_master.mp4"
 
         captions_provider = None
@@ -178,29 +327,39 @@ class VideoPipeline:
         def render_cb(msg: str, pct: float) -> None:
             self._state("subtitles" if "ubt" in msg or "ranscrib" in msg else "render", 50.0 + pct * 42.0, msg)
 
-        self._state("render", 50.0, "Renderizando con FFmpeg...")
-        render_info = await loop.run_in_executor(
-            None, lambda: engine.render(self.input_file, plan, mapper, self.workdir, final_master,
-                                        captions_provider, render_cb)
+        self._state("render", 50.0, "Preparando el corte y la composición final con FFmpeg.")
+        render_info = await self._run_with_heartbeat(
+            loop, lambda: engine.render(self.input_file, plan, mapper, self.workdir, final_master,
+                                        captions_provider, render_cb),
+            "render", 55.0, "FFmpeg está renderizando el master",
         )
 
         # ---- 6. Short vertical (sale del master: incluye tarjetas y subtítulos) ----
-        short_file: Optional[Path] = None
+        short_files: list[Path] = []
         if plan.highlights:
-            self._state("finalizing", 94.0, "Generando Short vertical 9:16...")
-            best = max(plan.highlights, key=lambda h: h.virality_score)
-            placed = mapper.map_first(best.start_sec, best.end_sec)
-            if placed:
-                best = best.model_copy(update={"start_sec": placed[0], "end_sec": placed[1]})
-                short_file = await loop.run_in_executor(
-                    None, lambda: engine.extract_vertical_short(final_master, best, settings.OUTPUTS_DIR)
-                )
+            for index, highlight in enumerate(plan.highlights, start=1):
+                self._state("finalizing", 94.0,
+                            f"Generando Short {index} de {len(plan.highlights)}: «{highlight.title}».")
+                placed = mapper.map_first(highlight.start_sec, highlight.end_sec)
+                if placed:
+                    mapped = highlight.model_copy(update={"start_sec": placed[0], "end_sec": placed[1]})
+                    short_file = await self._run_with_heartbeat(
+                        loop, lambda: engine.extract_vertical_short(final_master, mapped, settings.OUTPUTS_DIR),
+                        "finalizing", 95.0, f"FFmpeg está generando el Short {index} de {len(plan.highlights)}",
+                    )
+                    if short_file:
+                        short_files.append(short_file)
 
         cut = [s for s in plan.timeline if s.action == ActionType.CUT_SILENCE]
         placed_cards = {o["path"] for o in render_info["overlays"] if o["kind"] == "card"}
         return {
             "master_video_url": f"/media/{final_master.name}",
-            "short_video_url": f"/media/{short_file.name}" if short_file else None,
+            "short_video_url": f"/media/{short_files[0].name}" if short_files else None,
+            "shorts": [
+                {"title": clip.title, "hook": clip.hook, "score": clip.virality_score,
+                 "url": f"/media/{file.name}"}
+                for clip, file in zip(plan.highlights, short_files)
+            ],
             "silences_cut_count": len(cut),
             "brolls_count": sum(1 for o in render_info["overlays"] if o["kind"] != "card"),
             "time_saved_sec": round(sum(s.end_sec - s.start_sec for s in cut), 2),

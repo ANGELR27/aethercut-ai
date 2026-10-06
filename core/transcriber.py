@@ -1,10 +1,11 @@
 import re
-import subprocess
 import threading
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+from cancellation import CancellationRequested
 from core.models import CaptionItem
+from process_runner import run_process
 
 _MODEL = None
 _LOCK = threading.Lock()
@@ -32,20 +33,24 @@ class WhisperTranscriber:
         self.max_words = max_words
         self.max_dur = max_dur
 
-    def _extract_audio(self, video: Path) -> Path:
+    def _extract_audio(self, video: Path, cancel_event=None) -> Path:
         wav = video.with_suffix(".16k.wav")
-        subprocess.run(["ffmpeg", "-y", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)],
-                       capture_output=True, check=True)
+        run_process(["ffmpeg", "-y", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)],
+                    capture_output=True, check=True, cancel_event=cancel_event)
         return wav
 
-    def transcribe(self, video: Path, highlight_terms: Iterable[str] = ()) -> List[CaptionItem]:
-        wav = self._extract_audio(video)
+    def transcribe(self, video: Path, highlight_terms: Iterable[str] = (), cancel_event=None) -> List[CaptionItem]:
+        wav = self._extract_audio(video, cancel_event)
         try:
             segments, _info = _model().transcribe(
                 str(wav), language=self.language, word_timestamps=True,
                 vad_filter=True, beam_size=1, condition_on_previous_text=False,
             )
-            words = [w for seg in segments for w in (seg.words or []) if w.word.strip()]
+            words = []
+            for seg in segments:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise CancellationRequested()
+                words.extend(w for w in (seg.words or []) if w.word.strip())
         finally:
             wav.unlink(missing_ok=True)
 
