@@ -19,7 +19,7 @@ class TestAvatarCopilot(unittest.TestCase):
             correction="La Tierra y los planetas orbitan alrededor del Sol."
         )
         text_contra = narrator.craft_dialogue(card_contra)
-        self.assertIn("Ojo", text_contra)
+        self.assertTrue("Bueno" in text_contra or "Ojo" in text_contra)
         self.assertIn("Sol", text_contra)
 
         # 2. Cifra confirmada

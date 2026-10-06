@@ -113,6 +113,10 @@ def editor_snapshot(plan: VideoEditingPlan) -> Dict[str, Any]:
                 "id": c.card_id, "start": c.start_sec, "end": c.end_sec,
                 "duration": c.display_duration_sec, "headline": c.headline,
                 "kind": c.kind, "claim": c.claim, "verdict": c.verdict,
+                "stat_value": c.stat_value, "correction": c.correction,
+                "corrected_value": c.corrected_value,
+                "avatar_spoken_text": c.avatar_spoken_text,
+                "avatar_enabled": getattr(c, "avatar_enabled", False),
                 "note": c.note, "body": c.body, "position": c.screen_position,
                 "enabled": c.enabled, "sources": [s.model_dump() for s in c.sources],
             }

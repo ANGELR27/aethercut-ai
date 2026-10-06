@@ -338,7 +338,17 @@ class VideoPipeline:
                         raise CancellationRequested()
                     try:
                         if not card.avatar_spoken_text:
-                            card.avatar_spoken_text = narrator.craft_dialogue(card)
+                            # Extraer contexto inmediato de la transcripción de Whisper alrededor del argumento
+                            surrounding_context = ""
+                            if plan.captions:
+                                chunks = [
+                                    c.text for c in plan.captions
+                                    if (card.start_sec - 14.0) <= c.start_sec <= (card.start_sec + 4.0)
+                                ]
+                                surrounding_context = " ".join(chunks).strip()
+                            card.avatar_spoken_text = await narrator.craft_dialogue_with_ai(
+                                card, surrounding_context=surrounding_context, llm=llm
+                            )
                         
                         audio_file = self.workdir / f"{card.card_id}_voice.mp3"
                         _p, dur = await narrator.synthesize(card.avatar_spoken_text, audio_file)

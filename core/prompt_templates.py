@@ -31,7 +31,8 @@ REGLAS CRÍTICAS DE EDICIÓN:
    - ¿QUÉ TARJETAS CREAR?
      1. AFIRMACIONES Y LEYES: Si hace una afirmación engañosa o pregunta abierta, crea tarjeta para fact-checking. Si es un MITO o creencia popular, marca `is_myth=true`.
      2. TÉRMINOS DESCONOCIDOS / ABREVIACIONES / INSTITUCIONES: Si menciona un término raro, una sigla (ej. "FMI", "AFIP") o una institución, crea una tarjeta para EXPLICAR QUÉ SIGNIFICA (definición).
-     3. DATOS Y CIFRAS: Confirmar estadísticas.
+     3. DATOS Y CIFRAS: Confirmar estadísticas, porcentajes o muestreos.
+     4. CIERRE O DEBATE DE ARGUMENTOS: Si el orador plantea o intenta cerrar un argumento sobre un tema debatible, extrae el argumento (`claim`) para que el avatar intervenga y lo aclare con datos y muestreos contrastados.
    - 'kind': persona | organizacion | lugar | ley | concepto | hardware | definicion (=> tarjeta de ENTIDAD/DEFINICIÓN: explica qué/quién es)
              cifra | fecha | dato                                         (=> tarjeta de DATO: confirma o desmiente un hecho)
    - 'card_style': 'reference' (persona/lugar/organización/concepto), 'stat_highlight' (cifras, porcentajes, años),

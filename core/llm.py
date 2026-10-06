@@ -13,7 +13,7 @@ from cancellation import CancellationRequested
 # modelo que respondió y conservamos los demás para recuperarnos de una caída.
 # 3.8 agotó el tiempo incluso con una consulta mínima durante la comprobación
 # del 2026-10-05. Se excluye del camino crítico para no atascar cada proyecto.
-FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.6-flash"]
+FALLBACK_MODELS = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
 
 
 def safe_log(msg: str) -> None:

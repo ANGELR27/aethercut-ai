@@ -15,9 +15,8 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
     PIXABAY_API_KEY: str = os.getenv("PIXABAY_API_KEY", "")
-    # 3.6 responde de forma estable para estos proyectos. Los modelos más nuevos
-    # siguen disponibles como respaldo, pero pueden estar saturados con frecuencia.
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    # Modelo principal activo de Gemini para análisis y redacción
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
     # Parámetros de edición
     MAX_SILENCE_DURATION_SEC: float = float(os.getenv("MAX_SILENCE_DURATION_SEC", "1.5"))

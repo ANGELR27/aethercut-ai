@@ -152,7 +152,8 @@ document.addEventListener("DOMContentLoaded", () => {
             <label>Activo <input id="editEnabled" type="checkbox" ${item.enabled === false ? "" : "checked"}></label>
             <label>Inicio <input id="editStart" type="number" min="0" step="0.1" value="${Number(item.start || 0).toFixed(1)}"></label>
             <label>Fin <input id="editEnd" type="number" min="0" step="0.1" value="${Number(end || 0).toFixed(1)}"></label>
-            ${selectedEditorItem.type === "card" ? `<label>Posición <select id="editPosition">${positions.map((position) => `<option value="${position}" ${item.position === position ? "selected" : ""}>${position.replace("_", " ")}</option>`).join("")}</select></label>` : ""}`;
+            ${selectedEditorItem.type === "card" ? `<label>Posición <select id="editPosition">${positions.map((position) => `<option value="${position}" ${item.position === position ? "selected" : ""}>${position.replace("_", " ")}</option>`).join("")}</select></label>
+            ${item.avatar_spoken_text ? `<div style="margin:8px 0 4px 0; font-size:12px; color:#38bdf8; background:rgba(56,189,248,0.1); border-left:3px solid #38bdf8; padding:6px 10px; border-radius:6px; line-height:1.4;">⚡ <b>KAI Copilot (Voz Neural):</b><br>«${esc(item.avatar_spoken_text)}»</div>` : ""}` : ""}`;
         $("editEnabled").addEventListener("change", (event) => { item.enabled = event.target.checked; markEditorDirty(); renderTimeline(); });
         $("editStart").addEventListener("change", (event) => {
             item.start = Math.max(0, Number(event.target.value || 0));
@@ -658,7 +659,7 @@ document.addEventListener("DOMContentLoaded", () => {
         button.disabled = true;
         $("editorSaveState").textContent = "Guardando cambios de edición…";
         const payload = {
-            cards: (editorState.cards || []).map((card) => ({ id: card.id, enabled: card.enabled !== false, start: card.start, duration: card.duration, position: card.position || "auto" })),
+            cards: (editorState.cards || []).map((card) => ({ id: card.id, enabled: card.enabled !== false, start: card.start, duration: card.duration, position: card.position || "auto", avatar_spoken_text: card.avatar_spoken_text, avatar_enabled: card.avatar_enabled !== false })),
             brolls: (editorState.brolls || []).map((broll) => ({ id: broll.id, enabled: broll.enabled !== false, start: broll.start, end: broll.end })),
         };
         try {

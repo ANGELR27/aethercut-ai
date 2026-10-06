@@ -224,7 +224,16 @@ async def run_export_task(task_id: str) -> None:
                 if not getattr(card, "avatar_video_path", None) or not Path(card.avatar_video_path).exists():
                     try:
                         if not card.avatar_spoken_text:
-                            card.avatar_spoken_text = narrator.craft_dialogue(card)
+                            surrounding_context = ""
+                            if plan.captions:
+                                chunks = [
+                                    c.text for c in plan.captions
+                                    if (card.start_sec - 14.0) <= c.start_sec <= (card.start_sec + 4.0)
+                                ]
+                                surrounding_context = " ".join(chunks).strip()
+                            card.avatar_spoken_text = await narrator.craft_dialogue_with_ai(
+                                card, surrounding_context=surrounding_context
+                            )
                         audio_file = store.workdir / f"{card.card_id}_voice.mp3"
                         _p, dur = await narrator.synthesize(card.avatar_spoken_text, audio_file)
                         card.avatar_audio_path = str(audio_file)
@@ -445,6 +454,12 @@ async def update_project_timeline(task_id: str, payload: Dict[str, Any] = Body(.
             card.display_duration_sec = max(4.5, min(12.0, float(update["duration"])))
         if update.get("position") in {"auto", "upper_left", "upper_right", "lower_left", "lower_right"}:
             card.screen_position = update["position"]
+        if "avatar_spoken_text" in update and update["avatar_spoken_text"] != card.avatar_spoken_text:
+            card.avatar_spoken_text = str(update["avatar_spoken_text"]).strip()
+            card.avatar_audio_path = None
+            card.avatar_video_path = None
+        if "avatar_enabled" in update:
+            card.avatar_enabled = bool(update["avatar_enabled"])
 
     broll_updates = {str(item.get("id")): item for item in payload.get("brolls", []) if item.get("id")}
     for cue in plan.b_rolls:
