@@ -35,6 +35,19 @@ def probe_size(path: Path) -> Tuple[int, int]:
         return 1920, 1080
 
 
+def probe_duration(path: Path) -> float:
+    """Obtiene la duración exacta en segundos de un archivo de audio o video vía ffprobe."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "json", str(path)], capture_output=True, text=True, timeout=15,
+        ).stdout
+        d = json.loads(out).get("format", {}).get("duration")
+        return float(d) if d is not None else 0.0
+    except Exception:
+        return 0.0
+
+
 def _ff_path(p: Path) -> str:
     """Ruta escapada para filtros de FFmpeg (ass=...) en Windows."""
     return str(p.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
@@ -132,7 +145,14 @@ class VideoRenderEngine:
                     if getattr(card, "avatar_enabled", False) and getattr(card, "avatar_video_path", None):
                         av_p = Path(card.avatar_video_path)
                         if av_p.exists():
-                            av_dur = min(d, 6.0)
+                            aud_p = getattr(card, "avatar_audio_path", None)
+                            aud_dur = probe_duration(Path(aud_p)) if aud_p and Path(aud_p).exists() else 0.0
+                            vid_dur = probe_duration(av_p)
+                            # El avatar dura todo lo que dure su audio/video real sin recorte prematuro
+                            av_dur = max(aud_dur + 0.4, vid_dur, 3.5) if (aud_dur > 0 or vid_dur > 0) else min(d, 8.0)
+                            # La tarjeta informativa debe acompañar al avatar todo el tiempo
+                            if len(items) > 0 and items[-1]["kind"] == "card":
+                                items[-1]["dur"] = max(items[-1]["dur"], av_dur + 0.5)
                             av_pos = "lower_right" if position in ("auto", "upper_right") else "lower_left"
                             items.append({
                                 "kind": "avatar",
@@ -221,7 +241,10 @@ class VideoRenderEngine:
                 pos_x = f"W-w-{margin_x}+{slide}*{ease}" if right else f"{margin_x}-{slide}*{ease}"
                 pos_y = str(margin_y) if upper else f"H-h-{margin_y}"
                 if it.get("audio_path") and Path(it["audio_path"]).exists():
-                    audio_mix_inputs.append((it["audio_path"], s, d))
+                    aud_dur = probe_duration(Path(it["audio_path"]))
+                    # Ducking activo durante todo el audio de la voz más 0.4s de margen para salida suave
+                    duck_dur = max(aud_dur + 0.4, d)
+                    audio_mix_inputs.append((it["audio_path"], s, duck_dur))
             else:
                 cmd += ["-loop", "1", "-framerate", str(self.fps), "-t", f"{d:.2f}", "-i", it["path"]]
                 chains.append(
@@ -253,7 +276,7 @@ class VideoRenderEngine:
         # Audio Composition: mezcla de voz de avatar con ducking o censura
         if audio_mix_inputs:
             duck_expr = "+".join(f"between(t,{st:.3f},{st+dr:.3f})" for _, st, dr in audio_mix_inputs)
-            chains.append(f"[0:a]volume='if({duck_expr},0.32,1.0)':eval=frame[a_base_ducked]")
+            chains.append(f"[0:a]volume='if({duck_expr},0.22,1.0)':eval=frame[a_base_ducked]")
             mix_tags = ["[a_base_ducked]"]
             for k, (a_path, st, dr) in enumerate(audio_mix_inputs):
                 cmd += ["-i", str(a_path)]

@@ -39,6 +39,7 @@ class AvatarRenderer:
         self.size = badge_size
 
         self.idle_path = self.avatar_dir / "idle.jpg"
+        self.talk_half_path = self.avatar_dir / "talking_half.jpg"
         self.talk_path = self.avatar_dir / "talking.jpg"
         self.point_path = self.avatar_dir / "pointing.jpg"
         self.blink_path = self.avatar_dir / "blink.jpg"
@@ -47,9 +48,10 @@ class AvatarRenderer:
 
         self.idle_img = self._load_img(self.idle_path)
         self.talk_img = self._load_img(self.talk_path)
-        self.point_img = self._load_img(self.point_path)
+        self.talk_half_img = self._load_img(self.talk_half_path, fallback=self.talk_img)
         self.blink_img = self._load_img(self.blink_path, fallback=self.idle_img)
-        self.think_img = self._load_img(self.think_path, fallback=self.point_img)
+        self.point_img = self._load_img(self.point_path, fallback=self.idle_img)
+        self.think_img = self._load_img(self.think_path, fallback=self.idle_img)
         self.happy_img = self._load_img(self.happy_path, fallback=self.talk_img)
 
     def _load_img(self, path: Path, fallback: Optional[Image.Image] = None) -> Image.Image:
@@ -92,10 +94,14 @@ class AvatarRenderer:
             max_rms = max(rms_list) + 1e-5
             # Normalizar entre 0.0 y 1.0 con umbral de sensibilidad
             norm = [min(1.0, r / (max_rms * 0.72)) for r in rms_list]
-            # Ajustar longitud exacta a total_frames
-            if len(norm) < total_frames:
-                norm.extend([0.0] * (total_frames - len(norm)))
-            return norm[:total_frames]
+            # Suavizado temporal de 2 fotogramas para transiciones fluidas de habla
+            smoothed: List[float] = []
+            for idx, val in enumerate(norm):
+                prev_val = smoothed[-1] if smoothed else val
+                smoothed.append(0.65 * val + 0.35 * prev_val)
+            if len(smoothed) < total_frames:
+                smoothed.extend([0.0] * (total_frames - len(smoothed)))
+            return smoothed[:total_frames]
         except Exception as exc:
             print(f"[AvatarRenderer] No se pudo extraer envolvente de audio: {exc}")
             return []
@@ -109,7 +115,7 @@ class AvatarRenderer:
         audio_path: Optional[Path] = None,
         fps: int = 24
     ) -> Optional[Path]:
-        """Crea un clip WebM transparente con gestos dinámicos y Lip-Sync realista."""
+        """Crea un clip WebM transparente con avatar mirando fijo de frente y lip-sync sutil."""
         dur = max(1.5, float(duration_sec))
         out_path.parent.mkdir(parents=True, exist_ok=True)
         temp_dir = out_path.parent / f"_avatar_tmp_{out_path.stem}"
@@ -117,73 +123,65 @@ class AvatarRenderer:
 
         size = self.size
         total_frames = max(1, int(dur * fps))
-        intro_frames = int(min(0.45, dur * 0.15) * fps)
-        outro_frames = int(min(0.5, dur * 0.15) * fps)
 
         # 1. Extraer energía real del audio para sincronía labial
         envelope = self._extract_audio_envelope(audio_path, fps, total_frames)
 
-        # Máscara circular
+        # Máscara circular con antialiasing
         mask = Image.new("L", (size, size), 0)
         ImageDraw.Draw(mask).ellipse((6, 6, size - 6, size - 6), fill=255)
 
-        # Pre-redimensionar imágenes base
+        # Pre-redimensionar imágenes base mirando de frente
         img_idle = self.idle_img.resize((size, size), Image.Resampling.LANCZOS)
+        img_half = self.talk_half_img.resize((size, size), Image.Resampling.LANCZOS)
         img_talk = self.talk_img.resize((size, size), Image.Resampling.LANCZOS)
-        img_point = self.point_img.resize((size, size), Image.Resampling.LANCZOS)
         img_blink = self.blink_img.resize((size, size), Image.Resampling.LANCZOS)
-        img_think = self.think_img.resize((size, size), Image.Resampling.LANCZOS)
-        img_happy = self.happy_img.resize((size, size), Image.Resampling.LANCZOS)
 
         f_tag = _get_font(["segoeuib.ttf", "arialbd.ttf"], 13)
 
         try:
             for i in range(total_frames):
-                # Determinar parpadeo natural (3 fotogramas cada ~2.8 segundos)
-                blink_cycle = int(fps * 2.8)
-                is_blinking = (i % blink_cycle) in (20, 21, 22)
+                # Parpadeo natural cada ~3 segundos (3 fotogramas de duración)
+                blink_interval = int(fps * 3.2)
+                is_blinking = (i % blink_interval) in (18, 19, 20)
 
-                # Selección del fotograma según la fase y la energía del habla
-                if i < intro_frames:
-                    # Entrada expresiva: comienza analizando y apunta con la mano hacia la tarjeta
-                    current_img = img_think if i < (intro_frames // 2) else img_point
-                    energy = 0.4
-                elif i >= total_frames - outro_frames:
-                    current_img = img_idle
-                    energy = 0.0
-                elif is_blinking:
+                # Selección precisa de articulación bucal (solo menea la boca, postura fija de frente)
+                if is_blinking:
                     current_img = img_blink
-                    energy = envelope[i] if envelope else 0.2
+                    energy = envelope[i] if envelope else 0.15
                 elif envelope:
                     energy = envelope[i]
-                    if energy > 0.58:
-                        current_img = img_happy   # Sonrisa amplia y énfasis en picos vocales
-                    elif energy > 0.25:
-                        current_img = img_talk    # Articulación normal de voz
-                    elif energy > 0.10:
-                        current_img = img_point   # Gesto hacia la información
+                    if energy > 0.42:
+                        current_img = img_talk       # Boca abierta para fonemas con volumen
+                    elif energy > 0.12:
+                        current_img = img_half       # Boca semi-abierta (articulación sutil)
                     else:
-                        current_img = img_idle    # Pausas naturales y escucha atenta
+                        current_img = img_idle       # Boca cerrada (pausa / escucha)
                 else:
-                    cycle = (i // 4) % 4
-                    current_img = img_talk if cycle == 0 else (img_happy if cycle == 1 else (img_point if cycle == 2 else img_idle))
-                    energy = 0.4
+                    # Si no hay pista de audio, cadencia suave de habla sin aspavientos
+                    cadence = (i // 3) % 4
+                    if cadence == 0:
+                        current_img = img_idle
+                    elif cadence in (1, 3):
+                        current_img = img_half
+                    else:
+                        current_img = img_talk
+                    energy = 0.35
 
-                # Micro-movimiento humano de respiración y gesticulación (sway/bobbing)
-                sway_y = int(math.sin(i / (fps * 0.45)) * 3.5)
-                sway_x = int(math.cos(i / (fps * 0.8)) * 1.5)
+                # Postura fija mirando a la cámara, con respiración subpíxel imperceptible (1px máx)
+                subtle_breath_y = int(math.sin(i / (fps * 1.2)) * 1.0)
 
                 canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-                # Pegar con desplazamiento orgánico suave dentro de la máscara
-                canvas.paste(current_img, (sway_x, sway_y), mask)
+                # Pegar avatar fijo y centrado
+                canvas.paste(current_img, (0, subtle_breath_y), mask)
                 d = ImageDraw.Draw(canvas)
 
-                # Anillo de pulso neón reactivo a la energía de la voz
-                alpha_cyan = int(170 + 80 * energy)
+                # Borde elegante y sutil de vidrio / HUD
+                alpha_cyan = int(140 + 75 * energy)
                 d.ellipse((4, 4, size - 4, size - 4), outline=(56, 189, 248, alpha_cyan), width=3)
-                d.ellipse((8, 8, size - 8, size - 8), outline=(99, 102, 241, int(100 + 60 * energy)), width=1)
+                d.ellipse((8, 8, size - 8, size - 8), outline=(99, 102, 241, int(80 + 50 * energy)), width=1)
 
-                # Insignia KAI COPILOT con rayo vectorial nítido
+                # Insignia KAI COPILOT en la parte inferior
                 tag_w = 126
                 tag_h = 24
                 tx = (size - tag_w) // 2

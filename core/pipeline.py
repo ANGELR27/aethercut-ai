@@ -355,10 +355,12 @@ class VideoPipeline:
                         card.avatar_audio_path = str(audio_file)
 
                         video_file = self.workdir / f"{card.card_id}_avatar.webm"
-                        rendered = avatar_rnd.render_reaction_clip(dur + 0.4, video_file, audio_path=audio_file)
+                        rendered = avatar_rnd.render_reaction_clip(dur + 0.5, video_file, audio_path=audio_file)
                         if rendered:
                             card.avatar_video_path = str(rendered)
                             card.avatar_enabled = True
+                            # Sincronizar duración de la tarjeta para que permanezca visible mientras habla
+                            card.display_duration_sec = max(card.display_duration_sec, dur + 1.0)
                             safe_log(f"[Pipeline] Avatar reactivo listo para {card.card_id} ({dur:.1f}s): {card.avatar_spoken_text}")
                     except Exception as exc:
                         safe_log(f"[Pipeline] No se pudo generar avatar para {card.card_id}: {exc}")

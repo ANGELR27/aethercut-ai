@@ -1,13 +1,15 @@
 """Módulo de renderizado de tarjetas gráficas (Info Cards) de alto impacto visual.
 
-Inspirado en el diseño limpio y moderno de tarjetas UI con transición suave (gradient fade)
-entre la imagen y los textos, micro-badges tipo píldora flotante con indicadores vectoriales,
-y tipografía bold de máximo contraste y legibilidad broadcast sobre cualquier video.
+Diseño profesional oscuro, sólido, limpio y de máximo contraste:
+- Contenedor oscuro sólido con sutil glassmorfismo y borde de 1px.
+- Una sola etiqueta/badge clara y legible (sin saturación de píldoras).
+- Tipografía grande y nítida en blanco puro y slate brillante para máxima legibilidad.
+- Para tarjetas con imagen: foto limpia con sutil difuminado en el borde inferior.
+- Para tarjetas de solo info: tarjeta compacta, sólida y elegante sin espacios vacíos.
 """
 
 from __future__ import annotations
 
-import math
 import re
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -19,18 +21,18 @@ from core.models import InfoCard
 FONT_DIR = Path("C:/Windows/Fonts")
 
 # Paleta para badges e indicadores
-PALETTE = {
-    "green": (52, 211, 153, 255),    # Esmeralda neón / Verificado
-    "cyan": (56, 189, 248, 255),     # Cyan eléctrico
-    "amber": (251, 191, 36, 255),    # Ámbar / Alerta
-    "red": (248, 113, 113, 255),     # Rojo suave / Corrección
-    "purple": (168, 85, 247, 255),   # Violeta / Concepto
-    "slate": (148, 163, 184, 255),   # Pizarra neutra
+BADGE_PALETTE = {
+    "green": ((16, 185, 129, 45), (52, 211, 153, 220), (52, 211, 153, 255)),
+    "red": ((239, 68, 68, 45), (248, 113, 113, 220), (248, 113, 113, 255)),
+    "amber": ((245, 158, 11, 45), (251, 191, 36, 220), (251, 191, 36, 255)),
+    "cyan": ((14, 165, 233, 45), (56, 189, 248, 220), (56, 189, 248, 255)),
+    "purple": ((147, 51, 234, 45), (192, 132, 252, 220), (192, 132, 252, 255)),
+    "slate": ((71, 85, 105, 45), (148, 163, 184, 220), (226, 232, 240, 255)),
 }
 
 KIND_LABELS = {
-    "ley": ("LEY / NORMATIVA", "cyan"),
-    "normativa": ("LEY / NORMATIVA", "cyan"),
+    "ley": ("LEY CONFIRMADA", "cyan"),
+    "normativa": ("NORMATIVA OFICIAL", "cyan"),
     "articulo": ("ARTÍCULO LEGAL", "cyan"),
     "cifra": ("ESTADÍSTICA", "amber"),
     "estadistica": ("ESTADÍSTICA", "amber"),
@@ -41,11 +43,9 @@ KIND_LABELS = {
     "organización": ("INSTITUCIÓN", "cyan"),
     "hardware": ("ESPECIFICACIÓN", "slate"),
     "concepto": ("CONCEPTO CLAVE", "purple"),
-    "dato": ("DATO CLAVE", "cyan"),
+    "dato": ("DATO VERIFICADO", "green"),
     "confirmacion": ("CONFIRMADO", "green"),
     "confirmación": ("CONFIRMADO", "green"),
-    "tip": ("TIP PRO", "amber"),
-    "advertencia": ("ALERTA", "red"),
 }
 
 
@@ -62,19 +62,12 @@ def _font(names: List[str], size: int) -> ImageFont.FreeTypeFont:
 
 class InfoCardRenderer:
     """
-    Renderizador de tarjetas gráficas modernas y limpias:
-    - Cabecera con imagen (o aura mesh) con transición suave (gradient fade) hacia el fondo blanco.
-    - Badges flotantes tipo píldora oscura con indicadores luminosos (verde, cyan, ámbar, violeta).
-    - Titular bold limpio y de gran contraste (charcoal / dark slate).
-    - Párrafo explicativo con interlineado generoso.
-    - Pie de fuentes minimalista sin botones de acción.
-    - Sombra ambiental suave y borde sutil de 1px para destacar sobre cualquier escena de video.
+    Renderizador de tarjetas broadcast limpias, oscuras y de máximo contraste.
     """
 
     def __init__(self, frame_w: int, frame_h: int):
         portrait = frame_h > frame_w
-        # Escala adecuada para que sea muy legible sin tapar excesivamente la pantalla
-        self.card_w = int(frame_w * (0.84 if portrait else 0.35))
+        self.card_w = int(frame_w * (0.84 if portrait else 0.32))
         self.card_w = max(self.card_w, 420)
         self.s = self.card_w / 640.0
 
@@ -109,48 +102,41 @@ class InfoCardRenderer:
         top = (img.height - h) // 3
         return img.crop((left, top, left + w, top + h))
 
-    def _build_badges(self, card: InfoCard) -> List[Tuple[str, str]]:
-        badges: List[Tuple[str, str]] = []
-
+    def _get_single_badge(self, card: InfoCard) -> Tuple[str, str]:
         verdict = (card.verdict or "").lower()
         if verdict == "contradicted":
-            badges.append(("CORRECCIÓN", "red"))
-        elif verdict == "supported":
-            badges.append(("VERIFICADO", "green"))
-        elif verdict == "insufficient":
-            badges.append(("EN REVISIÓN", "amber"))
+            return ("CORRECCIÓN OFICIAL", "red")
+        if verdict == "insufficient":
+            return ("EN REVISIÓN", "amber")
+
+        if card.stat_value:
+            return (f"DATO CLAVE: {card.stat_value[:18]}", "amber")
 
         kind = (card.kind or "dato").lower()
         if kind in KIND_LABELS:
-            badges.append(KIND_LABELS[kind])
+            return KIND_LABELS[kind]
 
-        if card.stat_value:
-            badges.append((card.stat_value[:18], "amber"))
-        elif card.sources and card.sources[0].domain:
-            badges.append((card.sources[0].domain[:20], "slate"))
+        return ("VERIFICADO", "green")
 
-        # Limitar a máximo 4 badges para no saturar la cabecera
-        return badges[:4]
-
-    def _render_modern_card(
+    def _render_solid_dark_card(
         self,
         headline: str,
         body: str,
-        badges: List[Tuple[str, str]],
+        badge_text: str,
+        badge_color: str = "green",
         image_path: Optional[str] = None,
         source_domain: str = "Registro oficial",
-        highlight_color: Optional[Tuple[int, int, int]] = None,
         out_path: Optional[Path] = None,
     ) -> Path:
-        """Renderiza la tarjeta con el diseño exacto: imagen + gradient fade + píldoras + textos."""
+        """Renderiza una tarjeta profesional sólida, oscura y limpia."""
         w = self.card_w
-        pad_x = self._px(30)
+        pad_x = self._px(28)
         inner_w = w - 2 * pad_x
-        radius = self._px(28)
+        radius = self._px(22)
 
         f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(13))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(30))
-        f_body = _font(["segoeui.ttf", "arial.ttf"], self._px(19))
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(28))
+        f_body = _font(["segoeuib.ttf", "segoeui.ttf", "arialbd.ttf"], self._px(20))
         f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(13))
 
         probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
@@ -159,147 +145,132 @@ class InfoCardRenderer:
 
         title_lh = f_title.size + self._px(6)
         body_lh = f_body.size + self._px(8)
+        badge_h = self._px(28)
 
         has_photo = bool(image_path and Path(image_path).exists())
-        photo_h = self._px(250) if has_photo else self._px(170)
+        photo_h = self._px(160) if has_photo else 0
 
-        text_section_h = (
-            (len(title_lines) * title_lh)
-            + self._px(10)
-            + (len(body_lines) * body_lh)
-            + self._px(20)
-            + f_src.size
-            + self._px(34)
-        )
-        total_h = photo_h + text_section_h
+        if has_photo:
+            h = (
+                photo_h
+                + self._px(16)
+                + badge_h
+                + self._px(12)
+                + (len(title_lines) * title_lh)
+                + self._px(10)
+                + (len(body_lines) * body_lh)
+                + self._px(16)
+                + f_src.size
+                + self._px(24)
+            )
+        else:
+            h = (
+                self._px(24)
+                + badge_h
+                + self._px(12)
+                + (len(title_lines) * title_lh)
+                + self._px(10)
+                + (len(body_lines) * body_lh)
+                + self._px(16)
+                + f_src.size
+                + self._px(24)
+            )
 
         ss = 2
-        W, H = w * ss, total_h * ss
-        card = Image.new("RGBA", (W, H), (255, 255, 255, 255))
+        W, H = w * ss, h * ss
+        # Fondo oscuro profesional sólido de máxima legibilidad
+        card = Image.new("RGBA", (W, H), (14, 19, 32, 248))
 
-        # 1. Cabecera superior: Foto o Mesh gradient
         if has_photo:
             try:
                 raw_photo = Image.open(image_path).convert("RGB")
                 photo = self._cover(raw_photo, W, photo_h * ss).convert("RGBA")
+
+                # Difuminado muy sutil solo en el último 22% del borde inferior
+                fade_start = int(photo_h * ss * 0.78)
+                fade_len = max(1, (photo_h * ss) - fade_start)
+                mask = Image.new("L", (W, photo_h * ss), 255)
+                m_data = []
+                for py in range(photo_h * ss):
+                    if py < fade_start:
+                        a = 255
+                    else:
+                        t = (py - fade_start) / fade_len
+                        a = int(255 * (1.0 - t))
+                    m_data.extend([a] * W)
+                mask.putdata(m_data)
+                card.paste(photo, (0, 0), mask)
             except Exception as exc:
-                print(f"[CardRenderer] Error cargando imagen {image_path}: {exc}")
+                print(f"[CardRenderer] Error cargando foto {image_path}: {exc}")
                 has_photo = False
 
-        if not has_photo:
-            photo = Image.new("RGBA", (W, photo_h * ss), (15, 23, 42, 255))
-            p_draw = ImageDraw.Draw(photo)
-            for row in range(photo_h * ss):
-                ratio = row / (photo_h * ss)
-                r = int(18 + 24 * ratio)
-                g = int(28 + 36 * ratio)
-                b = int(48 + 68 * ratio)
-                p_draw.line((0, row, W, row), fill=(r, g, b, 255))
-
-        # 2. Máscara de transición suave (Smoothstep gradient fade) hacia el blanco
-        mask = Image.new("L", (W, photo_h * ss), 255)
-        fade_start = int(photo_h * ss * 0.38)
-        fade_len = max(1, (photo_h * ss) - fade_start)
-        m_data = []
-        for y in range(photo_h * ss):
-            if y < fade_start:
-                a = 255
-            else:
-                t = (y - fade_start) / fade_len
-                s = 3 * (t ** 2) - 2 * (t ** 3)
-                a = int(255 * (1.0 - s))
-            m_data.extend([a] * W)
-        mask.putdata(m_data)
-
-        card.paste(photo, (0, 0), mask)
-
-        # 3. Badges flotantes estilo píldora oscura con punto luminoso
         d = ImageDraw.Draw(card)
-        bx = pad_x * ss
-        by = self._px(18) * ss
-        badge_h = self._px(28) * ss
-        dot_r = self._px(4) * ss
+        y = (photo_h + self._px(16)) * ss if has_photo else self._px(24) * ss
 
-        for b_text, b_color in badges:
-            text_w = int(d.textlength(b_text, font=f_badge))
-            bw = text_w + self._px(36) * ss
-            if bx + bw > (W - pad_x * ss):
-                bx = pad_x * ss
-                by += badge_h + self._px(8) * ss
-
-            # Píldora con fondo de cristal oscuro y borde translúcido
-            d.rounded_rectangle(
-                (bx, by, bx + bw, by + badge_h),
-                radius=badge_h // 2,
-                fill=(15, 23, 42, 210),
-                outline=(255, 255, 255, 55),
-                width=ss,
-            )
-
-            # Punto vector luminoso
-            accent_col = PALETTE.get(b_color, PALETTE["cyan"])
-            dot_cx = bx + self._px(14) * ss
-            dot_cy = by + badge_h // 2
-            d.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=accent_col)
-
-            # Texto de la píldora
-            d.text((bx + self._px(25) * ss, dot_cy), b_text, font=f_badge, fill=(255, 255, 255, 255), anchor="lm")
-            bx += bw + self._px(8) * ss
-
-        # 4. Sección de texto (Titular y Cuerpo)
-        ty = (photo_h + self._px(12)) * ss
-        title_color = highlight_color or (15, 23, 42, 255)
-        for line in title_lines:
-            d.text((pad_x * ss, ty), line, font=f_title, fill=title_color)
-            ty += title_lh * ss
-        ty += self._px(8) * ss
-
-        for line in body_lines:
-            d.text((pad_x * ss, ty), line, font=f_body, fill=(51, 65, 85, 255))
-            ty += body_lh * ss
-        ty += self._px(16) * ss
-
-        # 5. Pie de metadatos (limpio, sin botones)
-        foot_text = f"Fuente oficial • {source_domain}"
-        dot_fy = ty + (f_src.size // 2) * ss
-        d.ellipse(
-            (pad_x * ss, dot_fy - self._px(3) * ss, pad_x * ss + self._px(6) * ss, dot_fy + self._px(3) * ss),
-            fill=(100, 116, 139, 255),
+        # Badge único y limpio con punto luminoso
+        bg_col, border_col, text_col = BADGE_PALETTE.get(badge_color, BADGE_PALETTE["green"])
+        text_w = int(d.textlength(badge_text, font=f_badge))
+        bw = text_w + self._px(34) * ss
+        d.rounded_rectangle(
+            (pad_x * ss, y, pad_x * ss + bw, y + badge_h * ss),
+            radius=(badge_h * ss) // 2,
+            fill=bg_col,
+            outline=border_col,
+            width=ss,
         )
-        d.text((pad_x * ss + self._px(14) * ss, ty), foot_text, font=f_src, fill=(100, 116, 139, 255), anchor="lt")
+        dot_cx = pad_x * ss + self._px(12) * ss
+        dot_cy = y + (badge_h * ss) // 2
+        dot_r = self._px(4) * ss
+        d.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=text_col)
+        d.text((pad_x * ss + self._px(24) * ss, dot_cy), badge_text, font=f_badge, fill=text_col, anchor="lm")
+        y += (badge_h + self._px(14)) * ss
 
-        # 6. Redimensionar para antialiasing de precisión
-        card = card.resize((w, total_h), Image.LANCZOS)
+        # Titular en blanco puro bold
+        for line in title_lines:
+            d.text((pad_x * ss, y), line, font=f_title, fill=(255, 255, 255, 255))
+            y += title_lh * ss
+        y += self._px(8) * ss
 
-        # 7. Máscara de esquinas redondeadas
-        card_mask = Image.new("L", (w, total_h), 0)
-        ImageDraw.Draw(card_mask).rounded_rectangle((0, 0, w - 1, total_h - 1), radius=radius, fill=255)
+        # Cuerpo en slate brillante ultra-legible
+        for line in body_lines:
+            d.text((pad_x * ss, y), line, font=f_body, fill=(241, 245, 249, 255))
+            y += body_lh * ss
+        y += self._px(14) * ss
 
-        # 8. Sombra suave para despegar la tarjeta del video
-        margin = self._px(28)
-        shadow = Image.new("RGBA", (w + 2 * margin, total_h + 2 * margin), (0, 0, 0, 0))
+        # Pie de fuente limpio
+        d.text((pad_x * ss, y), f"Fuente: {source_domain}", font=f_src, fill=(148, 163, 184, 255))
+
+        # Redimensionado para máxima nitidez
+        card = card.resize((w, h), Image.LANCZOS)
+
+        # Máscara de esquinas redondeadas
+        c_mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(c_mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
+
+        # Sombra suave que despega la tarjeta del video
+        margin = self._px(18)
+        shadow = Image.new("RGBA", (w + 2 * margin, h + 2 * margin), (0, 0, 0, 0))
         s_draw = ImageDraw.Draw(shadow)
         s_draw.rounded_rectangle(
-            (margin, margin + self._px(6), margin + w, margin + total_h + self._px(6)),
+            (margin, margin + self._px(4), margin + w, margin + h + self._px(4)),
             radius=radius,
-            fill=(0, 0, 0, 75),
+            fill=(0, 0, 0, 115),
         )
-        shadow = shadow.filter(ImageFilter.GaussianBlur(self._px(14)))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(self._px(10)))
 
-        final_img = Image.new("RGBA", (w + 2 * margin, total_h + 2 * margin), (0, 0, 0, 0))
+        final_img = Image.new("RGBA", (w + 2 * margin, h + 2 * margin), (0, 0, 0, 0))
         final_img.paste(shadow, (0, 0), shadow)
-        final_img.paste(card, (margin, margin), card_mask)
+        final_img.paste(card, (margin, margin), c_mask)
 
-        # 9. Borde sutil de 1px para nitidez máxima
-        border_layer = Image.new("RGBA", (w + 2 * margin, total_h + 2 * margin), (0, 0, 0, 0))
-        b_draw = ImageDraw.Draw(border_layer)
-        b_draw.rounded_rectangle(
-            (margin, margin, margin + w - 1, margin + total_h - 1),
+        # Borde sutil de cristal de 1px
+        b_layer = Image.new("RGBA", (w + 2 * margin, h + 2 * margin), (0, 0, 0, 0))
+        ImageDraw.Draw(b_layer).rounded_rectangle(
+            (margin, margin, margin + w - 1, margin + h - 1),
             radius=radius,
-            outline=(226, 232, 240, 220),
+            outline=(255, 255, 255, 45),
             width=1,
         )
-        final_img = Image.alpha_composite(final_img, border_layer)
+        final_img = Image.alpha_composite(final_img, b_layer)
 
         target_out = out_path or Path("card_output.png")
         target_out.parent.mkdir(parents=True, exist_ok=True)
@@ -307,74 +278,76 @@ class InfoCardRenderer:
         return target_out
 
     def render(self, card: InfoCard, out_path: Path) -> str:
-        """Elige los contenidos y genera la tarjeta con el diseño moderno unificado."""
+        """Renderiza la tarjeta con el diseño profesional oscuro."""
         domain = card.sources[0].domain if card.sources else "Registro oficial"
-        badges = self._build_badges(card)
+        badge_text, badge_color = self._get_single_badge(card)
 
-        # 1. Contradicción / Dato Errado
+        # 1. Contradicción / Corrección
         if card.verdict == "contradicted":
             if getattr(card, "is_myth", False):
                 return self._render_myth_cards(card, out_path)
             headline = card.headline
-            body = (
-                f"Afirmación en video: «{card.claim}»\n\n"
-                f"Dato real verificado: {card.correction or card.corrected_value or card.note}"
-            )
-            return str(self._render_modern_card(
+            correction_text = card.correction or card.corrected_value or card.note
+            body = f"Afirmación: «{card.claim}»\n\nDato real confirmado: {correction_text}"
+            return str(self._render_solid_dark_card(
                 headline=headline,
                 body=body,
-                badges=[("CORRECCIÓN", "red"), ("DATO OFICIAL", "green")] + badges[1:],
+                badge_text="CORRECCIÓN OFICIAL",
+                badge_color="red",
                 image_path=card.image_path,
                 source_domain=card.correction_source or domain,
                 out_path=out_path,
             ))
 
-        # 2. Información insuficiente / Alerta
+        # 2. Insuficiente evidencia
         if card.verdict == "insufficient":
             headline = card.headline
             body = card.note or "No se encontraron registros ni evidencia oficial concluyente que respalden esta afirmación."
-            return str(self._render_modern_card(
+            return str(self._render_solid_dark_card(
                 headline=headline,
                 body=body,
-                badges=[("EN REVISIÓN", "amber"), ("SIN REGISTRO", "slate")] + badges[1:],
+                badge_text="EN REVISIÓN",
+                badge_color="amber",
                 image_path=card.image_path,
                 source_domain=domain,
                 out_path=out_path,
             ))
 
-        # 3. Métrica destacada / Estadística
-        style = (getattr(card, "card_style", None) or "reference").lower()
-        if (style == "stat_highlight" or card.kind == "cifra") and card.stat_value:
+        # 3. Estadística / Cifra
+        if card.stat_value:
             headline = card.headline
             body = f"Cifra confirmada: {card.stat_value}. {card.body or card.claim}"
-            return str(self._render_modern_card(
+            return str(self._render_solid_dark_card(
                 headline=headline,
                 body=body,
-                badges=[("ESTADÍSTICA", "amber"), (card.stat_value[:18], "cyan")] + badges[1:],
+                badge_text=f"DATO CLAVE: {card.stat_value[:18]}",
+                badge_color="amber",
                 image_path=card.image_path,
                 source_domain=domain,
                 out_path=out_path,
             ))
 
-        # 4. Referencia estándar (con foto o sin foto)
+        # 4. Referencia o Apoyo visual estándar
         headline = card.headline
         body = card.body or card.claim
-        return str(self._render_modern_card(
+        return str(self._render_solid_dark_card(
             headline=headline,
             body=body,
-            badges=badges,
+            badge_text=badge_text,
+            badge_color=badge_color,
             image_path=card.image_path,
             source_domain=domain,
             out_path=out_path,
         ))
 
     def render_photo_frame(self, image_path: str, label: str, out_path: Path) -> Optional[Path]:
-        """Foto real enmarcada con el nuevo diseño flotante y badge del concepto."""
+        """Foto real enmarcada en el formato sólido oscuro con badge de apoyo visual."""
         try:
-            return self._render_modern_card(
+            return self._render_solid_dark_card(
                 headline=label.strip(),
                 body="Apoyo visual contextual integrado para ilustrar el argumento expuesto.",
-                badges=[("APOYO VISUAL", "cyan"), ("FOTO REAL", "green")],
+                badge_text="APOYO VISUAL",
+                badge_color="green",
                 image_path=image_path,
                 source_domain="Registro visual",
                 out_path=out_path,
@@ -384,27 +357,26 @@ class InfoCardRenderer:
             return None
 
     def _render_myth_cards(self, card: InfoCard, out_path: Path) -> str:
-        """Renderiza dos tarjetas: la primera 'MITO' y la segunda 'REALIDAD'."""
+        """Renderiza dos tarjetas: MITO y REALIDAD."""
         path_mito = out_path.with_name(f"{out_path.stem}_mito.png")
         path_real = out_path.with_name(f"{out_path.stem}_real.png")
-
         domain = card.correction_source or (card.sources[0].domain if card.sources else "Registro oficial")
 
-        # Tarjeta 1: MITO
-        self._render_modern_card(
+        self._render_solid_dark_card(
             headline="Mito Popular",
             body=f"«{card.claim}»",
-            badges=[("MITO", "red"), ("EN REVISIÓN", "amber")],
+            badge_text="MITO POPULAR",
+            badge_color="amber",
             image_path=card.image_path,
             source_domain=domain,
             out_path=path_mito,
         )
 
-        # Tarjeta 2: REALIDAD
-        self._render_modern_card(
+        self._render_solid_dark_card(
             headline=card.headline or "Realidad Verificada",
             body=card.correction or card.corrected_value or card.body,
-            badges=[("REALIDAD", "green"), ("DATO OFICIAL", "cyan")],
+            badge_text="REALIDAD CONFIRMADA",
+            badge_color="green",
             image_path=card.image_path,
             source_domain=domain,
             out_path=path_real,
