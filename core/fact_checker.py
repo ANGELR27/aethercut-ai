@@ -35,11 +35,11 @@ INSTRUCCIONES SEGÚN EL TIPO:
   * "insufficient": no se puede confirmar ni desmentir.
 
 REGLAS:
-- Prohibido usar conocimiento propio. Ante la duda: "insufficient".
-- "summary": máximo 160 caracteres, en español. Vacío si el veredicto no es "supported".
-- "stat": si el dato confirmado tiene una cifra protagonista (ej. "26.743", "40%", "1994"), ponla aquí; si no, "".
-- "correction": SI el veredicto es "contradicted", escribe aquí la frase de corrección (ej. "La inflación no fue del 20%, sino del 8.4%."). Si no es contradicted, déjalo vacío.
-- "corrected_value": SI el veredicto es "contradicted", escribe aquí el DATO EXACTO CORREGIDO (ej. "8.4%", "Ley 27.551", "1994"). Si no, "".
+- Prohibido inventar datos fuera de la evidencia. Ante la duda: "insufficient".
+- "summary": máximo 180 caracteres en español. Debe ser ENRIQUECEDOR: destaca cifras concretas, organismos de referencia (ej. NASA, OIT, tribunales, ministerios, leyes específicas) o hechos contrastados que aporten alto valor informativo. Vacío si el veredicto no es "supported".
+- "stat": si el dato confirmado tiene una cifra o porcentaje protagonista (ej. "26.743", "40%", "1994", "541 días"), extráela exactamente aquí; si no, "".
+- "correction": SI el veredicto es "contradicted", escribe aquí la frase de corrección con datos contundentes y la entidad/norma que lo desmiente (ej. "La pena real fijada por ley es de 541 días a 3 años, no 15 años."). Si no es contradicted, déjalo vacío.
+- "corrected_value": SI el veredicto es "contradicted", escribe aquí el DATO EXACTO CORREGIDO (ej. "541 días a 3 años", "8.4%", "Ley 21.208"). Si no, "".
 - "source_indexes": números de los fragmentos usados.
 - "reason": una frase corta que explique el veredicto.
 

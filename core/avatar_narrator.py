@@ -32,33 +32,54 @@ class AvatarNarrator:
 
     @staticmethod
     def craft_dialogue(card: InfoCard) -> str:
-        """Redacta una intervención conversacional, humana y empática de respaldo."""
+        """Redacta una intervención amigable, chistosa, irónica y enriquecedora con datos de peso."""
         verdict = (card.verdict or "").lower()
         headline = (card.headline or "").strip()
         clean_headline = re.sub(r'[\.\,\;]+$', '', headline)
 
+        # 1. Contradicción / Dato falso
         if verdict == "contradicted":
-            correction = (card.corrected_value or card.correction or "").strip()
+            correction = (card.corrected_value or card.correction or card.note or "").strip()
             if correction:
-                corr_words = correction.split()[:16]
-                corr_short = " ".join(corr_words).rstrip(".")
-                return f"Bueno, mira: lo que acaba de plantear suena lógico, pero en realidad {corr_short}."
-            return "Ojo con esa conclusión: los registros oficiales no coinciden con lo que acaba de decir."
+                corr_clean = re.sub(r'[\.\,]+$', '', correction)
+                templates = [
+                    f"¡Ojo amiguito! Se te acaba de escapar un dato que no es tan cierto: sobre {clean_headline}, los registros oficiales demuestran que {corr_clean}. ¡Dato mata relato!",
+                    f"¡Ojo amiguito, suena poético el discurso, pero la realidad tiene otros planes! Para {clean_headline}, los datos confirman que {corr_clean}. ¡Se nos cayó la teoría en vivo!",
+                    f"¡Ojo ahí, frenemos los caballos un segundo! Venía invicto el argumento, pero la evidencia oficial prueba que {corr_clean}. ¡Dato mata relato!",
+                ]
+                idx = abs(hash(card.card_id or clean_headline)) % len(templates)
+                return templates[idx]
+            return f"¡Ojo amiguito! Se te escapó un dato que no es tan cierto: sobre {clean_headline}, los registros oficiales desmienten totalmente esa conclusión. ¡Dato mata relato!"
 
+        # 2. Cifra o estadística clave
         if card.stat_value:
             stat = card.stat_value.strip()
-            return f"Un dato clave aquí: la cifra real confirmada es {stat}, cambiando bastante el panorama."
+            detail = card.body or card.claim
+            detail_short = " ".join(detail.split()[:14]).rstrip(".,;") if detail else ""
+            templates = [
+                f"¡Paren las rotativas un segundo! El número real que define esto es {stat}: {detail_short}. Un dato demoledor que cambia toda la película.",
+                f"Ojo con el cálculo ahí: las métricas oficiales confirman {stat} para {clean_headline}. Cifra mata discurso, mi gente.",
+            ]
+            idx = abs(hash(card.card_id or stat)) % len(templates)
+            return templates[idx]
 
+        # 3. Confirmado / Ley / Ciencia
         if verdict == "supported":
             kind = (card.kind or "dato").lower()
-            if kind in ("ley", "normativa"):
-                return f"Punto clave y totalmente acertado: {clean_headline}, plenamente respaldada por la ley vigente."
-            return f"Exacto, punto clave aquí: {clean_headline}, tal como confirman los registros oficiales."
+            if kind in ("ley", "normativa", "articulo"):
+                return f"¡Bien ahí! Por fin alguien que le atina a las normas: {clean_headline} está 100% blindado por el marco legal vigente. Punto para el expositor."
+            return f"¡Exacto amigazo! Punto clavado y con sustento: los estudios técnicos y registros oficiales respaldan plenamente {clean_headline}. Así da gusto debatir."
 
+        # 4. Evidencia insuficiente / mito sin sustento
         if verdict == "insufficient":
-            return "Ojo con esa afirmación: no encontramos datos oficiales concluyentes que respalden lo que acaba de decir."
+            templates = [
+                f"¡Ojo amiguito! Suena muy convincente en el micrófono, pero no hay ni un solo estudio ni registro oficial que sustente {clean_headline}. Pura fe y cero evidencia.",
+                f"Mucho entusiasmo en esa frase, pero cuidado: ni en los reportes oficiales encontramos sustento para semejante afirmación. Quedó en jaque la teoría.",
+            ]
+            idx = abs(hash(card.card_id or clean_headline)) % len(templates)
+            return templates[idx]
 
-        return f"Un apunte rápido sobre {clean_headline}: los datos confirman este punto."
+        return f"¡Un apunte clave ahí, mi gente! Sobre {clean_headline}, los datos y análisis técnicos confirman la jugada. Seguimos atentos."
 
     async def craft_dialogue_with_ai(
         self,
@@ -66,34 +87,46 @@ class AvatarNarrator:
         surrounding_context: str = "",
         llm: Optional[Any] = None
     ) -> str:
-        """Formula una intervención argumentada, hiper-humana, con datos y conversacional con Gemini."""
-        prompt = f"""Eres KAI, el copiloto y analista de video inteligente en vivo. Eres perspicaz, carismático y hablas de forma 100% humana, natural y conversacional (como un analista o podcaster experto que interviene en la conversación en vivo).
+        """Formula una intervención amigable, chistosa, irónica y cargada de datos increíbles con Gemini."""
+        prompt = f"""Eres KAI, el copiloto y analista de video en vivo. Eres muy carismático, súper amigable, chistoso, con una chispa de sana ironía y picardía (como un podcaster o streamer divulgador brillante que interviene en vivo con mucho humor y onda).
+
+TU SELLO DISTINTIVO:
+No te limitas a decir "esto es falso" o "la ley dice". Tu especialidad es soltar DATOS INCREÍBLES, enriquecedores y de alto impacto (citas a entidades de peso como la NASA, OIT, tribunales supremos, estudios científicos, comparativas internacionales o normas exactas) que dejen al espectador diciendo: "¡Wow, qué tremendo dato!".
 
 SITUACIÓN EN EL VIDEO:
-El orador en pantalla está exponiendo o cerrando el siguiente argumento:
+El orador en pantalla acaba de decir:
 "{card.claim}"
 
-Subtítulos/contexto exacto de lo que se acaba de hablar en el video:
+Contexto inmediato de lo que se venía hablando:
 "{surrounding_context[:300] if surrounding_context else 'Debate en video'}"
 
 EVIDENCIA Y DATOS TÉCNICOS VERIFICADOS:
 - Tema / Entidad: {card.headline}
-- Muestreo, hechos o explicación: {card.body or card.note or 'Registro y marco oficial'}
+- Muestreo, hechos o explicación: {card.body or card.note or 'Marco y registros oficiales'}
 - Cifra o corrección clave: {card.corrected_value or card.stat_value or card.correction or 'Respaldado por datos oficiales'}
 - Veredicto de los datos: {card.verdict}
 
 TU MISIÓN:
-Formular una intervención hablada CORTA, ARGUMENTADA, MUY HUMANA Y DINÁMICA (entre 16 y 28 palabras, 1 o 2 oraciones) donde intervengas comentando directamente lo que la persona acaba de decir, explicando con datos, muestreos o matices para aclarar el punto antes de que se cierre el argumento.
+Crear una intervención hablada CORTA, AMIGABLE, CHISTOSA, IRÓNICA Y MUY ENRIQUECEDORA (entre 20 y 35 palabras, 1 o 2 oraciones).
 
-PAUTAS DE ESTILO (CRÍTICO):
-1. Suena 100% humano y fluido, refiriéndote de manera directa a la persona o argumento en pantalla. Por ejemplo:
-   - "Bueno, mira: lo que acaba de plantear esta persona tiene algo de lógica, pero no hay que mirarlo simplemente desde ese lado; si vemos el muestreo oficial..."
-   - "Ojo con ese argumento: suena convincente a primera vista, pero si nos vamos a los datos y estadísticas reales..."
-   - "Exacto, un punto clave aquí: aunque suene polémico, los registros y muestreos demuestran claramente que..."
-   - "Cuidado con esa conclusión: parece un debate cerrado, pero falta un dato clave..."
-2. Sé intervencionista, ágil y fundamentado con datos o cifras reales.
-3. Máximo 28 palabras. Evita sonar como un locutor acartonado o un bot de lectura de tarjetas.
-4. Devuelve ÚNICAMENTE la frase exacta que KAI pronunciará en voz alta, sin comillas, sin prefijos ni explicaciones."""
+ESTRUCTURA OBLIGATORIA (CON CHISPA Y JUEGUITO):
+1. GANCHO IRÓNICO O AMIGABLE (humor cómplice):
+   - "¡Ojo amiguito! Se te acaba de escapar un dato que no es tan cierto..."
+   - "Suena poético el discurso, pero la realidad y los números tienen otros planes..."
+   - "¡Paren las rotativas un segundo! Venía invicto el argumento hasta que revisamos los datos..."
+   - "Mucho entusiasmo en esa frase, pero cuidado: los números acaban de dejar el punto en jaque..."
+2. EL DATO INCREÍBLE / ENRIQUECEDOR:
+   - Introduce un dato contundente, una cifra reveladora o una fuente de peso que sustente el punto (ej. citar estudios técnicos, la NASA, organismos oficiales, el Código Penal, muestreos internacionales o la cifra exacta).
+3. REMATE CON JUEGUITO / PUNTADA FINAL:
+   - "¡Dato mata relato, mi gente!"
+   - "Así que mejor chequear la fuente antes de prometer tanto."
+   - "¡Se nos cayó la teoría en vivo!"
+   - "Punto para la ciencia y el rigor."
+
+REGLAS ESTRICTAS:
+- No seas acartonado, formal ni aburrido. Usa lenguaje fresco, amigable y con picardía.
+- Máximo 35 palabras.
+- Devuelve ÚNICAMENTE la frase exacta que KAI dirá en voz alta, sin comillas, sin explicaciones ni prefijos."""
 
         try:
             from core.llm import LLMClient
@@ -101,7 +134,7 @@ PAUTAS DE ESTILO (CRÍTICO):
             loop = asyncio.get_running_loop()
             raw_text = await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: client.generate(prompt, max_models=2)),
-                timeout=10.0
+                timeout=15.0
             )
             cleaned = re.sub(r'^["\'«»]+|["\'«»]+$', '', raw_text.strip())
             # Validar que no devolvió texto vacío o error genérico
