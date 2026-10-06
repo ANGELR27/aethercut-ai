@@ -17,14 +17,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const stageLabels = {
         init: "Preparando la tarea", queued: "En cola", inspect: "Revisando el archivo",
         transcribe: "Transcripción local", gemini: "Análisis con Gemini", silence: "Detección de pausas",
-        visual: "Análisis visual local", enrich: "B-Roll y búsqueda de fuentes", cards: "Diseño de apoyos visuales",
+        visual: "Análisis visual local", enrich: "B-Roll y búsqueda de fuentes", cards: "Diseño de apoyos visuales", quality: "Control técnico",
         render: "Render del video", subtitles: "Composición y subtítulos",
         finalizing: "Short vertical", done: "Edición terminada", error: "Edición detenida",
         cancelling: "Cancelando edición", cancelled: "Edición cancelada",
     };
     const stagePhase = {
         init: 0, queued: 0, inspect: 0, transcribe: 0,
-        gemini: 1, silence: 2, visual: 2, enrich: 3, cards: 3,
+        gemini: 1, silence: 2, visual: 2, enrich: 3, cards: 3, quality: 3,
         render: 4, subtitles: 4, finalizing: 4, done: 4,
     };
     const fmtDuration = (seconds) => {

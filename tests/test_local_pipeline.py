@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 
 from core.card_renderer import InfoCardRenderer
-from core.models import ActionType, InfoCard, SourceRef, TimelineSegment, VideoEditingPlan
+from core.models import ActionType, BRollCue, HighlightClip, InfoCard, SourceRef, TimelineSegment, VideoEditingPlan
+from core.quality_gate import PlanQualityGate
 from core.render_engine import VideoRenderEngine
 from core.silence_detector import SilenceDetector
 from core.timeline import TimelineMapper
@@ -54,6 +55,19 @@ class LocalPipelineTest(unittest.TestCase):
         self.assertTrue(output.exists())
         self.assertGreater(output.stat().st_size, 30_000)
         self.assertEqual(len(result["overlays"]), 1)
+
+    def test_quality_gate_clamps_invalid_timestamps(self):
+        plan = VideoEditingPlan(
+            video_summary="Control", total_original_duration_sec=5,
+            timeline=[TimelineSegment(start_sec=0, end_sec=5, action=ActionType.KEEP)],
+            b_rolls=[BRollCue(cue_id="b", start_sec=7, end_sec=8, concept="Fuera de rango",
+                               search_query_en="test", reasoning="prueba")],
+            highlights=[HighlightClip(clip_id="h", start_sec=4.8, end_sec=10, title="Short", hook="Hook", virality_score=80)],
+        )
+        report = PlanQualityGate(5).apply(plan)
+        self.assertFalse(plan.b_rolls[0].enabled)
+        self.assertLessEqual(plan.highlights[0].end_sec, 5)
+        self.assertTrue(report.warnings)
 
 
 if __name__ == "__main__":

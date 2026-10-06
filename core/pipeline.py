@@ -14,6 +14,7 @@ from core.gemini_analyzer import GeminiVideoAnalyzer
 from core.llm import LLMClient, safe_log
 from core.models import ActionType, VideoEditingPlan
 from core.project_store import ProjectStore, editor_snapshot
+from core.quality_gate import PlanQualityGate
 from core.orchestrator import AssetOrchestrator
 from core.render_engine import VideoRenderEngine
 from core.silence_detector import SilenceDetector
@@ -313,6 +314,15 @@ class VideoPipeline:
         await self._run_with_heartbeat(loop, design, "cards", 47.0,
                                        "Diseñando tarjetas y preparando los apoyos visuales")
         self._publish_plan(plan, "cards", 49.0, "Tarjetas listas para previsualizar y editar.")
+
+        # ---- 4.5 Control de calidad local antes de gastar CPU en el render ----
+        report = PlanQualityGate(duration).apply(plan)
+        quality_message = "Control técnico listo: la línea de tiempo puede exportarse."
+        if report.fixes:
+            quality_message = f"Control técnico corrigió {len(report.fixes)} elemento(s) fuera de rango."
+        if report.warnings:
+            quality_message += f" Avisos: {len(report.warnings)}."
+        self._publish_plan(plan, "quality", 49.5, quality_message)
 
         # ---- 5. Render (Smart Cut + overlays + subtítulos opcionales) ----
         mapper = TimelineMapper.from_plan_segments(plan.timeline, duration)

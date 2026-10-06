@@ -160,6 +160,7 @@ class VideoRenderEngine:
         cmd = ["ffmpeg", "-y", "-i", str(base_video)]
         chains, cur = [], "0:v"
         audio_map = "0:a?"
+        audio_filters: List[str] = []
         
         # 1. Dynamic Zoom (Punch-ins)
         if zoom_segments:
@@ -221,7 +222,12 @@ class VideoRenderEngine:
             chains.append(f"[bleep]volume='0.15*min(1,({mute_expr}))':eval=frame[bleep_vol]")
             # Mix them together
             chains.append(f"[a_muted][bleep_vol]amix=inputs=2:duration=first[aout]")
-            audio_map = "[aout]"
+            chains.append("[aout]loudnorm=I=-16:LRA=11:TP=-1.5[a_norm]")
+            audio_map = "[a_norm]"
+        else:
+            # Nivel consistente para la versión final: voz audible sin picos
+            # que distorsionen al cambiar entre tomas o recursos externos.
+            audio_filters = ["-af", "loudnorm=I=-16:LRA=11:TP=-1.5"]
 
         if not chains:
             shutil.copy(base_video, out)
@@ -229,7 +235,7 @@ class VideoRenderEngine:
 
         script = out.with_suffix(".fx.txt")
         script.write_text(";\n".join(chains), encoding="utf-8")
-        cmd += ["-filter_complex_script", str(script), "-map", f"[{cur}]", "-map", audio_map,
+        cmd += ["-filter_complex_script", str(script), "-map", f"[{cur}]", "-map", audio_map, *audio_filters,
                 *ENC_FINAL, "-c:a", "aac", "-movflags", "+faststart", str(out)]
         try:
             ok = self._run(cmd, f"Componiendo {len(overlays)} overlays" + (" + subtítulos" if ass_file else ""))
