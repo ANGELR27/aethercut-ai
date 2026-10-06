@@ -116,13 +116,17 @@ class VideoPipeline:
         analysis_file = self.input_file
         if self.input_file.stat().st_size > 150 * 1024 * 1024:
             proxy = self.workdir / "analysis_proxy.mp4"
-            self._state("inspect", 3.0,
-                        "Creando una copia ligera para analizar el contenido sin subir el original completo.")
-            analysis_file = await self._run_with_heartbeat(
-                loop,
-                lambda: FileManager.create_analysis_proxy(self.input_file, proxy, self.cancel_event),
-                "inspect", 3.0, "FFmpeg está creando la copia ligera para el análisis",
-            )
+            analysis_file = FileManager.reusable_analysis_proxy(self.input_file, proxy)
+            if analysis_file:
+                self._state("inspect", 4.0, "Reutilizando la copia ligera ya preparada para este proyecto.")
+            else:
+                self._state("inspect", 3.0,
+                            "Creando una copia ligera para analizar el contenido sin subir el original completo.")
+                analysis_file = await self._run_with_heartbeat(
+                    loop,
+                    lambda: FileManager.create_analysis_proxy(self.input_file, proxy, self.cancel_event),
+                    "inspect", 3.0, "FFmpeg está creando la copia ligera para el análisis",
+                )
             proxy_mb = analysis_file.stat().st_size / 1024 / 1024
             self._state("inspect", 5.0,
                         f"Copia de análisis lista ({proxy_mb:.0f} MB). El render final conservará el video original.")

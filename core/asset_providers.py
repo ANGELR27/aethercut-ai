@@ -98,7 +98,8 @@ class PixabayAssetProvider(AssetProvider):
                     if resp.status == 200:
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         async with aiofiles.open(destination, mode="wb") as f:
-                            await f.write(await resp.read())
+                            async for chunk in resp.content.iter_chunked(256 * 1024):
+                                await f.write(chunk)
                         print(f"[PixabayProvider] Guardado exitosamente: {destination.name}")
                         return True
         except Exception as e:
@@ -162,7 +163,8 @@ class PexelsAssetProvider(AssetProvider):
                 if resp.status == 200:
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     async with aiofiles.open(destination, mode="wb") as f:
-                        await f.write(await resp.read())
+                        async for chunk in resp.content.iter_chunked(256 * 1024):
+                            await f.write(chunk)
                     print(f"[PexelsProvider] Guardado en: {destination.name}")
                     return True
         except Exception as e:
@@ -197,7 +199,8 @@ class OpenStockAssetProvider(AssetProvider):
                     if resp.status == 200:
                         target_dir.mkdir(parents=True, exist_ok=True)
                         async with aiofiles.open(out_path, mode="wb") as f:
-                            await f.write(await resp.read())
+                            async for chunk in resp.content.iter_chunked(256 * 1024):
+                                await f.write(chunk)
                         print(f"[OpenStockProvider] B-Roll real descargado con éxito: {out_path.name}")
                         return out_path
         except Exception as e:

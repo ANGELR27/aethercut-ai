@@ -13,6 +13,7 @@ from core.render_engine import VideoRenderEngine
 from core.silence_detector import SilenceDetector
 from core.timeline import TimelineMapper
 from core.visual_analysis import VisualAnalyzer
+from utils.file_manager import FileManager
 
 
 class LocalPipelineTest(unittest.TestCase):
@@ -79,6 +80,11 @@ class LocalPipelineTest(unittest.TestCase):
             "stream=width,height", "-of", "csv=p=0", str(output),
         ], text=True).strip()
         self.assertEqual(dimensions, "1080,1920")
+
+    def test_reuses_valid_analysis_proxy(self):
+        proxy = self.temp / "analysis-proxy.mp4"
+        FileManager.create_analysis_proxy(self.video, proxy)
+        self.assertEqual(FileManager.reusable_analysis_proxy(self.video, proxy), proxy)
 
 
 if __name__ == "__main__":

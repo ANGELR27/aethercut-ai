@@ -80,6 +80,8 @@ class FactChecker:
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.wiki = WikiMediaClient()
         self._sem = asyncio.Semaphore(concurrency)
+        self._web_cache: Dict[str, List[Dict[str, str]]] = {}
+        self._web_cache_lock = asyncio.Lock()
 
     # ---------- búsqueda ----------
     @staticmethod
@@ -133,14 +135,25 @@ class FactChecker:
         queries = [card.search_query]
         if card.headline and card.headline.lower() not in card.search_query.lower():
             queries.append(card.headline)
-        web: List[Dict[str, str]] = []
+        async def search(query: str) -> List[Dict[str, str]]:
+            async with self._web_cache_lock:
+                cached = self._web_cache.get(query)
+            if cached is not None:
+                return cached
+            try:
+                found = await asyncio.wait_for(asyncio.to_thread(self._web_search, query), timeout=12)
+            except asyncio.TimeoutError:
+                safe_log(f"[FactChecker] La búsqueda web tardó demasiado para '{query}'.")
+                found = []
+            async with self._web_cache_lock:
+                self._web_cache[query] = found
+            return found
+
         for q in queries:
             if progress:
                 progress(f"Buscando información para «{card.headline}»: {q}")
-            try:
-                web += await asyncio.wait_for(asyncio.to_thread(self._web_search, q), timeout=12)
-            except asyncio.TimeoutError:
-                safe_log(f"[FactChecker] La búsqueda web tardó demasiado para '{q}'.")
+        found_groups = await asyncio.gather(*(search(q) for q in queries))
+        web: List[Dict[str, str]] = [item for group in found_groups for item in group]
         if progress:
             progress(f"Consultando Wikipedia para «{card.headline}».")
         wiki = await self.wiki.search(card.image_query or card.headline)

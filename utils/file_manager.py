@@ -79,6 +79,25 @@ class FileManager:
         return destination
 
     @staticmethod
+    def reusable_analysis_proxy(source: Path, destination: Path) -> Optional[Path]:
+        """Devuelve el proxy previo si corresponde exactamente al video actual.
+
+        Reanudar una edición no debe volver a comprimir cientos de MB. Se exige
+        que el proxy sea posterior al original y tenga un stream de video real.
+        """
+        try:
+            if not destination.exists() or destination.stat().st_size < 32_000:
+                return None
+            if destination.stat().st_mtime < source.stat().st_mtime:
+                return None
+            metadata = FileManager.get_media_metadata(destination)
+            if metadata.get("duration", 0) <= 0 or metadata.get("width", 0) <= 0:
+                return None
+            return destination
+        except OSError:
+            return None
+
+    @staticmethod
     def clean_temp_directory() -> int:
         """Elimina todos los archivos del directorio temporal y devuelve la cantidad eliminada."""
         count = 0
