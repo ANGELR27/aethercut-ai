@@ -58,6 +58,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let editorState = null;
     let selectedEditorItem = null;
     let editorDirty = false;
+    let thumbnailsKey = "";
 
     function percent(value, duration) {
         return `${Math.max(0, Math.min(100, (Number(value || 0) / Math.max(1, Number(duration || 1))) * 100))}%`;
@@ -67,6 +68,59 @@ document.addEventListener("DOMContentLoaded", () => {
         const preview = $("projectPreview");
         if (!Number.isFinite(Number(seconds))) return;
         preview.currentTime = Math.max(0, Number(seconds));
+    }
+
+    function waitForEvent(element, eventName) {
+        return new Promise((resolve, reject) => {
+            element.addEventListener(eventName, resolve, { once: true });
+            element.addEventListener("error", () => reject(new Error("No se pudo leer la vista previa.")), { once: true });
+        });
+    }
+
+    async function buildTimelineThumbnails(source, duration) {
+        const strip = $("timelineThumbnails");
+        const status = $("thumbnailStatus");
+        const key = `${source}|${duration}`;
+        if (key === thumbnailsKey) return;
+        thumbnailsKey = key;
+        strip.replaceChildren();
+        strip.hidden = true;
+        if (!("VideoFrame" in window) || !source || duration <= 0) {
+            status.textContent = "La vista previa está lista; este navegador no expone miniaturas WebCodecs.";
+            return;
+        }
+        status.textContent = "Generando miniaturas locales con WebCodecs…";
+        const sampler = document.createElement("video");
+        sampler.preload = "auto";
+        sampler.muted = true;
+        sampler.src = source;
+        try {
+            await waitForEvent(sampler, "loadedmetadata");
+            const count = Math.max(4, Math.min(10, Math.ceil(duration / 45)));
+            for (let index = 0; index < count; index += 1) {
+                sampler.currentTime = Math.min(Math.max(0, duration - 0.05), duration * (index + 0.5) / count);
+                await waitForEvent(sampler, "seeked");
+                const frame = new VideoFrame(sampler);
+                const canvas = document.createElement("canvas");
+                canvas.width = 160; canvas.height = 90;
+                canvas.getContext("2d").drawImage(frame, 0, 0, canvas.width, canvas.height);
+                frame.close();
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "timeline-thumbnail";
+                const at = duration * (index + 0.5) / count;
+                button.title = `Ir a ${fmtDuration(at)}`;
+                button.append(canvas);
+                button.addEventListener("click", () => setPreviewTime(at));
+                strip.append(button);
+            }
+            strip.hidden = false;
+            status.textContent = "Miniaturas listas: pulsa una para mover la previsualización.";
+        } catch (_error) {
+            if (key === thumbnailsKey) status.textContent = "La vista previa sigue disponible; no se pudieron generar las miniaturas.";
+        } finally {
+            sampler.removeAttribute("src"); sampler.load();
+        }
     }
 
     function markEditorDirty() {
@@ -182,6 +236,7 @@ document.addEventListener("DOMContentLoaded", () => {
             preview.src = previewUrl;
             preview.load();
             $("previewEmpty").hidden = true;
+            preview.addEventListener("loadedmetadata", () => buildTimelineThumbnails(previewUrl, Number(preview.duration || duration)), { once: true });
         }
         $("timelineCursor").max = String(Math.max(1, duration));
         renderTimeline(); renderInspector();

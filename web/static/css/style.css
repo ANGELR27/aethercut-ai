@@ -161,6 +161,11 @@ fieldset:disabled { opacity: .58; }
 .preview-empty { padding: 22px; color: var(--tertiary); font-size: 11px; text-align: center; }
 .time-readout { display: flex; justify-content: space-between; padding: 7px 3px 3px; color: var(--tertiary); font: 9px var(--mono); font-variant-numeric: tabular-nums; }
 .timeline-cursor { height: 5px; accent-color: var(--violet); }
+.timeline-thumbnails { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; margin-top: 9px; overflow: hidden; border-radius: 7px; }
+.timeline-thumbnail { min-width: 0; padding: 0; border: 0; background: #090b0e; cursor: pointer; }
+.timeline-thumbnail canvas { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; opacity: .84; transition: opacity .15s ease, transform .15s ease; }
+.timeline-thumbnail:hover canvas { opacity: 1; transform: scale(1.05); }
+.thumbnail-status { margin: 7px 2px 0; color: var(--tertiary); font: 9px var(--mono); }
 .inspector-pane { padding: 14px; }
 .editor-inspector { margin-top: 9px; color: var(--secondary); font-size: 11px; line-height: 1.55; }
 .editor-inspector b { display: block; color: var(--text); font-size: 12px; }

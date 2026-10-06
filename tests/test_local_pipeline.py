@@ -69,6 +69,17 @@ class LocalPipelineTest(unittest.TestCase):
         self.assertLessEqual(plan.highlights[0].end_sec, 5)
         self.assertTrue(report.warnings)
 
+    def test_smart_vertical_short(self):
+        clip = HighlightClip(clip_id="vertical", start_sec=0, end_sec=1.2,
+                             title="Prueba vertical", hook="Prueba", virality_score=75)
+        output = VideoRenderEngine().extract_vertical_short(self.video, clip, self.temp)
+        self.assertIsNotNone(output)
+        dimensions = subprocess.check_output([
+            "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+            "stream=width,height", "-of", "csv=p=0", str(output),
+        ], text=True).strip()
+        self.assertEqual(dimensions, "1080,1920")
+
 
 if __name__ == "__main__":
     unittest.main()

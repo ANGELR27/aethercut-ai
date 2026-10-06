@@ -10,6 +10,7 @@ from core.models import CaptionItem, HighlightClip, VideoEditingPlan
 from core.subtitle_generator import SubtitleGenerator
 from core.timeline import TimelineMapper
 from process_runner import run_process
+from core.visual_analysis import VisualAnalyzer
 
 ProgressCb = Optional[Callable[[str, float], None]]
 
@@ -293,10 +294,19 @@ class VideoRenderEngine:
     def extract_vertical_short(self, video_path: Path, highlight: HighlightClip, output_dir: Path) -> Optional[Path]:
         duration = max(1.0, highlight.end_sec - highlight.start_sec)
         out_path = output_dir / f"short_{highlight.clip_id}_{video_path.stem[:40]}.mp4"
-        fc = ("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=22:6,crop=1080:1920[bg];"
-              "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];"
-              "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]")
+        source_w, source_h = probe_size(video_path)
+        scale = max(1080 / max(1, source_w), 1920 / max(1, source_h))
+        scaled_w = max(1080, int(source_w * scale) // 2 * 2)
+        scaled_h = max(1920, int(source_h * scale) // 2 * 2)
+        focus_x = VisualAnalyzer(cancel_event=self.cancel_event).dominant_face_focus(
+            video_path, highlight.start_sec, highlight.end_sec,
+        )
+        crop_x = min(max(0, int(focus_x * scaled_w - 540)), scaled_w - 1080)
+        crop_y = max(0, (scaled_h - 1920) // 2)
+        # Recorte vertical con prioridad a la persona principal. Es un enfoque
+        # local inspirado en AutoFlip: si no hay rostro, conserva el centro.
+        fc = f"[0:v]scale={scaled_w}:{scaled_h},crop=1080:1920:{crop_x}:{crop_y},setsar=1[v]"
         cmd = ["ffmpeg", "-y", "-ss", f"{highlight.start_sec:.2f}", "-i", str(video_path), "-t", f"{duration:.2f}",
-               "-filter_complex", fc, "-map", "[v]", "-map", "0:a?", *ENC_FINAL, "-c:a", "aac",
+               "-filter_complex", fc, "-map", "[v]", "-map", "0:a?", "-af", "loudnorm=I=-16:LRA=11:TP=-1.5", *ENC_FINAL, "-c:a", "aac",
                "-movflags", "+faststart", str(out_path)]
         return out_path if self._run(cmd, f"Short 9:16 '{highlight.title}'") and out_path.exists() else None

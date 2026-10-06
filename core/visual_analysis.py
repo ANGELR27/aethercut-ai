@@ -9,6 +9,7 @@ mantiene el comportamiento editorial existente (``auto``).
 from __future__ import annotations
 
 from pathlib import Path
+from statistics import median
 from threading import Event
 from typing import Iterable, List, Optional
 
@@ -92,3 +93,42 @@ class VisualAnalyzer:
         finally:
             capture.release()
         return placed
+
+    def dominant_face_focus(self, video_path: Path, start_sec: float, end_sec: float,
+                            samples: int = 5) -> float:
+        """Devuelve el centro horizontal del rostro dominante de un clip.
+
+        Muestrea varios puntos y usa la mediana para ignorar transiciones o
+        detecciones puntuales equivocadas. El valor 0.5 conserva el encuadre
+        centrado cuando el video no contiene una cara reconocible.
+        """
+        try:
+            import cv2
+        except Exception:
+            return 0.5
+        cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
+        detector = cv2.CascadeClassifier(str(cascade_path))
+        if detector.empty():
+            return 0.5
+        capture = cv2.VideoCapture(str(video_path))
+        if not capture.isOpened():
+            return 0.5
+        centers: List[float] = []
+        try:
+            span = max(0.15, float(end_sec) - float(start_sec))
+            for index in range(max(1, samples)):
+                if self.cancel_event and self.cancel_event.is_set():
+                    raise CancellationRequested()
+                at = float(start_sec) + span * (index + 0.5) / max(1, samples)
+                capture.set(cv2.CAP_PROP_POS_MSEC, at * 1000)
+                ok, frame = capture.read()
+                if not ok or frame is None:
+                    continue
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = detector.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=5, minSize=(36, 36))
+                if len(faces):
+                    x, _y, w, h = max(faces, key=lambda face: int(face[2]) * int(face[3]))
+                    centers.append((float(x) + float(w) / 2) / max(1, frame.shape[1]))
+        finally:
+            capture.release()
+        return max(0.0, min(1.0, float(median(centers)))) if centers else 0.5
