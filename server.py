@@ -56,18 +56,24 @@ task_cancel_events: Dict[str, threading.Event] = {}
 task_pipelines: Dict[str, VideoPipeline] = {}
 task_jobs: Dict[str, asyncio.Task] = {}
 _state_lock = threading.RLock()
-_pipeline_lock = asyncio.Lock()  # un render a la vez: MoviePy/FFmpeg saturan CPU y RAM
+_render_lock = asyncio.Lock()  # un render FFmpeg a la vez: protege CPU/GPU y memoria
 
 
 @app.on_event("startup")
 async def recover_orphaned_inputs() -> None:
     """Convierte cargas de un servidor interrumpido en proyectos recuperables."""
+    import time
     defaults = {"silence_threshold": 1.5, "broll": True, "cards": True, "captions": False, "shorts": True}
+    if not settings.INPUTS_DIR.exists():
+        return
     for source in settings.INPUTS_DIR.iterdir():
         if not source.is_file():
             continue
         match = re.match(r"^([a-f0-9]{8})_", source.name, re.I)
         if not match:
+            continue
+        # Solo recuperar archivos modificados en las últimas 24 horas
+        if time.time() - source.stat().st_mtime > 86400:
             continue
         project = ProjectStore(match.group(1))
         if project.manifest_path.exists():
@@ -140,59 +146,39 @@ async def serve_index():
 
 
 async def run_pipeline_task(task_id: str, input_file: Path, options: PipelineOptions) -> None:
-    update_task_state(task_id, "queued", 5.0, "En cola...")
-    acquired = False
-    queued_at = asyncio.get_running_loop().time()
+    update_task_state(task_id, "init", 5.0, "Iniciando análisis del video...")
     cancel_event = task_cancel_events[task_id]
     project = ProjectStore(task_id)
-    project.set_status("queued")
+    project.set_status("running")
     try:
-        while not acquired:
-            if cancel_event.is_set():
-                raise CancellationRequested()
-            try:
-                await asyncio.wait_for(_pipeline_lock.acquire(), timeout=10)
-                acquired = True
-            except asyncio.TimeoutError:
-                waited = int(asyncio.get_running_loop().time() - queued_at)
-                update_task_state(task_id, "queued", 5.0,
-                                  f"En cola: otra edición está usando el render. Espera acumulada: {waited} s.")
-        try:
-            pipeline = VideoPipeline(
-                task_id, input_file, options,
-                on_state=lambda step, pct, msg, **kw: update_task_state(task_id, step, pct, msg, **kw),
-                cancel_event=cancel_event,
-                project_store=project,
-            )
-            task_pipelines[task_id] = pipeline
-            if cancel_event.is_set():
-                raise CancellationRequested()
-            result = await pipeline.run()
-            if cancel_event.is_set():
-                raise CancellationRequested()
-            update_task_state(task_id, "done", 100.0, "Edición completada.", completed=True, result=result)
-            project.set_status("done", result=result)
-        except CancellationRequested:
-            update_task_state(task_id, "cancelled", tasks_progress.get(task_id, {}).get("progress", 0.0),
-                              "Edición cancelada. No se iniciarán más etapas.", completed=True, cancelled=True,
-                              cancel_requested=False)
-            cleanup_cancelled_task_files(task_id, input_file)
-            project.set_status("cancelled")
-        except Exception as exc:
-            safe_log(f"[Pipeline] Error: {exc}")
-            state = tasks_progress.get(task_id, {})
-            update_task_state(task_id, "error", state.get("progress", 0.0), "La edición se detuvo.",
-                              error=friendly_error(exc), failed_step=state.get("step"))
-            project.set_status("error", error=friendly_error(exc))
+        pipeline = VideoPipeline(
+            task_id, input_file, options,
+            on_state=lambda step, pct, msg, **kw: update_task_state(task_id, step, pct, msg, **kw),
+            cancel_event=cancel_event,
+            project_store=project,
+            render_lock=_render_lock,
+        )
+        task_pipelines[task_id] = pipeline
+        if cancel_event.is_set():
+            raise CancellationRequested()
+        result = await pipeline.run()
+        if cancel_event.is_set():
+            raise CancellationRequested()
+        update_task_state(task_id, "done", 100.0, "Edición completada.", completed=True, result=result)
+        project.set_status("done", result=result)
     except CancellationRequested:
         update_task_state(task_id, "cancelled", tasks_progress.get(task_id, {}).get("progress", 0.0),
-                          "Edición cancelada mientras esperaba en la cola.", completed=True, cancelled=True,
+                          "Edición cancelada.", completed=True, cancelled=True,
                           cancel_requested=False)
         cleanup_cancelled_task_files(task_id, input_file)
         project.set_status("cancelled")
+    except Exception as exc:
+        safe_log(f"[Pipeline] Error: {exc}")
+        state = tasks_progress.get(task_id, {})
+        update_task_state(task_id, "error", state.get("progress", 0.0), "La edición se detuvo.",
+                          error=friendly_error(exc), failed_step=state.get("step"))
+        project.set_status("error", error=friendly_error(exc))
     finally:
-        if acquired:
-            _pipeline_lock.release()
         task_pipelines.pop(task_id, None)
         task_cancel_events.pop(task_id, None)
         task_jobs.pop(task_id, None)
@@ -208,7 +194,9 @@ async def run_export_task(task_id: str) -> None:
     cancel_event = task_cancel_events[task_id]
     store = ProjectStore(task_id)
     try:
-        await _pipeline_lock.acquire()
+        if _render_lock.locked():
+            update_task_state(task_id, "queued", 5.0, "En cola de render: esperando que termine la codificación actual...")
+        await _render_lock.acquire()
         acquired = True
         document = store.read()
         source = Path(document.get("source_file") or "")
@@ -256,7 +244,7 @@ async def run_export_task(task_id: str) -> None:
                           "La exportación se detuvo.", error=friendly_error(exc))
     finally:
         if acquired:
-            _pipeline_lock.release()
+            _render_lock.release()
         task_cancel_events.pop(task_id, None)
         task_jobs.pop(task_id, None)
 
@@ -377,6 +365,26 @@ async def list_projects():
             continue
     projects.sort(key=lambda project: project.get("updated_at") or "", reverse=True)
     return {"projects": projects[:20]}
+
+
+@app.delete("/api/projects/{task_id}")
+async def delete_project(task_id: str):
+    """Elimina un proyecto y libera espacio en disco."""
+    if task_id in task_jobs:
+        raise HTTPException(status_code=409, detail="No se puede eliminar un proyecto en ejecución. Cancélalo primero.")
+    store = ProjectStore(task_id)
+    if not store.root.exists() and not store.manifest_path.exists():
+        raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+    report = store.delete(include_source=True, include_outputs=True)
+    tasks_progress.pop(task_id, None)
+    return {"message": "Proyecto eliminado.", "freed_mb": round(report["freed_bytes"] / 1024 / 1024, 2)}
+
+
+@app.post("/api/cleanup")
+async def trigger_storage_cleanup():
+    """Limpia archivos temporales, duplicados de uploads antiguos y libera espacio en disco."""
+    report = FileManager.cleanup_storage()
+    return {"message": "Limpieza completada con éxito.", **report}
 
 
 @app.get("/api/projects/{task_id}/preview")

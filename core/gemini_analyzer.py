@@ -88,10 +88,9 @@ class GeminiVideoAnalyzer:
                 raw = self.llm.generate(
                     [uploaded, prompt], json_mode=True, progress=progress, client=client,
                     cancel_event=cancel_event,
-                    # Cada proyecto prueba los dos modelos que la comprobación
-                    # de salud confirmó disponibles. Así un 503 puntual de 3.6
-                    # puede resolverse con 3.7 sin desperdiciar otra subida.
-                    max_models=2,
+                    # Permite recorrer todos los modelos de respaldo configurados
+                    # antes de descartar la clave del proyecto actual.
+                    max_models=len(self.llm.models),
                 )
                 safe_log(f"[GeminiAnalyzer] Respuesta recibida de {self.llm.last_model_used}. Validando JSON...")
                 plan = JSONValidator.validate_editing_plan(raw)

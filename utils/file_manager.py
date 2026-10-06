@@ -115,3 +115,81 @@ class FileManager:
             except Exception as e:
                 print(f"[FileManager] Advertencia al eliminar {item}: {e}")
         return count
+
+    @staticmethod
+    def cleanup_storage(keep_completed_outputs: bool = True) -> Dict[str, Any]:
+        """Limpia archivos temporales, duplicados huérfanos y libera espacio en disco."""
+        freed_bytes = 0
+        deleted_count = 0
+
+        # 1. Limpiar directorio temporal
+        if settings.TEMP_DIR.exists():
+            for item in settings.TEMP_DIR.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        size = item.stat().st_size
+                        item.unlink()
+                        freed_bytes += size
+                        deleted_count += 1
+                    elif item.is_dir():
+                        for f in item.rglob("*"):
+                            if f.is_file():
+                                freed_bytes += f.stat().st_size
+                                deleted_count += 1
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception as exc:
+                    print(f"[FileManager] Error limpiando temp {item}: {exc}")
+
+        # 2. Identificar qué inputs están activamente vinculados a proyectos con plan o resultado
+        active_sources = set()
+        for manifest in settings.PROJECTS_DIR.glob("*/project.json"):
+            try:
+                doc = json.loads(manifest.read_text(encoding="utf-8"))
+                status = doc.get("status")
+                # Si el proyecto terminó con éxito o tiene plan guardado, conservamos su source
+                if status in ("done", "ready_for_export") or doc.get("plan"):
+                    src = doc.get("source_file")
+                    if src:
+                        active_sources.add(Path(src).resolve())
+            except Exception:
+                pass
+
+        # 3. Limpiar inputs huérfanos o duplicados
+        # Agrupar por nombre original y tamaño para conservar solo el más reciente de cada archivo idéntico
+        seen_duplicates: Dict[tuple, list] = {}
+        if settings.INPUTS_DIR.exists():
+            for src in settings.INPUTS_DIR.iterdir():
+                if not src.is_file():
+                    continue
+                size = src.stat().st_size
+                # Obtener nombre original sin el prefijo del task_id
+                stem = src.name.split("_", 1)[-1] if "_" in src.name else src.name
+                seen_duplicates.setdefault((stem, size), []).append(src)
+
+            for (stem, size), files in seen_duplicates.items():
+                # Ordenar por fecha de modificación (el más reciente primero)
+                files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                # Mantener el más reciente si está activo o como única copia
+                keep_first = files[0]
+                for redundant in files[1:]:
+                    # Si no está explícitamente protegido por un proyecto finalizado, borrar
+                    if redundant.resolve() not in active_sources:
+                        try:
+                            f_size = redundant.stat().st_size
+                            redundant.unlink(missing_ok=True)
+                            freed_bytes += f_size
+                            deleted_count += 1
+                            # También limpiar carpeta del proyecto si era un proyecto vacío
+                            proj_id = redundant.name.split("_", 1)[0]
+                            proj_dir = settings.PROJECTS_DIR / proj_id
+                            if proj_dir.exists():
+                                shutil.rmtree(proj_dir, ignore_errors=True)
+                        except Exception as exc:
+                            print(f"[FileManager] Error eliminando input duplicado {redundant}: {exc}")
+
+        return {
+            "freed_bytes": freed_bytes,
+            "freed_mb": round(freed_bytes / (1024 * 1024), 2),
+            "freed_gb": round(freed_bytes / (1024 * 1024 * 1024), 2),
+            "deleted_files": deleted_count,
+        }

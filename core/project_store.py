@@ -71,6 +71,36 @@ class ProjectStore:
             raise ValueError("El proyecto aún no tiene un plan de edición.")
         return VideoEditingPlan.model_validate(doc["plan"])
 
+    def delete(self, include_source: bool = True, include_outputs: bool = True) -> Dict[str, Any]:
+        """Elimina el proyecto y sus recursos asociados liberando espacio en disco."""
+        import shutil
+        freed_bytes = 0
+        try:
+            doc = self.read()
+            if include_source:
+                src = Path(doc.get("source_file") or "")
+                if src.exists() and src.is_file():
+                    freed_bytes += src.stat().st_size
+                    src.unlink(missing_ok=True)
+            if include_outputs:
+                for out_file in settings.OUTPUTS_DIR.glob(f"{self.project_id}_*"):
+                    if out_file.is_file():
+                        freed_bytes += out_file.stat().st_size
+                        out_file.unlink(missing_ok=True)
+                for out_file in settings.OUTPUTS_DIR.glob(f"short_*_{self.project_id}_*"):
+                    if out_file.is_file():
+                        freed_bytes += out_file.stat().st_size
+                        out_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        if self.root.exists():
+            for f in self.root.rglob("*"):
+                if f.is_file():
+                    freed_bytes += f.stat().st_size
+            shutil.rmtree(self.root, ignore_errors=True)
+        return {"freed_bytes": freed_bytes}
+
 
 def editor_snapshot(plan: VideoEditingPlan) -> Dict[str, Any]:
     """Versión compacta y segura para actualizar el editor en el navegador."""

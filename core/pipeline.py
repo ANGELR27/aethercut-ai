@@ -44,13 +44,15 @@ class VideoPipeline:
 
     def __init__(self, task_id: str, input_file: Path, options: PipelineOptions, on_state: StateCb,
                  cancel_event: Optional[threading.Event] = None,
-                 project_store: Optional[ProjectStore] = None):
+                 project_store: Optional[ProjectStore] = None,
+                 render_lock: Optional[asyncio.Lock] = None):
         self.task_id = task_id
         self.input_file = input_file
         self.opt = options
         self.on_state = on_state
         self.cancel_event = cancel_event or threading.Event()
         self.project_store = project_store or ProjectStore(task_id)
+        self.render_lock = render_lock
         self.workdir = self.project_store.workdir
         self.workdir.mkdir(parents=True, exist_ok=True)
 
@@ -341,28 +343,38 @@ class VideoPipeline:
         def render_cb(msg: str, pct: float) -> None:
             self._state("subtitles" if "ubt" in msg or "ranscrib" in msg else "render", 50.0 + pct * 42.0, msg)
 
-        self._state("render", 50.0, "Preparando el corte y la composición final con FFmpeg.")
-        render_info = await self._run_with_heartbeat(
-            loop, lambda: engine.render(self.input_file, plan, mapper, self.workdir, final_master,
-                                        captions_provider, render_cb),
-            "render", 55.0, "FFmpeg está renderizando el master",
-        )
+        async def _execute_render():
+            self._state("render", 50.0, "Preparando el corte y la composición final con FFmpeg.")
+            info = await self._run_with_heartbeat(
+                loop, lambda: engine.render(self.input_file, plan, mapper, self.workdir, final_master,
+                                            captions_provider, render_cb),
+                "render", 55.0, "FFmpeg está renderizando el master",
+            )
 
-        # ---- 6. Short vertical (sale del master: incluye tarjetas y subtítulos) ----
-        short_files: list[Path] = []
-        if plan.highlights:
-            for index, highlight in enumerate(plan.highlights, start=1):
-                self._state("finalizing", 94.0,
-                            f"Generando Short {index} de {len(plan.highlights)}: «{highlight.title}».")
-                placed = mapper.map_first(highlight.start_sec, highlight.end_sec)
-                if placed:
-                    mapped = highlight.model_copy(update={"start_sec": placed[0], "end_sec": placed[1]})
-                    short_file = await self._run_with_heartbeat(
-                        loop, lambda: engine.extract_vertical_short(final_master, mapped, settings.OUTPUTS_DIR),
-                        "finalizing", 95.0, f"FFmpeg está generando el Short {index} de {len(plan.highlights)}",
-                    )
-                    if short_file:
-                        short_files.append(short_file)
+            # ---- 6. Short vertical (sale del master: incluye tarjetas y subtítulos) ----
+            shorts: list[Path] = []
+            if plan.highlights:
+                for index, highlight in enumerate(plan.highlights, start=1):
+                    self._state("finalizing", 94.0,
+                                f"Generando Short {index} de {len(plan.highlights)}: «{highlight.title}».")
+                    placed = mapper.map_first(highlight.start_sec, highlight.end_sec)
+                    if placed:
+                        mapped = highlight.model_copy(update={"start_sec": placed[0], "end_sec": placed[1]})
+                        short_file = await self._run_with_heartbeat(
+                            loop, lambda: engine.extract_vertical_short(final_master, mapped, settings.OUTPUTS_DIR),
+                            "finalizing", 95.0, f"FFmpeg está generando el Short {index} de {len(plan.highlights)}",
+                        )
+                        if short_file:
+                            shorts.append(short_file)
+            return info, shorts
+
+        if self.render_lock:
+            if self.render_lock.locked():
+                self._state("render", 50.0, "En cola de render: esperando turno de codificación para proteger CPU/GPU.")
+            async with self.render_lock:
+                render_info, short_files = await _execute_render()
+        else:
+            render_info, short_files = await _execute_render()
 
         cut = [s for s in plan.timeline if s.action == ActionType.CUT_SILENCE]
         placed_cards = {o["path"] for o in render_info["overlays"] if o["kind"] == "card"}

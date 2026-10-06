@@ -1,7 +1,9 @@
 import json
 import re
-from typing import Any, Dict
-from core.models import VideoEditingPlan
+from typing import Any, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.models import VideoEditingPlan
 
 class JSONParsingError(Exception):
     """Excepción lanzada cuando la respuesta no puede ser parseada a JSON válido."""
@@ -35,7 +37,8 @@ class JSONValidator:
             raise JSONParsingError(f"No fue posible parsear el JSON de Gemini: {err}\nTexto original:\n{raw_text[:500]}...")
 
     @classmethod
-    def validate_editing_plan(cls, raw_text: str) -> VideoEditingPlan:
+    def validate_editing_plan(cls, raw_text: str):
         """Valida que el texto cumpla con el modelo VideoEditingPlan."""
+        from core.models import VideoEditingPlan
         data = cls.extract_and_parse(raw_text)
         return VideoEditingPlan.model_validate(data)

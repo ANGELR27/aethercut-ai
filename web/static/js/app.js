@@ -267,8 +267,13 @@ document.addEventListener("DOMContentLoaded", () => {
             list.replaceChildren();
             card.hidden = !projects.length;
             projects.forEach((project) => {
+                const row = document.createElement("div");
+                row.className = "saved-project-row";
+                row.style.cssText = "display:flex; align-items:center; gap:6px; width:100%;";
+
                 const button = document.createElement("button");
                 button.type = "button"; button.className = "saved-project";
+                button.style.flex = "1";
                 const copy = document.createElement("span");
                 const name = document.createElement("b"); name.textContent = project.name || "Video sin nombre";
                 const detail = document.createElement("span"); detail.textContent = project.has_result ? "Edición terminada" : project.has_plan ? "Plan listo para revisar" : "Carga conservada · reanudar sin subir";
@@ -288,9 +293,49 @@ document.addEventListener("DOMContentLoaded", () => {
                         setConnection("error", "No se pudo abrir");
                     });
                 });
-                list.append(button);
+
+                const delBtn = document.createElement("button");
+                delBtn.type = "button";
+                delBtn.className = "del-project-btn";
+                delBtn.title = "Eliminar proyecto y liberar espacio";
+                delBtn.textContent = "×";
+                delBtn.style.cssText = "width:28px; height:28px; border-radius:8px; border:1px solid var(--border); background:var(--surface-inset); color:var(--tertiary); cursor:pointer; font-size:16px; display:grid; place-items:center; flex-shrink:0;";
+                delBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`¿Eliminar proyecto «${project.name}»? Se liberará el espacio ocupado.`)) return;
+                    try {
+                        const res = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+                        if (res.ok) {
+                            loadSavedProjects();
+                        }
+                    } catch (err) {
+                        console.error("Error eliminando proyecto:", err);
+                    }
+                });
+
+                row.append(button, delBtn);
+                list.append(row);
             });
         } catch { /* la edición nueva funciona aunque no se pueda leer el historial */ }
+    }
+
+    const cleanupBtn = $("cleanupStorageBtn");
+    if (cleanupBtn) {
+        cleanupBtn.addEventListener("click", async () => {
+            cleanupBtn.disabled = true;
+            cleanupBtn.textContent = "Limpiando…";
+            try {
+                const res = await fetch("/api/cleanup", { method: "POST" });
+                const data = await res.json();
+                alert(`Limpieza completada:\n• Espacio liberado: ${data.freed_mb || 0} MB (${data.freed_gb || 0} GB)\n• Archivos temporales eliminados: ${data.deleted_files || 0}`);
+                loadSavedProjects();
+            } catch (err) {
+                alert("Error durante la limpieza: " + err.message);
+            } finally {
+                cleanupBtn.disabled = false;
+                cleanupBtn.textContent = "🧹 Limpiar";
+            }
+        });
     }
 
     function setConnection(kind, label) {

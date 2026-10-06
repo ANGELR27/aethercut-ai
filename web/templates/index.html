@@ -74,9 +74,12 @@
                 <p class="local-note">El análisis del contenido se envía a Gemini. Las opciones web consultan sus fuentes cuando están activadas.</p>
             </section>
             <section class="card projects-card" id="savedProjectsCard" hidden>
-                <div class="section-heading compact-heading">
-                    <span class="section-kicker">PROYECTOS GUARDADOS</span>
-                    <h2>Continuar una edición</h2>
+                <div class="section-heading compact-heading" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <span class="section-kicker">PROYECTOS GUARDADOS</span>
+                        <h2>Continuar una edición</h2>
+                    </div>
+                    <button id="cleanupStorageBtn" type="button" class="cancel-task" style="margin-left:auto; font-size:10px; border-color:var(--border); color:var(--secondary);" title="Liberar espacio y limpiar archivos temporales">🧹 Limpiar</button>
                 </div>
                 <div id="savedProjectsList" class="saved-projects"></div>
             </section>
