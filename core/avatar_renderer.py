@@ -42,11 +42,15 @@ class AvatarRenderer:
         self.talk_path = self.avatar_dir / "talking.jpg"
         self.point_path = self.avatar_dir / "pointing.jpg"
         self.blink_path = self.avatar_dir / "blink.jpg"
+        self.think_path = self.avatar_dir / "thinking.jpg"
+        self.happy_path = self.avatar_dir / "happy.jpg"
 
         self.idle_img = self._load_img(self.idle_path)
         self.talk_img = self._load_img(self.talk_path)
         self.point_img = self._load_img(self.point_path)
         self.blink_img = self._load_img(self.blink_path, fallback=self.idle_img)
+        self.think_img = self._load_img(self.think_path, fallback=self.point_img)
+        self.happy_img = self._load_img(self.happy_path, fallback=self.talk_img)
 
     def _load_img(self, path: Path, fallback: Optional[Image.Image] = None) -> Image.Image:
         if path.exists():
@@ -128,6 +132,8 @@ class AvatarRenderer:
         img_talk = self.talk_img.resize((size, size), Image.Resampling.LANCZOS)
         img_point = self.point_img.resize((size, size), Image.Resampling.LANCZOS)
         img_blink = self.blink_img.resize((size, size), Image.Resampling.LANCZOS)
+        img_think = self.think_img.resize((size, size), Image.Resampling.LANCZOS)
+        img_happy = self.happy_img.resize((size, size), Image.Resampling.LANCZOS)
 
         f_tag = _get_font(["segoeuib.ttf", "arialbd.ttf"], 13)
 
@@ -139,8 +145,9 @@ class AvatarRenderer:
 
                 # Selección del fotograma según la fase y la energía del habla
                 if i < intro_frames:
-                    current_img = img_point
-                    energy = 0.5
+                    # Entrada expresiva: comienza analizando y apunta con la mano hacia la tarjeta
+                    current_img = img_think if i < (intro_frames // 2) else img_point
+                    energy = 0.4
                 elif i >= total_frames - outro_frames:
                     current_img = img_idle
                     energy = 0.0
@@ -149,16 +156,17 @@ class AvatarRenderer:
                     energy = envelope[i] if envelope else 0.2
                 elif envelope:
                     energy = envelope[i]
-                    if energy > 0.32:
-                        current_img = img_talk
-                    elif energy > 0.13:
-                        current_img = img_point
+                    if energy > 0.58:
+                        current_img = img_happy   # Sonrisa amplia y énfasis en picos vocales
+                    elif energy > 0.25:
+                        current_img = img_talk    # Articulación normal de voz
+                    elif energy > 0.10:
+                        current_img = img_point   # Gesto hacia la información
                     else:
-                        current_img = img_idle
+                        current_img = img_idle    # Pausas naturales y escucha atenta
                 else:
-                    # Alternancia orgánica si no hay audio procesado
-                    cycle = (i // 3) % 4
-                    current_img = img_talk if cycle in (0, 2) else (img_point if cycle == 1 else img_idle)
+                    cycle = (i // 4) % 4
+                    current_img = img_talk if cycle == 0 else (img_happy if cycle == 1 else (img_point if cycle == 2 else img_idle))
                     energy = 0.4
 
                 # Micro-movimiento humano de respiración y gesticulación (sway/bobbing)
@@ -175,24 +183,36 @@ class AvatarRenderer:
                 d.ellipse((4, 4, size - 4, size - 4), outline=(56, 189, 248, alpha_cyan), width=3)
                 d.ellipse((8, 8, size - 8, size - 8), outline=(99, 102, 241, int(100 + 60 * energy)), width=1)
 
-                # Insignia KAI COPILOT
-                tag_w = 120
+                # Insignia KAI COPILOT con rayo vectorial nítido
+                tag_w = 126
                 tag_h = 24
                 tx = (size - tag_w) // 2
                 ty = size - 34
                 d.rounded_rectangle(
                     (tx, ty, tx + tag_w, ty + tag_h),
                     radius=12,
-                    fill=(10, 14, 22, 230),
-                    outline=(56, 189, 248, 190),
+                    fill=(10, 14, 22, 235),
+                    outline=(56, 189, 248, 200),
                     width=1,
                 )
+                # Rayo vectorial dorado
+                bx = tx + 14
+                by = ty + 12
+                bolt_pts = [
+                    (bx + 2, by - 6),
+                    (bx - 4, by + 1),
+                    (bx, by + 1),
+                    (bx - 2, by + 6),
+                    (bx + 4, by - 1),
+                    (bx, by - 1)
+                ]
+                d.polygon(bolt_pts, fill=(251, 191, 36, 255))
                 d.text(
-                    (size // 2, ty + 12),
-                    "⚡ KAI COPILOT",
+                    (tx + 24, ty + 12),
+                    "KAI COPILOT",
                     font=f_tag,
                     fill=(255, 255, 255, 255),
-                    anchor="mm",
+                    anchor="lm",
                 )
 
                 canvas.save(temp_dir / f"f_{i:04d}.png")
