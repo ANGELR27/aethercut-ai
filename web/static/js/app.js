@@ -716,10 +716,12 @@ document.addEventListener("DOMContentLoaded", () => {
             }).join("");
             const detail = card.verdict === "supported" ? card.body
                 : card.verdict === "contradicted" ? (card.note || "Se detectó una diferencia con las fuentes consultadas.")
-                    : (card.note || "No se encontró evidencia suficiente.");
+            const avatarHtml = card.avatar_spoken_text
+                ? `<div class="avatar-voice" style="margin-top:8px; font-size:12px; color:#38bdf8; background:rgba(56,189,248,0.08); padding:6px 10px; border-radius:6px; border-left:3px solid #38bdf8; display:flex; align-items:center; gap:6px;"><span>⚡ <b>KAI Copilot:</b></span> <span>«${esc(card.avatar_spoken_text)}»</span></div>`
+                : "";
             item.innerHTML = `<div class="fact-top"><b>${esc(card.headline)}</b><span class="badge ${style}">${label}${card.shown ? " · en el video" : ""}</span></div>
                 <p class="claim">Afirmación (${esc(card.at_sec)} s): ${esc(card.claim)}</p>
-                <p>${esc(detail)}</p>${sources ? `<div class="srcs">${sources}</div>` : ""}`;
+                <p>${esc(detail)}</p>${avatarHtml}${sources ? `<div class="srcs">${sources}</div>` : ""}`;
             list.appendChild(item);
         });
     }

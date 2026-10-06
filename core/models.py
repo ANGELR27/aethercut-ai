@@ -58,6 +58,11 @@ class InfoCard(BaseModel):
     enabled: bool = Field(default=True, description="Permite al editor ocultar la tarjeta sin borrar su investigación")
     screen_position: str = Field(default="auto", description="auto, upper_left, upper_right, lower_left o lower_right")
     display_duration_sec: float = Field(default=7.0, ge=4.5, le=12.0, description="Tiempo visible para que la tarjeta pueda leerse")
+    # --- Avatar Copilot fields ---
+    avatar_spoken_text: Optional[str] = Field(default=None, description="Frase hablada que el avatar pronuncia")
+    avatar_audio_path: Optional[str] = Field(default=None, description="Ruta al archivo de audio MP3 de voz generado")
+    avatar_video_path: Optional[str] = Field(default=None, description="Ruta al clip de video WebM con canal alfa del avatar")
+    avatar_enabled: bool = Field(default=True, description="Habilita que el avatar intervenga hablando en esta tarjeta")
 
 class CaptionItem(BaseModel):
     """Segmento de subtítulo con temporización para subtitulado dinámico."""

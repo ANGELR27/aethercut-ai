@@ -15,7 +15,11 @@ from core.visual_analysis import VisualAnalyzer
 ProgressCb = Optional[Callable[[str, float], None]]
 
 VIDEO_EXT = (".mp4", ".mov", ".webm", ".mkv")
-ENC_FINAL = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
+ENC_FINAL = [
+    "-c:v", "libx264", "-preset", "medium", "-crf", "17",
+    "-pix_fmt", "yuv420p", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+    "-b:a", "256k"
+]
 ENC_INTERMEDIATE = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-pix_fmt", "yuv420p"]
 
 
@@ -124,6 +128,21 @@ class VideoRenderEngine:
                     else:
                         items.append({"kind": "card", "path": paths[0], "start": s, "dur": d, "position": position})
 
+                    # Avatar Copilot overlay si está configurado y renderizado
+                    if getattr(card, "avatar_enabled", False) and getattr(card, "avatar_video_path", None):
+                        av_p = Path(card.avatar_video_path)
+                        if av_p.exists():
+                            av_dur = min(d, 6.0)
+                            av_pos = "lower_right" if position in ("auto", "upper_right") else "lower_left"
+                            items.append({
+                                "kind": "avatar",
+                                "path": str(av_p),
+                                "audio_path": getattr(card, "avatar_audio_path", None),
+                                "start": s,
+                                "dur": av_dur,
+                                "position": av_pos,
+                            })
+
         for cue in plan.b_rolls:
             if not cue.enabled or cue.download_status != "COMPLETED" or not cue.local_file_path:
                 continue
@@ -147,7 +166,7 @@ class VideoRenderEngine:
         final = []
         for it in items:
             position = it.get("position", "auto")
-            zone = "full" if it["kind"] == "video" else (position if it["kind"] == "card" and position != "auto" else ("right" if it["kind"] == "card" else "left"))
+            zone = "full" if it["kind"] == "video" else (position if position != "auto" else ("right" if it["kind"] == "card" else "left"))
             blockers = [zone, "full"] if zone != "full" else ["full", "right", "left"]
             if any(zone_free.get(z, -1) > it["start"] for z in blockers):
                 continue
@@ -162,6 +181,7 @@ class VideoRenderEngine:
         chains, cur = [], "0:v"
         audio_map = "0:a?"
         audio_filters: List[str] = []
+        audio_mix_inputs: List[Tuple[str, float, float]] = []
         
         # 1. Dynamic Zoom (Punch-ins)
         if zoom_segments:
@@ -185,6 +205,23 @@ class VideoRenderEngine:
                     f"setpts=PTS-STARTPTS+{s:.3f}/TB[o{i}]"
                 )
                 pos_x, pos_y = "0", "0"
+            elif it["kind"] == "avatar":
+                cmd += ["-t", f"{d:.2f}", "-i", it["path"]]
+                av_size = int(min(W, H) * 0.28)
+                chains.append(
+                    f"[{i}:v]scale={av_size}:{av_size},fps={self.fps},format=yuva420p,"
+                    f"fade=t=in:st=0:d=0.25:alpha=1,fade=t=out:st={fo:.2f}:d=0.3:alpha=1,"
+                    f"setpts=PTS-STARTPTS+{s:.3f}/TB[o{i}]"
+                )
+                slide = int(W * 0.03)
+                ease = f"pow(1-min((t-{s:.3f})/0.4\\,1)\\,3)"
+                position = it.get("position", "lower_right")
+                right = position in ("upper_right", "lower_right")
+                upper = position in ("upper_left", "upper_right")
+                pos_x = f"W-w-{margin_x}+{slide}*{ease}" if right else f"{margin_x}-{slide}*{ease}"
+                pos_y = str(margin_y) if upper else f"H-h-{margin_y}"
+                if it.get("audio_path") and Path(it["audio_path"]).exists():
+                    audio_mix_inputs.append((it["audio_path"], s, d))
             else:
                 cmd += ["-loop", "1", "-framerate", str(self.fps), "-t", f"{d:.2f}", "-i", it["path"]]
                 chains.append(
@@ -213,8 +250,22 @@ class VideoRenderEngine:
             chains.append(f"[{cur}]ass='{_ff_path(ass_file)}'[vout]")
             cur = "vout"
             
-        # Audio Bleep (Censorship)
-        if censor_segments:
+        # Audio Composition: mezcla de voz de avatar con ducking o censura
+        if audio_mix_inputs:
+            duck_expr = "+".join(f"between(t,{st:.3f},{st+dr:.3f})" for _, st, dr in audio_mix_inputs)
+            chains.append(f"[0:a]volume='if({duck_expr},0.32,1.0)':eval=frame[a_base_ducked]")
+            mix_tags = ["[a_base_ducked]"]
+            for k, (a_path, st, dr) in enumerate(audio_mix_inputs):
+                cmd += ["-i", str(a_path)]
+                in_idx = len(overlays) + 1 + k
+                delay_ms = int(st * 1000)
+                tag = f"a_av_{k}"
+                chains.append(f"[{in_idx}:a]adelay={delay_ms}|{delay_ms},volume=1.25[{tag}]")
+                mix_tags.append(f"[{tag}]")
+            chains.append(f"{''.join(mix_tags)}amix=inputs={len(mix_tags)}:duration=first:dropout_transition=2[a_mixed]")
+            chains.append("[a_mixed]loudnorm=I=-16:LRA=11:TP=-1.5[a_norm]")
+            audio_map = "[a_norm]"
+        elif censor_segments:
             # Silence original audio in censor windows
             mute_expr = "+".join(f"between(t,{c['start']:.3f},{c['start']+c['dur']:.3f})" for c in censor_segments)
             chains.append(f"[0:a]volume='1-min(1,({mute_expr}))':eval=frame[a_muted]")

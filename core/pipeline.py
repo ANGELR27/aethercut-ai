@@ -317,7 +317,47 @@ class VideoPipeline:
 
         await self._run_with_heartbeat(loop, design, "cards", 47.0,
                                        "Diseñando tarjetas y preparando los apoyos visuales")
-        self._publish_plan(plan, "cards", 49.0, "Tarjetas listas para previsualizar y editar.")
+
+        # ---- 4.2 Narración y Avatar Reactivo Copiloto IA (Microsoft Neural TTS) ----
+        self._state("cards", 47.5, "Preparando voz neural y animación reactiva para el avatar copiloto...")
+        try:
+            from core.avatar_narrator import AvatarNarrator
+            from core.avatar_renderer import AvatarRenderer
+
+            narrator = AvatarNarrator()
+            avatar_rnd = AvatarRenderer(badge_size=int(min(frame_w, frame_h) * 0.28))
+
+            async def prepare_avatars():
+                eligible = [
+                    c for c in plan.info_cards
+                    if c.enabled and c.verdict in ("supported", "contradicted", "insufficient")
+                ]
+                eligible.sort(key=lambda c: 0 if c.verdict == "contradicted" else (1 if c.stat_value else 2))
+                for card in eligible[:4]:
+                    if self.cancel_event and self.cancel_event.is_set():
+                        raise CancellationRequested()
+                    try:
+                        if not card.avatar_spoken_text:
+                            card.avatar_spoken_text = narrator.craft_dialogue(card)
+                        
+                        audio_file = self.workdir / f"{card.card_id}_voice.mp3"
+                        _p, dur = await narrator.synthesize(card.avatar_spoken_text, audio_file)
+                        card.avatar_audio_path = str(audio_file)
+
+                        video_file = self.workdir / f"{card.card_id}_avatar.webm"
+                        rendered = avatar_rnd.render_reaction_clip(dur + 0.4, video_file)
+                        if rendered:
+                            card.avatar_video_path = str(rendered)
+                            card.avatar_enabled = True
+                            safe_log(f"[Pipeline] Avatar reactivo listo para {card.card_id} ({dur:.1f}s): {card.avatar_spoken_text}")
+                    except Exception as exc:
+                        safe_log(f"[Pipeline] No se pudo generar avatar para {card.card_id}: {exc}")
+
+            await prepare_avatars()
+        except Exception as exc:
+            safe_log(f"[Pipeline] Error inicializando Avatar Copilot: {exc}")
+
+        self._publish_plan(plan, "cards", 49.0, "Tarjetas y avatar reactivo listos para el montaje.")
 
         # ---- 4.5 Control de calidad local antes de gastar CPU en el render ----
         report = PlanQualityGate(duration).apply(plan)
@@ -394,6 +434,7 @@ class VideoPipeline:
                     "headline": c.headline, "kind": c.kind, "verdict": c.verdict, "body": c.body,
                     "claim": c.claim, "note": c.note, "shown": bool(c.card_path and c.card_path in placed_cards),
                     "at_sec": round(c.start_sec, 1),
+                    "avatar_spoken_text": c.avatar_spoken_text,
                     "sources": [s.model_dump() for s in c.sources],
                 }
                 for c in plan.info_cards
