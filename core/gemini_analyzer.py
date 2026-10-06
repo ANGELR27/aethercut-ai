@@ -88,9 +88,9 @@ class GeminiVideoAnalyzer:
                 raw = self.llm.generate(
                     [uploaded, prompt], json_mode=True, progress=progress, client=client,
                     cancel_event=cancel_event,
-                    # Permite recorrer todos los modelos de respaldo configurados
-                    # antes de descartar la clave del proyecto actual.
-                    max_models=len(self.llm.models),
+                    # Probar el modelo principal de este proyecto; si está saturado (503),
+                    # saltar de inmediato al siguiente proyecto sin perder minutos probando modelos viejos.
+                    max_models=1,
                 )
                 safe_log(f"[GeminiAnalyzer] Respuesta recibida de {self.llm.last_model_used}. Validando JSON...")
                 plan = JSONValidator.validate_editing_plan(raw)
@@ -111,11 +111,11 @@ class GeminiVideoAnalyzer:
                 if status not in self.llm.PROJECT_FAILOVER_STATUSES:
                     raise
                 last_error = exc if isinstance(exc, GeminiAPIError) else GeminiAPIError(status, str(exc))
-                safe_log(f"[GeminiAnalyzer] {project_label} falló con HTTP {status}; se probará el siguiente.")
+                safe_log(f"[GeminiAnalyzer] {project_label} falló con HTTP {status}; rotando inmediatamente al siguiente proyecto.")
                 if progress and index < len(api_keys):
                     progress(
-                        f"{project_label} no respondió al análisis (HTTP {status}). "
-                        f"Se probará el proyecto {index + 1} de {len(api_keys)}."
+                        f"{project_label} ocupado en Google (HTTP {status}). "
+                        f"Rotando al Proyecto {index + 1} de {len(api_keys)}..."
                     )
             finally:
                 if uploaded and client:
@@ -123,6 +123,24 @@ class GeminiVideoAnalyzer:
                         client.files.delete(name=uploaded.name)
                     except Exception as exc:
                         safe_log(f"[GeminiAnalyzer] No se pudo borrar el archivo remoto de {project_label}: {exc}")
+
+        # Si los servidores de video de Gemini están saturados pero tenemos transcripción de audio:
+        if transcript:
+            safe_log("[GeminiAnalyzer] Servidores de video de Gemini saturados (503). Continuando análisis con transcripción de audio...")
+            if progress:
+                progress("Servidores de video de Google en alta demanda temporal; completando análisis con transcripción de audio...")
+            for index, api_key in enumerate(api_keys, start=1):
+                try:
+                    client = self.llm.client_for_key(api_key)
+                    raw = self.llm.generate(
+                        [prompt], json_mode=True, progress=progress, client=client,
+                        cancel_event=cancel_event, max_models=1,
+                    )
+                    safe_log(f"[GeminiAnalyzer] Plan generado exitosamente con transcripción usando {self.llm.last_model_used}.")
+                    return JSONValidator.validate_editing_plan(raw)
+                except Exception as exc:
+                    safe_log(f"[GeminiAnalyzer] Análisis con transcripción en proyecto {index} falló: {exc}")
+                    continue
 
         if isinstance(last_error, GeminiAPIError):
             raise RuntimeError(

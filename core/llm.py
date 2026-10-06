@@ -179,13 +179,10 @@ class LLMClient:
                             raise GeminiAPIError(status, str(exc)) from exc
                         report("Este proyecto alcanzó su cuota temporal; probando el siguiente proyecto.")
                         continue
-                    # El archivo sigue ligado a este proyecto, pero un 503 de
-                    # modelo no implica que el proyecto esté agotado. Permitimos
-                    # probar el siguiente modelo estable (3.6 -> 3.7) antes de
-                    # subir de nuevo el archivo con la siguiente clave.
                     if client is not None and status in (500, 502, 503, 504):
-                        report(f"{model} está saturado; probando otro modelo de este proyecto.")
-                        break
+                        # Cuando Google devuelve 503 (alta demanda), el proyecto completo o su cuota está congestionado.
+                        # Rotar de inmediato a la siguiente clave/proyecto evita demoras innecesarias entre modelos.
+                        raise GeminiAPIError(status, str(exc)) from exc
                     if client is not None and status is None:
                         raise GeminiAPIError(503, str(exc)) from exc
                     delay = min(2 * attempt, 4)

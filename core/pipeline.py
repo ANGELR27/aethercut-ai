@@ -144,21 +144,19 @@ class VideoPipeline:
         self._state("transcribe", 2.0, "Preparando transcripción local para apoyar el análisis.")
         transcript_text = None
         whisper_caps = None
-        if opt.captions:
-            try:
-                whisper_caps = await self._run_with_heartbeat(
-                    loop, lambda: WhisperTranscriber().transcribe(self.input_file, [], cancel_event=self.cancel_event),
-                    "transcribe", 2.0, "Whisper está transcribiendo el audio",
-                )
-                if whisper_caps:
-                    transcript_text = "\n".join(f"[{c.start_sec:.1f}-{c.end_sec:.1f}] {c.text}" for c in whisper_caps)
-            except CancellationRequested:
-                raise
-            except Exception as exc:
-                safe_log(f"[Pipeline] Error en Whisper pre-análisis: {exc}")
-                self._state("transcribe", 5.0, f"No se pudo completar Whisper; Gemini continuará con el video. ({str(exc)[:100]})")
-        else:
-            self._state("transcribe", 5.0, "Transcripción de subtítulos desactivada; se continúa sin Whisper.")
+        try:
+            whisper_caps = await self._run_with_heartbeat(
+                loop, lambda: WhisperTranscriber().transcribe(self.input_file, [], cancel_event=self.cancel_event),
+                "transcribe", 2.0, "Whisper está transcribiendo el audio localmente",
+            )
+            if whisper_caps:
+                transcript_text = "\n".join(f"[{c.start_sec:.1f}-{c.end_sec:.1f}] {c.text}" for c in whisper_caps)
+                self._state("transcribe", 5.0, f"Transcripción local lista ({len(whisper_caps)} frases).")
+        except CancellationRequested:
+            raise
+        except Exception as exc:
+            safe_log(f"[Pipeline] Error en Whisper pre-análisis: {exc}")
+            self._state("transcribe", 5.0, "Continuando análisis directamente con Gemini.")
 
         # ---- 1. Gemini ----
         llm = LLMClient()
