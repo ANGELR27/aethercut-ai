@@ -18,9 +18,10 @@ import edge_tts
 
 from core.models import InfoCard
 
-DEFAULT_VOICE = "es-MX-JorgeNeural"  # Voz masculina enérgica y profesional
-VOICE_FEMALE = "es-MX-DaliaNeural"   # Voz femenina cálida y amigable
-VOICE_SPAIN = "es-ES-AlvaroNeural"    # Voz estilo divulgación tecnológica España
+DEFAULT_VOICE = "es-CO-GonzaloNeural"  # Voz ultra-natural, conversacional y neutra (sin tono robótico)
+VOICE_LATINO = "es-US-AlonsoNeural"    # Voz neutra estilo locutor internacional
+VOICE_FEMALE = "es-MX-DaliaNeural"     # Voz femenina cálida y amigable
+VOICE_SPAIN = "es-ES-AlvaroNeural"      # Voz estilo divulgación tecnológica España
 
 
 class AvatarNarrator:
@@ -69,7 +70,7 @@ class AvatarNarrator:
         chosen_voice = voice or self.voice
         out_path.parent.mkdir(parents=True, exist_ok=True)
         
-        communicate = edge_tts.Communicate(text, chosen_voice, rate="+5%")
+        communicate = edge_tts.Communicate(text, chosen_voice, rate="+0%")
         await communicate.save(str(out_path))
 
         duration = self.get_audio_duration(out_path)
