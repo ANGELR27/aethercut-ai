@@ -716,6 +716,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }).join("");
             const detail = card.verdict === "supported" ? card.body
                 : card.verdict === "contradicted" ? (card.note || "Se detectó una diferencia con las fuentes consultadas.")
+                : (card.note || "No se encontró evidencia suficiente.");
             const avatarHtml = card.avatar_spoken_text
                 ? `<div class="avatar-voice" style="margin-top:8px; font-size:12px; color:#38bdf8; background:rgba(56,189,248,0.08); padding:6px 10px; border-radius:6px; border-left:3px solid #38bdf8; display:flex; align-items:center; gap:6px;"><span>⚡ <b>KAI Copilot:</b></span> <span>«${esc(card.avatar_spoken_text)}»</span></div>`
                 : "";
