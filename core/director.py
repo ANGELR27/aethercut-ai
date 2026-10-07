@@ -69,7 +69,8 @@ REQUISITO CRÍTICO E INNEGOCIABLE DE DURACIÓN:
 - Ritmo de lectura: 140 palabras por minuto (2.33 palabras por segundo).
 - Si la duración es de 3 minutos o más, es OBLIGATORIO desarrollar cada escena con argumentos completos,
   contexto histórico, datos precisos, ejemplos concretos, comparaciones y reflexiones. NO RESUMAS.
-- NUNCA escribas frases cortas de 1-2 líneas como speech. Cada speech debe ser un PÁRRAFO COMPLETO Y EXTENSO.
+- RITMO AUDIOVISUAL DINÁMICO: Ningún plano ni fondo debe permanecer estático por mucho tiempo. Cada escena debe cambiar de perspectiva: alternar entre el gancho directo del avatar, tomas de B-Roll documental reactivo en pantalla completa, tarjetas Bento con cifras duras y momentos de debate.
+- NUNCA escribas frases cortas de 1-2 líneas como speech. Cada speech debe ser un PÁRRAFO COMPLETO Y NUTRIDO.
 
 REGLAS DE GANCHO Y ENTRADA (PROHIBIDO SALUDOS CLICHÉ):
 - NUNCA comiences diciendo "¡Hola a todos!", "Bienvenidos a mi canal", "En este video vamos a ver...", o saludos genéricos de relleno.
@@ -172,20 +173,20 @@ class AIDirector:
         """Pide a Gemini dirigir la emisión completa escena por escena."""
         safe_log(f"[AIDirector] Planificando y dirigiendo transmisión para: «{topic}» ({duration_target}s)")
 
-        # Calcular distribución de escenas y palabras según la duración objetivo
+        # Dinamismo profesional de YouTube/TikTok: cambio de escena visual cada 16 a 24 segundos
         dur = max(30, duration_target)
-        if dur <= 90:
-            num_scenes = 4
-        elif dur <= 200:
-            num_scenes = 5
-        elif dur <= 400:
-            num_scenes = 6
+        if dur <= 60:
+            num_scenes = max(3, dur // 18)
+        elif dur <= 180:
+            num_scenes = max(6, dur // 22)
+        elif dur <= 360:
+            num_scenes = max(10, dur // 25)
         else:
-            num_scenes = min(8, max(6, dur // 80))
+            num_scenes = min(20, max(12, dur // 28))
 
         seconds_per_scene = round(dur / num_scenes)
         # ~140 palabras por minuto = ~2.33 palabras por segundo
-        words_per_scene = max(30, round(seconds_per_scene * 2.33))
+        words_per_scene = max(25, round(seconds_per_scene * 2.33))
         total_words = words_per_scene * num_scenes
 
         if dur >= 600:

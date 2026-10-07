@@ -121,6 +121,15 @@ class SceneEngine:
         if not broll_img:
             broll_img = await self._get_scene_visual(scene.visual_query, scene_dir)
 
+        # Si no se pudo obtener B-Roll o falló la descarga, NUNCA dejar la pantalla en negro:
+        # Usar el fondo de estudio ambiental desenfocado en alta definición
+        if not broll_img or not broll_img.exists():
+            studio_blur_path = Path("assets/streamer_studio_blur_9_16.jpg" if self.is_vertical else "assets/streamer_studio_blur_16_9.jpg")
+            if studio_blur_path.exists():
+                broll_img = studio_blur_path
+            elif Path("assets/streamer_studio_room.jpg").exists():
+                broll_img = Path("assets/streamer_studio_room.jpg")
+
         # Generar clip de avatar con sincronización reactiva labial a la voz de la escena
         scene_avatar_clip = scene_dir / "kai_avatar_synced.mov"
         try:
@@ -290,12 +299,12 @@ class SceneEngine:
             "-map", "[v_out]",
             "-map", "[a_out]",
             "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "22",
+            "-preset", "veryfast",
+            "-crf", "18",
             "-pix_fmt", "yuv420p",
-            "-x264-params", "threads=2:lookahead_threads=1:rc-lookahead=0",
+            "-x264-params", "threads=3:rc-lookahead=10",
             "-c:a", "aac",
-            "-b:a", "192k",
+            "-b:a", "256k",
             "-t", dur_str,
             str(scene_out),
         ]

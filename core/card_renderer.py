@@ -183,10 +183,10 @@ class InfoCardRenderer:
 
         has_photo = bool(image_path and Path(image_path).exists())
 
-        # Dimensiones compactas y ergonómicas
-        card_w = 480 if not has_photo else 560
+        # Dimensiones de alto impacto visual y legibilidad óptima en Full HD
+        card_w = 620 if not has_photo else 720
         if self.portrait:
-            card_w = min(card_w, int(self.frame_w * 0.88))
+            card_w = min(card_w, int(self.frame_w * 0.90))
 
         pad_x = 22
         pad_y = 20
