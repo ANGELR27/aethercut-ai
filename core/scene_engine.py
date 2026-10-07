@@ -229,11 +229,11 @@ class SceneEngine:
             filter_parts.append(f"[{cur_v}][{ch_idx}:v]overlay={cx}:{cy}:enable='between(t,0.5,{duration-0.3:.2f})'[v_chat]")
             cur_v = "v_chat"
 
-        # Subtítulos con libass
+        # Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
         if srt_path and srt_path.exists():
             esc_srt = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
-            sub_size = 20 if self.is_vertical else 16
-            margin_v = 45 if self.is_vertical else 26
+            sub_size = 18 if self.is_vertical else 14
+            margin_v = 40 if self.is_vertical else 20
             filter_parts.append(
                 f"[{cur_v}]subtitles='{esc_srt}':force_style='FontName=Segoe UI,FontSize={sub_size},Bold=1,PrimaryColour=&H00FFFFFF,BorderStyle=3,OutlineColour=&HB2000000,MarginV={margin_v}'[v_sub]"
             )

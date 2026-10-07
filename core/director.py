@@ -92,12 +92,13 @@ REGLAS DE TONO Y ESTILO (NATURALIDAD PURA):
 
 REGLAS DE SELECCIÓN VISUAL (B-ROLL & IMÁGENES REALES DE ALTA CALIDAD):
 - El campo "visual_query" para cada escena DEBE ser en inglés y describir una ESCENA REALISTA, FOTOGRÁFICA O DOCUMENTAL concreta relacionada DIRECTAMENTE con el contenido exacto que se está debatiendo en esa escena (ej: "dog smelling grass close up 4k high resolution", "artificial intelligence data center gpu servers 4k", "electric car lithium battery manufacturing plant").
+- PROHIBIDO buscar capturas de pantalla de interfaces de software, Notion, dashboards SaaS o páginas web genéricas a menos que se trate específicamente de un software puntual. Si se habla de ciencia, innovación o naturaleza, busca el laboratorio, el animal, el espacio o la fábrica en acción fotográfica documental.
 - NUNCA pongas términos genéricos como "technology abstract", "futuristic concept", "cool wallpaper". Sé hiper-específico al hecho, ser vivo, dispositivo o contexto del que se habla.
 ==============================================================================
 
 TIPOS DE ESCENA DISPONIBLES:
 1. "avatar_cam": KAI en plano principal hablando directamente al espectador. Ideal para el gancho inicial (Hook directo) y la conclusión final reflexiva.
-2. "video_reaction": Video o B-Roll temático en pantalla completa mientras KAI aparece en recuadro PIP en la esquina reaccionando en vivo ("¡Fíjense en este detalle exacto...!").
+2. "video_reaction": B-Roll fotográfico o de video en pantalla completa mientras KAI aparece en recuadro PIP en la esquina reaccionando en vivo ("¡Fíjense en este detalle exacto...!"). En video_reaction, KAI debe reaccionar a un HECHO O VIDEO REAL DEL TEMA, no a interfaces de software.
 3. "card_focus": Tarjeta Bento HUD de alto impacto visual en pantalla mostrando la estadística, comparativa o dato clave junto a KAI explicando los números. ¡OBLIGATORIA para cualquier estadística o comparación!
 4. "chat_debate": KAI interactúa con preguntas y dilemas de la audiencia, contrastando posturas.
 5. "breaking_news": Titular o primicia urgente con tono dinámico y datos inmediatos.
