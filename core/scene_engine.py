@@ -49,6 +49,7 @@ class SceneEngine:
         aspect_ratio: str = "16:9",
         voice: str = DEFAULT_VOICE,
         card_theme: str = "dark",
+        cancel_event: Optional[Any] = None,
     ):
         self.workdir = workdir
         self.workdir.mkdir(parents=True, exist_ok=True)
@@ -57,6 +58,7 @@ class SceneEngine:
         self.W, self.H = (1080, 1920) if self.is_vertical else (1920, 1080)
         self.voice = voice
         self.card_theme = card_theme
+        self.cancel_event = cancel_event
         self.narrator = AvatarNarrator(voice=voice)
         self.card_renderer = InfoCardRenderer(self.W, self.H, theme=card_theme)
         self.chat_renderer = LiveChatRenderer(width=340 if not self.is_vertical else 300)
@@ -309,8 +311,21 @@ class SceneEngine:
             str(scene_out),
         ]
 
+        if self.cancel_event and self.cancel_event.is_set():
+            raise asyncio.CancelledError("Render cancelado.")
+
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await proc.communicate()
+        except asyncio.CancelledError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise
+
+        if self.cancel_event and self.cancel_event.is_set():
+            raise asyncio.CancelledError("Render cancelado tras ejecución de escena.")
 
         if not scene_out.exists() or scene_out.stat().st_size < 10000:
             err_msg = stderr.decode(errors="replace") if stderr else "No stderr"
@@ -347,6 +362,10 @@ class SceneEngine:
         total_scenes = len(plan.scenes)
 
         for i, scene in enumerate(plan.scenes):
+            if self.cancel_event and self.cancel_event.is_set():
+                safe_log(f"[SceneEngine] Cancelación solicitada antes de la escena {scene.scene_id}. Abortando render.")
+                raise asyncio.CancelledError("Render de transmisión cancelado por el usuario.")
+
             pct = 70.0 + (float(i) / max(1, total_scenes)) * 18.0
             if progress_cb:
                 progress_cb(pct, f"Grabando Escena {scene.scene_id}/{total_scenes}: {scene.name} ({scene.type})...")

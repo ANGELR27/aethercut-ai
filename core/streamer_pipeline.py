@@ -205,6 +205,7 @@ class StreamerPipeline:
             aspect_ratio=self.options.aspect_ratio,
             voice=self.options.voice,
             card_theme=self.options.card_theme,
+            cancel_event=self.cancel_event,
         )
 
         def scene_progress(pct: float, msg: str):

@@ -674,18 +674,42 @@ document.addEventListener("DOMContentLoaded", () => {
 
     cancelBtn.addEventListener("click", async () => {
         if (!observedTaskId || cancelBtn.disabled) return;
+        const targetId = observedTaskId;
         cancelBtn.disabled = true;
-        cancelBtn.textContent = "Solicitando…";
+        cancelBtn.textContent = "Cancelando…";
         try {
-            const response = await fetch(`/api/cancel-task/${encodeURIComponent(observedTaskId)}`, { method: "POST" });
+            const response = await fetch(`/api/cancel-task/${encodeURIComponent(targetId)}`, { method: "POST" });
             let result = {};
             try { result = await response.json(); } catch { /* respuesta sin cuerpo JSON */ }
-            if (!response.ok) throw new Error(result.detail || "No se pudo solicitar la cancelación.");
-            cancelBtn.textContent = "Cancelando…";
-            $("pipelineStatusText").textContent = result.message || "Cancelación solicitada.";
+            if (!response.ok) throw new Error(result.detail || "No se pudo cancelar el proceso.");
+            
+            // Limpieza inmediata de UI y estado local para permitir iniciar otro video al instante
+            cancelBtn.hidden = true;
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = "Cancelar Transmisión";
+            controls.disabled = false;
+            if (startStreamerBtn) {
+                startStreamerBtn.disabled = false;
+                startStreamerBtnText.textContent = "🚀 Iniciar Transmisión de KAI";
+            }
+            startBtn.disabled = !selectedFile;
+            $("statusTitle").textContent = "Transmisión cancelada";
+            $("pipelineStatusText").textContent = "Listo para iniciar una nueva transmisión.";
+            setConnection("warning", "Cancelado");
+            
+            localStorage.removeItem("currentTaskId");
+            const url = new URL(window.location.href);
+            url.searchParams.delete("task");
+            window.history.replaceState({}, "", url);
+            
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            observedTaskId = null;
         } catch (error) {
             cancelBtn.disabled = false;
-            cancelBtn.textContent = "Cancelar edición";
+            cancelBtn.textContent = "Cancelar Transmisión";
             $("pipelineStatusText").textContent = `No se pudo cancelar: ${error.message}`;
         }
     });

@@ -381,7 +381,7 @@ async def run_streamer_task(task_id: str, options: StreamerOptions) -> None:
             raise CancellationRequested()
         update_task_state(task_id, "done", 100.0, "¡Transmisión completada!", completed=True, result=result)
         project.set_status("done", result=result)
-    except CancellationRequested:
+    except (CancellationRequested, asyncio.CancelledError):
         update_task_state(task_id, "cancelled", tasks_progress.get(task_id, {}).get("progress", 0.0),
                           "Transmisión cancelada.", completed=True, cancelled=True)
         project.set_status("cancelled")
@@ -850,13 +850,17 @@ async def cancel_task(task_id: str):
         state["cancelled_step"] = state.get("step")
         state["cancel_requested"] = True
     cancel_event = task_cancel_events.get(task_id)
-    if cancel_event is None:
-        raise HTTPException(status_code=409, detail="No se puede cancelar esta tarea en el servidor actual.")
-    cancel_event.set()
-    update_task_state(task_id, "cancelling", state.get("progress", 0.0),
-                      "Cancelación solicitada. Esperando que termine la operación actual de forma segura.",
+    if cancel_event is not None:
+        cancel_event.set()
+
+    job = task_jobs.get(task_id)
+    if job and not job.done():
+        job.cancel()
+
+    update_task_state(task_id, "cancelled", state.get("progress", 0.0),
+                      "Transmisión cancelada.", completed=True, cancelled=True,
                       cancel_requested=True, cancelled_step=state.get("cancelled_step"))
-    return {"status": "cancelling", "message": "La cancelación se aplicará al terminar la operación actual."}
+    return {"status": "cancelled", "message": "Proceso cancelado inmediatamente."}
 
 
 @app.get("/api/stream-progress/{task_id}")
