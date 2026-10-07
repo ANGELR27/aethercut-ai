@@ -318,81 +318,134 @@ document.addEventListener("DOMContentLoaded", () => {
         window.history.replaceState({}, "", url);
     }
 
+    let allLoadedProjects = [];
+    let currentProjectFilter = "all";
+    let currentProjectSearch = "";
+
+    function renderProjectsGrid() {
+        const list = $("savedProjectsList");
+        if (!list) return;
+        list.replaceChildren();
+
+        let filtered = allLoadedProjects.filter(p => {
+            const matchesSearch = !currentProjectSearch || (p.name || "").toLowerCase().includes(currentProjectSearch.toLowerCase());
+            const st = (p.status || "").toLowerCase();
+            let matchesFilter = true;
+            if (currentProjectFilter === "done") matchesFilter = (st === "done" || p.has_result);
+            else if (currentProjectFilter === "progress") matchesFilter = (st !== "done" && !p.has_result && st !== "error");
+            return matchesSearch && matchesFilter;
+        });
+
+        if (!filtered.length) {
+            const empty = document.createElement("div");
+            empty.style.cssText = "grid-column: 1 / -1; color:var(--text-muted); font-size:13px; text-align:center; padding:36px; background:rgba(255,255,255,0.02); border-radius:14px; border:1px dashed rgba(255,255,255,0.08);";
+            empty.textContent = currentProjectSearch ? "No se encontraron proyectos con ese criterio." : "No hay proyectos guardados en esta categoría.";
+            list.append(empty);
+            return;
+        }
+
+        filtered.forEach((project) => {
+            const card = document.createElement("div");
+            card.className = "saved-project-card";
+
+            const header = document.createElement("div");
+            header.className = "saved-project-card-header";
+
+            const left = document.createElement("div");
+            left.style.cssText = "display:flex; align-items:flex-start; gap:10px;";
+            const iconBadge = document.createElement("div");
+            iconBadge.className = "project-icon-badge";
+            iconBadge.textContent = project.has_result ? "🎬" : "📝";
+
+            const title = document.createElement("h4");
+            title.className = "saved-project-card-title";
+            title.textContent = project.name || "Transmisión sin título";
+            left.append(iconBadge, title);
+
+            const st = (project.status || "done").toLowerCase();
+            const statusBadge = document.createElement("span");
+            statusBadge.className = `saved-project-badge ${st === "done" ? "badge-done" : st === "error" ? "badge-error" : "badge-render"}`;
+            statusBadge.textContent = st === "done" ? "Listo" : st === "error" ? "Error" : "En curso";
+            header.append(left, statusBadge);
+
+            const metaRow = document.createElement("div");
+            metaRow.className = "saved-project-meta-row";
+            const dt = project.updated_at ? new Date(project.updated_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+            const metaText = document.createElement("span");
+            metaText.textContent = dt ? `Actualizado ${dt}` : "Reciente";
+
+            const actions = document.createElement("div");
+            actions.className = "saved-project-actions";
+
+            const openBtn = document.createElement("button");
+            openBtn.type = "button";
+            openBtn.className = "project-open-btn";
+            openBtn.innerHTML = `<span>Abrir</span> <span>→</span>`;
+            openBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openProject(project.id).catch((error) => console.error("Error abriendo proyecto:", error));
+            });
+
+            const delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "del-project-btn";
+            delBtn.title = "Eliminar proyecto";
+            delBtn.innerHTML = `✕`;
+            delBtn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                if (!confirm(`¿Eliminar proyecto «${project.name}»? Se liberará el espacio en disco.`)) return;
+                try {
+                    const res = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+                    if (res.ok) {
+                        loadSavedProjects();
+                    }
+                } catch (err) {
+                    console.error("Error eliminando:", err);
+                }
+            });
+
+            actions.append(openBtn, delBtn);
+            metaRow.append(metaText, actions);
+
+            card.append(header, metaRow);
+            card.addEventListener("click", () => {
+                openProject(project.id).catch((error) => console.error("Error abriendo proyecto:", error));
+            });
+            list.append(card);
+        });
+    }
+
     async function loadSavedProjects() {
         try {
             const response = await fetch("/api/projects");
             const data = await response.json();
-            const projects = Array.isArray(data.projects) ? data.projects : [];
+            allLoadedProjects = Array.isArray(data.projects) ? data.projects : [];
             const card = $("savedProjectsCard");
-            const list = $("savedProjectsList");
-            if (!list) return;
-            list.replaceChildren();
             
-            // Si no estamos en la pestaña proyectos, mantenerlo según el modo actual
             if ($("tabModeProjects")?.classList.contains("active")) {
                 if (card) card.hidden = false;
             }
-
-            if (!projects.length) {
-                const empty = document.createElement("p");
-                empty.style.cssText = "color:var(--text-muted); font-size:13px; text-align:center; padding:20px;";
-                empty.textContent = "No hay proyectos guardados todavía.";
-                list.append(empty);
-                return;
-            }
-
-            projects.forEach((project) => {
-                const row = document.createElement("div");
-                row.className = "saved-project-row";
-
-                const button = document.createElement("button");
-                button.type = "button";
-                button.className = "saved-project";
-
-                const copy = document.createElement("div");
-                copy.className = "saved-project-copy";
-                const name = document.createElement("b");
-                name.textContent = project.name || "Transmisión sin título";
-                const detail = document.createElement("span");
-                const dt = project.updated_at ? new Date(project.updated_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-                detail.textContent = project.has_result ? `Producción lista · ${dt}` : project.has_plan ? `Plan listo · ${dt}` : `En progreso · ${dt}`;
-                copy.append(name, detail);
-
-                const statusBadge = document.createElement("span");
-                const st = (project.status || "done").toLowerCase();
-                statusBadge.className = `saved-project-badge ${st === "done" ? "badge-done" : st === "error" ? "badge-error" : "badge-render"}`;
-                statusBadge.textContent = st === "done" ? "Listo" : st === "error" ? "Error" : "En proceso";
-
-                button.append(copy, statusBadge);
-                button.addEventListener("click", () => {
-                    openProject(project.id).catch((error) => {
-                        console.error("Error abriendo proyecto:", error);
-                    });
-                });
-
-                const delBtn = document.createElement("button");
-                delBtn.type = "button";
-                delBtn.className = "del-project-btn";
-                delBtn.title = "Eliminar proyecto y liberar espacio";
-                delBtn.textContent = "🗑";
-                delBtn.addEventListener("click", async (e) => {
-                    e.stopPropagation();
-                    if (!confirm(`¿Eliminar proyecto «${project.name}»? Se liberará el espacio ocupado.`)) return;
-                    try {
-                        const res = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
-                        if (res.ok) {
-                            loadSavedProjects();
-                        }
-                    } catch (err) {
-                        console.error("Error eliminando proyecto:", err);
-                    }
-                });
-
-                row.append(button, delBtn);
-                list.append(row);
-            });
+            renderProjectsGrid();
         } catch { /* ignorar fallo silencioso de red */ }
     }
+
+    $("projectSearchInput")?.addEventListener("input", (e) => {
+        currentProjectSearch = e.target.value.trim();
+        renderProjectsGrid();
+    });
+
+    document.querySelectorAll("#projectFilterPills .subcard-pill-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll("#projectFilterPills .subcard-pill-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            currentProjectFilter = btn.dataset.filter || "all";
+            renderProjectsGrid();
+        });
+    });
+
+    $("refreshProjectsBtn")?.addEventListener("click", () => {
+        loadSavedProjects();
+    });
 
     const cleanupBtn = $("cleanupStorageBtn");
     if (cleanupBtn) {
@@ -1311,7 +1364,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (trendingRow) trendingRow.hidden = true;
             if (bentoPane) bentoPane.hidden = true;
             if (projectsCard) projectsCard.hidden = false;
-        
+            loadSavedProjects();
         }
     }
 
