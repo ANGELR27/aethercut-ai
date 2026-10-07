@@ -94,6 +94,7 @@ REGLAS DE TONO Y ESTILO (NATURALIDAD PURA):
 REGLAS DE SELECCIÓN VISUAL (B-ROLL & IMÁGENES REALES DE ALTA CALIDAD):
 - El campo "visual_query" para cada escena DEBE ser en inglés y describir una ESCENA REALISTA, FOTOGRÁFICA O DOCUMENTAL concreta relacionada DIRECTAMENTE con el contenido exacto que se está debatiendo en esa escena (ej: "dog smelling grass close up 4k high resolution", "artificial intelligence data center gpu servers 4k", "electric car lithium battery manufacturing plant").
 - PROHIBIDO buscar capturas de pantalla de interfaces de software, Notion, dashboards SaaS o páginas web genéricas a menos que se trate específicamente de un software puntual. Si se habla de ciencia, innovación o naturaleza, busca el laboratorio, el animal, el espacio o la fábrica en acción fotográfica documental.
+- EXCLUSIÓN TOTAL DE MARCAS DE AGUA Y SELLOS: La búsqueda visual debe apuntar a material fotográfico libre y editorial en alta resolución (usar sufijos como "editorial photograph hd", "documentary realistic 4k", "nature close up"). NUNCA busques marcas de stock comercial con marca de agua (Shutterstock, Alamy, iStock).
 - NUNCA pongas términos genéricos como "technology abstract", "futuristic concept", "cool wallpaper". Sé hiper-específico al hecho, ser vivo, dispositivo o contexto del que se habla.
 ==============================================================================
 

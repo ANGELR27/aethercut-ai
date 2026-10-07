@@ -236,9 +236,10 @@ class WebPhotoAssetProvider(AssetProvider):
     """Foto REAL desde la búsqueda de imágenes web (DuckDuckGo), filtrando marcas de agua comerciales y exigiendo alta resolución."""
 
     WATERMARK_DOMAINS = (
-        "dreamstime", "alamy", "shutterstock", "istockphoto", 
+        "dreamstime", "alamy", "shutterstock", "istockphoto", "istock",
         "gettyimages", "123rf", "adobestock", "depositphotos", "bigstockphoto", "canstockphoto",
-        "freepik", "vectorstock"
+        "freepik", "vectorstock", "stockphoto", "watermark", "pond5", "envato",
+        "storyblocks", "motionelements", "pixtastock", "agefotostock"
     )
 
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
