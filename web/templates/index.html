@@ -159,13 +159,9 @@
                 <div class="bento-subcard">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                         <span class="bento-subcard-title" style="margin:0;">Monitor de Emisión</span>
-                        <div id="monitorDownloadBar" style="display:flex; gap:6px;" hidden>
-                            <a href="#" class="subcard-pill-btn active" id="downloadMasterBtn" download style="text-decoration:none; padding:4px 10px; font-size:11px; display:inline-flex; align-items:center; gap:4px;">
-                                📥 Descargar Master ↗
-                            </a>
-                            <a href="#" class="subcard-pill-btn" id="downloadShortBtn" download style="text-decoration:none; padding:4px 10px; font-size:11px; display:inline-flex; align-items:center; gap:4px;" hidden>
-                                📱 Short ↗
-                            </a>
+                        <div id="monitorDownloadBar" style="display:none;" aria-hidden="true">
+                            <a id="downloadMasterBtn" href="#" download style="display:none;"></a>
+                            <a id="downloadShortBtn" href="#" download style="display:none;"></a>
                         </div>
                     </div>
                     
@@ -640,6 +636,6 @@
 
 </main>
 
-<script src="/static/js/app.js?v=26"></script>
+<script src="/static/js/app.js?v=27"></script>
 </body>
 </html>

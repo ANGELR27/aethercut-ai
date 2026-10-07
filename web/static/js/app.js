@@ -1143,6 +1143,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 request.send(body);
             });
             localStorage.setItem("currentTaskId", data.task_id);
+            const curUrl = new URL(window.location.href);
+            curUrl.searchParams.set("task", data.task_id);
+            curUrl.searchParams.delete("project");
+            window.history.replaceState({}, "", curUrl);
             listen(data.task_id);
         } catch (error) {
             controls.disabled = false;
@@ -1517,6 +1521,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (!response.ok) throw new Error(data.detail || "No se pudo iniciar la transmisión.");
                 observedTaskId = data.task_id;
                 localStorage.setItem("currentTaskId", data.task_id);
+                const curUrl = new URL(window.location.href);
+                curUrl.searchParams.set("task", data.task_id);
+                curUrl.searchParams.delete("project");
+                window.history.replaceState({}, "", curUrl);
                 listen(data.task_id);
             } catch (error) {
                 console.error("Error al iniciar streamer:", error);

@@ -134,6 +134,24 @@ def update_task_state(task_id: str, step: str, progress: float, message: str, **
                 events = state.setdefault("events", [])
                 events.append({"step": step, "progress": state["progress"], "message": message, "at": now})
                 del events[:-80]
+            try:
+                # Persistir progreso activo en el almacén del proyecto para que la recarga de página no lo pierda
+                p_store = ProjectStore(task_id)
+                if p_store.manifest_path.exists():
+                    doc = p_store.read()
+                    doc["current_progress"] = {
+                        "step": state.get("step"),
+                        "progress": state.get("progress"),
+                        "message": state.get("message"),
+                        "completed": state.get("completed", False),
+                        "error": state.get("error"),
+                        "result": state.get("result"),
+                        "file_name": state.get("file_name"),
+                        "cancel_supported": state.get("cancel_supported", True),
+                    }
+                    p_store.write(doc)
+            except Exception:
+                pass
 
 
 def cleanup_cancelled_task_files(task_id: str, input_file: Path) -> None:
@@ -850,7 +868,14 @@ async def stream_progress(task_id: str):
                 # Si la tarea no está en memoria, verificar si existe un proyecto guardado completado
                 try:
                     doc = ProjectStore(task_id).read()
-                    if doc.get("status") == "done":
+                    if "current_progress" in doc and doc["current_progress"]:
+                        cp = doc["current_progress"]
+                        yield f"data: {json.dumps(cp, default=str)}\n\n"
+                        if cp.get("completed") or cp.get("error"):
+                            break
+                        await asyncio.sleep(1)
+                        continue
+                    elif doc.get("status") == "done":
                         done_state = {
                             "step": "done",
                             "progress": 100.0,
