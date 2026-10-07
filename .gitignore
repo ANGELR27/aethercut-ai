@@ -13,3 +13,10 @@ storage/outputs/
 storage/assets/
 storage/temp/
 storage/projects/
+test_*.png
+test_*.py
+check_*.py
+fetch_pin.py
+assets/check_*.jpg
+assets/test_*.jpg
+assets/verify_*.jpg

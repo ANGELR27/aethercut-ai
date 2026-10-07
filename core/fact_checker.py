@@ -53,13 +53,35 @@ def _domain(url: str) -> str:
         return ""
 
 
+def _is_bad_image_url(url: str) -> bool:
+    """Detecta logos, iconos de Wikipedia, símbolos y placeholders vectoriales."""
+    if not url:
+        return True
+    u = url.lower()
+    bad_tokens = (
+        "logo", "icon", "symbol", "wikipedia", "wikimedia", "disambig",
+        "question", "default", "placeholder", ".svg", "flag", "bandera",
+        "escudo", "coat_of_arms", "shield", "emblem", "sign", "arrow",
+        "pixel", "blank", "commons-logo"
+    )
+    return any(token in u for token in bad_tokens)
+
+
 def _valid_image(path: Path, min_side: int = 220) -> bool:
-    """Descarta HTML disfrazado de imagen, archivos corruptos y miniaturas diminutas."""
+    """Descarta HTML disfrazado de imagen, archivos corruptos, miniaturas y logos planos."""
     try:
         with Image.open(path) as im:
             im.verify()
         with Image.open(path) as im:
-            return min(im.size) >= min_side
+            if min(im.size) < min_side:
+                return False
+            # Verificar variedad cromática: los logos planos/vectoriales tienen muy pocos colores
+            small = im.convert("RGB").resize((32, 32), Image.NEAREST)
+            colors = len(set(small.getdata()))
+            if colors < 28:
+                # Menos de 28 colores en 1024 pixeles es casi con certeza un icono o logo plano
+                return False
+            return True
     except Exception:
         return False
 
@@ -71,7 +93,7 @@ class FactChecker:
     1. Busca en internet (DuckDuckGo, región es) + Wikipedia.
     2. Gemini actúa como juez usando SOLO esos fragmentos (no su memoria).
     3. Solo las tarjetas "supported" se dibujan. Lo falso ("contradicted") o no confirmado nunca sale en el video.
-    4. Busca una foto real (Wikipedia -> búsqueda de imágenes web) y la valida antes de usarla.
+    4. Busca una foto real fotográfica y la valida antes de usarla (nunca logos de Wikipedia).
     """
 
     def __init__(self, llm: LLMClient, workdir: Path, concurrency: int = 3):
@@ -106,7 +128,7 @@ class FactChecker:
             for r in results:
                 url = r.get("image") or ""
                 w, h = int(r.get("width") or 0), int(r.get("height") or 0)
-                if url.startswith("http") and (not w or min(w, h) >= 300):
+                if url.startswith("http") and not _is_bad_image_url(url) and (not w or min(w, h) >= 300):
                     urls.append(url)
             return urls
         except Exception as exc:
@@ -114,17 +136,19 @@ class FactChecker:
             return []
 
     async def fetch_real_image(self, query: str, dest_stem: str, wiki_url: Optional[str] = None) -> Optional[str]:
-        """Foto real: primero Wikipedia, luego imágenes web. Siempre validada con Pillow."""
-        candidates = [wiki_url] if wiki_url else []
+        """Foto real: primero Wikipedia (si no es logo), luego imágenes web. Siempre validada fotográficamente."""
+        candidates = []
+        if wiki_url and not _is_bad_image_url(wiki_url):
+            candidates.append(wiki_url)
         try:
-            candidates += await asyncio.wait_for(
+            web_candidates = await asyncio.wait_for(
                 asyncio.to_thread(self._web_image_search, query), timeout=12
             )
+            candidates.extend(web_candidates)
         except asyncio.TimeoutError:
             safe_log(f"[FactChecker] La búsqueda de imágenes tardó demasiado para '{query}'.")
-        # La foto es decorativa; dos fuentes suficientes evitan bloquear una
-        # edición si un servidor de imágenes deja de responder.
-        for i, url in enumerate(candidates[:2]):
+
+        for i, url in enumerate(candidates[:4]):
             dest = self.workdir / f"{dest_stem}_{i}.img"
             if await self.wiki.download_image(url, dest) and _valid_image(dest):
                 return str(dest)
@@ -236,12 +260,17 @@ class FactChecker:
                 card.corrected_value = corrected_val[:20]
                 card.correction_source = card.sources[0].domain
 
-            if progress:
-                progress(f"Buscando imagen de apoyo para «{card.headline}».")
-            card.image_path = await self.fetch_real_image(
-                card.image_query or card.headline, f"{card.card_id}_photo",
-                wiki.image_url if wiki else None,
-            )
+            abstract_kinds = {"ley", "normativa", "articulo", "cifra", "estadistica", "concepto", "definicion"}
+            should_fetch_photo = bool(card.image_query or (card.kind or "").lower() not in abstract_kinds)
+            if should_fetch_photo:
+                if progress:
+                    progress(f"Buscando imagen de apoyo fotográfico para «{card.headline}».")
+                card.image_path = await self.fetch_real_image(
+                    card.image_query or card.headline, f"{card.card_id}_photo",
+                    wiki.image_url if (wiki and not _is_bad_image_url(wiki.image_url)) else None,
+                )
+            else:
+                card.image_path = None
             return card
 
     async def verify_plan(self, plan: VideoEditingPlan,

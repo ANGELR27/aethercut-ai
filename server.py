@@ -1,9 +1,12 @@
 import asyncio
+import io
 import json
 import re
+import subprocess
 import sys
 import threading
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -22,11 +25,13 @@ from fastapi.staticfiles import StaticFiles
 
 from config.settings import settings
 from cancellation import CancellationRequested
+from core.avatar_narrator import DEFAULT_VOICE
 from core.llm import safe_log
 from core.models import VideoEditingPlan
 from core.pipeline import PipelineOptions, VideoPipeline
 from core.project_store import ProjectStore, editor_snapshot
 from core.render_engine import VideoRenderEngine
+from core.streamer_pipeline import StreamerOptions, StreamerPipeline
 from core.timeline import TimelineMapper
 from utils.file_manager import FileManager
 
@@ -50,6 +55,7 @@ class NoCacheStaticFiles(StaticFiles):
 
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/media", StaticFiles(directory=str(settings.OUTPUTS_DIR)), name="media")
+app.mount("/storage", StaticFiles(directory=str(settings.STORAGE_DIR)), name="storage")
 
 tasks_progress: Dict[str, Dict[str, Any]] = {}
 task_cancel_events: Dict[str, threading.Event] = {}
@@ -337,6 +343,83 @@ async def process_video(
     return {"task_id": task_id, "project_id": task_id}
 
 
+async def run_streamer_task(task_id: str, options: StreamerOptions) -> None:
+    update_task_state(task_id, "research", 10.0, f"Investigando datos web sobre «{options.topic}»...")
+    cancel_event = task_cancel_events[task_id]
+    project = ProjectStore(task_id)
+    project.set_status("running")
+    try:
+        pipeline = StreamerPipeline(
+            task_id, options,
+            on_state=lambda step, pct, msg, **kw: update_task_state(task_id, step, pct, msg, **kw),
+            cancel_event=cancel_event,
+            project_store=project,
+            render_lock=_render_lock,
+        )
+        if cancel_event.is_set():
+            raise CancellationRequested()
+        result = await pipeline.run()
+        if cancel_event.is_set():
+            raise CancellationRequested()
+        update_task_state(task_id, "done", 100.0, "¡Transmisión completada!", completed=True, result=result)
+        project.set_status("done", result=result)
+    except CancellationRequested:
+        update_task_state(task_id, "cancelled", tasks_progress.get(task_id, {}).get("progress", 0.0),
+                          "Transmisión cancelada.", completed=True, cancelled=True)
+        project.set_status("cancelled")
+    except Exception as exc:
+        safe_log(f"[StreamerTask] Error: {exc}")
+        state = tasks_progress.get(task_id, {})
+        update_task_state(task_id, "error", state.get("progress", 0.0), "La transmisión se detuvo.",
+                          error=friendly_error(exc), failed_step=state.get("step"))
+        project.set_status("error", error=friendly_error(exc))
+    finally:
+        task_cancel_events.pop(task_id, None)
+        task_jobs.pop(task_id, None)
+
+
+@app.post("/api/streamer/create")
+async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
+    topic = str(payload.get("topic", "")).strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="Debes indicar un tema para la transmisión.")
+    style = str(payload.get("style", "divulgacion")).strip()
+    duration_sec = int(payload.get("duration_sec", 45))
+    aspect_ratio = str(payload.get("aspect_ratio", "16:9")).strip()
+    card_theme = str(payload.get("card_theme", "dark")).strip()
+    voice = str(payload.get("voice", DEFAULT_VOICE)).strip()
+    raw_rtmp = payload.get("rtmp_url")
+    rtmp_url = str(raw_rtmp).strip() if (raw_rtmp and str(raw_rtmp).strip() not in ("None", "null", "")) else None
+
+    task_id = uuid.uuid4().hex[:8]
+    now = datetime.now(timezone.utc).isoformat()
+    tasks_progress[task_id] = {
+        "step": "research", "progress": 10.0, "message": f"Investigando «{topic}» en la web...",
+        "completed": False, "error": None, "result": None, "cancel_supported": True,
+        "file_name": f"KAI Stream: {topic[:35]}",
+        "created_at": now, "updated_at": now, "step_started_at": now,
+        "events": [{"step": "research", "progress": 10.0, "message": f"Investigando «{topic}»...", "at": now}],
+    }
+    options = StreamerOptions(
+        topic=topic,
+        style=style,
+        duration_sec=duration_sec,
+        aspect_ratio=aspect_ratio,
+        card_theme=card_theme,
+        voice=voice,
+        rtmp_url=rtmp_url,
+    )
+    store = ProjectStore(task_id)
+    store.create(
+        source_file=settings.OUTPUTS_DIR / f"{task_id}_master.mp4",
+        original_name=f"KAI Stream: {topic}",
+        options={"topic": topic, "style": style, "duration_sec": duration_sec, "mode": "streamer"}
+    )
+    task_cancel_events[task_id] = threading.Event()
+    task_jobs[task_id] = asyncio.create_task(run_streamer_task(task_id, options))
+    return {"task_id": task_id, "project_id": task_id}
+
+
 @app.post("/api/projects/{task_id}/resume")
 async def resume_project(task_id: str):
     """Reanuda una carga conservada sin volver a transferir el archivo desde el navegador."""
@@ -377,6 +460,15 @@ async def get_project(task_id: str):
         raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
     plan_data = document.get("plan")
     editor = editor_snapshot(VideoEditingPlan.model_validate(plan_data)) if plan_data else None
+
+    # Asegurar compatibilidad de URLs del video editado
+    if document.get("result") and isinstance(document["result"], dict):
+        res = document["result"]
+        if "media_url" in res and "master_video_url" not in res:
+            res["master_video_url"] = res["media_url"]
+        if "master_video_url" in res and "media_url" not in res:
+            res["media_url"] = res["master_video_url"]
+
     # No se exponen rutas del equipo local a la interfaz.
     public = {key: value for key, value in document.items() if key not in {"source_file", "preview_file", "plan"}}
     return {"project": public, "editor": editor}
@@ -421,14 +513,231 @@ async def trigger_storage_cleanup():
 
 @app.get("/api/projects/{task_id}/preview")
 async def get_project_preview(task_id: str):
+    store = ProjectStore(task_id)
     try:
-        document = ProjectStore(task_id).read()
+        document = store.read()
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+    
     path = Path(document.get("preview_file") or "")
     if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="La previsualización todavía no está lista.")
-    return FileResponse(path, media_type="video/mp4", filename=f"{task_id}_preview.mp4")
+        src_path = Path(document.get("source_file") or "")
+        if src_path.exists() and src_path.is_file():
+            path = src_path
+        else:
+            master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+            if master_file.exists():
+                path = master_file
+            else:
+                res = document.get("result") or {}
+                out_path = Path(res.get("output_file") or "")
+                if out_path.exists() and out_path.is_file():
+                    path = out_path
+                else:
+                    raise HTTPException(status_code=404, detail="La previsualización todavía no está lista.")
+
+    title = document.get("original_name") or (document.get("result") or {}).get("title") or f"KAI_{task_id}"
+    safe_title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
+    filename = f"{safe_title}.mp4"
+
+    return FileResponse(
+        path=path,
+        media_type="video/mp4",
+        filename=filename,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'}
+    )
+
+
+@app.get("/api/projects/{task_id}/download")
+async def download_project_master(task_id: str):
+    """Descarga el video final con nombre descriptivo y extensión .mp4 garantizada."""
+    store = ProjectStore(task_id)
+    try:
+        document = store.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+
+    master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+    if not master_file.exists():
+        res = document.get("result") or {}
+        candidate = Path(res.get("output_file") or "")
+        if candidate.exists() and candidate.is_file():
+            master_file = candidate
+        else:
+            prev = Path(document.get("preview_file") or "")
+            if prev.exists() and prev.is_file():
+                master_file = prev
+            else:
+                raise HTTPException(status_code=404, detail="El video master todavía no está generado.")
+
+    title = document.get("original_name") or (document.get("result") or {}).get("title") or "KAI_Broadcast"
+    safe_title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
+    filename = f"{safe_title}.mp4"
+
+    return FileResponse(
+        path=master_file,
+        media_type="video/mp4",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+
+
+
+@app.get("/api/projects/{task_id}/materials-zip")
+async def download_project_materials_zip(task_id: str):
+    """Empaqueta y descarga todos los recursos del proyecto (video master, guión, audios, tarjetas, subtítulos) en un ZIP."""
+    store = ProjectStore(task_id)
+    try:
+        document = store.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+
+    title = document.get("original_name") or (document.get("result") or {}).get("title") or "KAI_Broadcast"
+    safe_title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).strip().replace(" ", "_")[:45] or f"KAI_{task_id}"
+
+    # Crear buffer ZIP en memoria o archivo temporal
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        # 1. Video master si existe
+        master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+        if master_file.exists():
+            zip_file.write(master_file, arcname=f"{safe_title}_Master_1080p.mp4")
+
+        # 2. Archivo del proyecto manifest
+        if store.manifest_path.exists():
+            zip_file.write(store.manifest_path, arcname="proyecto_metadata.json")
+
+        # 3. Todo el directorio de trabajo (escenas, voz, subtítulos, tarjetas)
+        if store.workdir.exists():
+            for f in store.workdir.rglob("*"):
+                if f.is_file() and not f.name.endswith(".tmp"):
+                    rel = f.relative_to(store.workdir)
+                    zip_file.write(f, arcname=f"materiales/{rel}")
+
+    zip_buffer.seek(0)
+    zip_filename = f"{safe_title}_Materiales_Completos.zip"
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'}
+    )
+
+
+@app.post("/api/projects/{task_id}/open-folder")
+async def open_project_folder(task_id: str):
+    """Abre la carpeta del proyecto en el Explorador de Windows y resalta el archivo .mp4."""
+    store = ProjectStore(task_id)
+    master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+    if not master_file.exists():
+        try:
+            document = store.read()
+            res = document.get("result") or {}
+            candidate = Path(res.get("output_file") or "")
+            if candidate.exists():
+                master_file = candidate
+            else:
+                prev = Path(document.get("preview_file") or "")
+                if prev.exists():
+                    master_file = prev
+        except Exception:
+            pass
+
+    folder = store.workdir
+    if not folder.exists():
+        folder = store.root
+    if not folder.exists():
+        folder = settings.OUTPUTS_DIR
+
+    try:
+        if master_file.exists():
+            # Abre el explorador seleccionando/resaltando directamente el video master
+            subprocess.Popen(["explorer.exe", f"/select,{str(master_file.resolve())}"])
+            return {"status": "ok", "path": str(master_file.parent), "file": str(master_file)}
+        else:
+            subprocess.Popen(["explorer.exe", str(folder.resolve())])
+            return {"status": "ok", "path": str(folder)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"No se pudo abrir el explorador: {exc}")
+
+
+@app.post("/api/projects/{task_id}/save-to-downloads")
+async def save_project_to_downloads(task_id: str):
+    """Guarda una copia directa del archivo .mp4 en la carpeta Descargas del usuario de Windows."""
+    import shutil
+    store = ProjectStore(task_id)
+    try:
+        document = store.read()
+    except Exception:
+        document = {}
+
+    master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+    if not master_file.exists():
+        res = document.get("result") or {}
+        candidate = Path(res.get("output_file") or "")
+        if candidate.exists() and candidate.is_file():
+            master_file = candidate
+        else:
+            prev = Path(document.get("preview_file") or "")
+            if prev.exists() and prev.is_file():
+                master_file = prev
+            else:
+                raise HTTPException(status_code=404, detail="El archivo de video no está listo.")
+
+    title = document.get("original_name") or (document.get("result") or {}).get("title") or "KAI_Broadcast"
+    safe_title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
+    filename = f"{safe_title}.mp4"
+
+    # Carpeta Downloads del usuario
+    downloads_dir = Path.home() / "Downloads"
+    if not downloads_dir.exists():
+        downloads_dir = Path.home()
+    dest_path = downloads_dir / filename
+
+    try:
+        shutil.copy2(str(master_file), str(dest_path))
+        # Abrir explorador seleccionando el archivo copiado en Downloads
+        try:
+            subprocess.Popen(["explorer.exe", f"/select,{str(dest_path.resolve())}"])
+        except Exception:
+            pass
+        return {"status": "ok", "path": str(dest_path), "filename": filename}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"No se pudo copiar a Descargas: {exc}")
+
+
+@app.get("/api/projects/{task_id}/materials")
+async def get_project_materials(task_id: str):
+    """Devuelve el inventario completo de archivos generados por escena."""
+    store = ProjectStore(task_id)
+    try:
+        document = store.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+
+    result = document.get("result") or {}
+    scenes_info = result.get("scenes") or []
+    materials = {
+        "master_video_url": f"/api/projects/{task_id}/download",
+        "zip_url": f"/api/projects/{task_id}/materials-zip",
+        "title": result.get("title") or document.get("original_name") or "Producción KAI",
+        "scenes": scenes_info,
+        "files": []
+    }
+
+    if store.workdir.exists():
+        for f in store.workdir.rglob("*"):
+            if f.is_file() and not f.name.endswith(".tmp"):
+                rel = str(f.relative_to(store.workdir)).replace("\\", "/")
+                materials["files"].append({
+                    "name": f.name,
+                    "rel_path": rel,
+                    "size_kb": round(f.stat().st_size / 1024, 1),
+                    "ext": f.suffix.lower()
+                })
+
+    return materials
 
 
 @app.put("/api/projects/{task_id}/timeline")
@@ -538,6 +847,25 @@ async def stream_progress(task_id: str):
         while True:
             state = tasks_progress.get(task_id)
             if not state:
+                # Si la tarea no está en memoria, verificar si existe un proyecto guardado completado
+                try:
+                    doc = ProjectStore(task_id).read()
+                    if doc.get("status") == "done":
+                        done_state = {
+                            "step": "done",
+                            "progress": 100.0,
+                            "message": "¡Transmisión completada!",
+                            "completed": True,
+                            "file_name": doc.get("original_name") or f"KAI Stream {task_id}",
+                            "result": doc.get("result"),
+                        }
+                        yield f"data: {json.dumps(done_state, default=str)}\n\n"
+                        break
+                    elif doc.get("status") == "error":
+                        yield f"data: {json.dumps({'error': doc.get('message', 'Error en el proyecto')})}\n\n"
+                        break
+                except Exception:
+                    pass
                 yield f"data: {json.dumps({'error': 'Tarea no encontrada'})}\n\n"
                 break
             yield f"data: {json.dumps(state, default=str)}\n\n"
@@ -546,6 +874,66 @@ async def stream_progress(task_id: str):
             await asyncio.sleep(1)
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@app.get("/api/progress/{task_id}")
+async def get_task_progress(task_id: str):
+    state = tasks_progress.get(task_id)
+    if not state:
+        try:
+            doc = ProjectStore(task_id).read()
+            if doc.get("status") == "done":
+                return {
+                    "step": "done",
+                    "progress": 100.0,
+                    "message": "¡Transmisión completada!",
+                    "completed": True,
+                    "file_name": doc.get("original_name") or f"KAI Stream {task_id}",
+                    "result": doc.get("result"),
+                }
+        except Exception:
+            pass
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    return state
+
+
+@app.get("/api/trending-topics")
+async def get_trending_topics():
+    """Devuelve temas y noticias en tendencia reales extraídos de la web o fuentes dinámicas."""
+    try:
+        from ddgs import DDGS
+        topics = []
+        def _fetch_news():
+            with DDGS() as ddgs:
+                return list(ddgs.news("tecnologia ciencia descubrimientos", max_results=10))
+        news = await asyncio.to_thread(_fetch_news)
+        for n in news:
+            t = (n.get("title") or "").strip()
+            if t and len(t) > 12:
+                # Limpiar sufijos de fuentes y caracteres corruptos
+                clean = re.sub(r"\s*-\s*[A-Za-z0-9\.\s]+$", "", t).strip()
+                clean = clean.replace("", "").strip()
+                if clean and len(clean) > 10 and clean not in topics:
+                    topics.append(clean)
+            if len(topics) >= 7:
+                break
+        if topics:
+            return {"topics": topics}
+    except Exception as exc:
+        safe_log(f"[Trending] Fallback en noticias: {exc}")
+
+    # Fallback dinámico si no hay conexión a internet externa temporalmente
+    return {
+        "topics": [
+            "Avances en Computación Cuántica y Chips Fotónicos",
+            "Misión Europa Clipper y Océanos en el Sistema Solar",
+            "Modelos de IA de Razonamiento Profundo en 2026",
+            "Fusión Nuclear: Récords de Confinamiento Magnético",
+            "Exploración Espacial del Telescopio James Webb",
+            "Baterías de Estado Sólido para Vehículos Eléctricos",
+            "Medicina Genómica y Terapias CRISPR Personalizadas"
+        ]
+    }
 
 
 if __name__ == "__main__":

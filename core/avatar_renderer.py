@@ -116,7 +116,7 @@ class AvatarRenderer:
         fps: int = 24
     ) -> Optional[Path]:
         """Crea un clip WebM transparente con avatar mirando fijo de frente y lip-sync sutil."""
-        dur = max(1.5, float(duration_sec))
+        dur = min(60.0, max(2.0, float(duration_sec)))
         out_path.parent.mkdir(parents=True, exist_ok=True)
         temp_dir = out_path.parent / f"_avatar_tmp_{out_path.stem}"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -181,8 +181,8 @@ class AvatarRenderer:
                 d.ellipse((4, 4, size - 4, size - 4), outline=(56, 189, 248, alpha_cyan), width=3)
                 d.ellipse((8, 8, size - 8, size - 8), outline=(99, 102, 241, int(80 + 50 * energy)), width=1)
 
-                # Insignia KAI COPILOT en la parte inferior
-                tag_w = 126
+                # Insignia KAI RODRIGUEZ en la parte inferior
+                tag_w = 142
                 tag_h = 24
                 tx = (size - tag_w) // 2
                 ty = size - 34
@@ -193,21 +193,20 @@ class AvatarRenderer:
                     outline=(56, 189, 248, 200),
                     width=1,
                 )
-                # Rayo vectorial dorado
-                bx = tx + 14
+                # Logo 'R' futurista vectorial geométrico
+                bx = tx + 13
                 by = ty + 12
-                bolt_pts = [
-                    (bx + 2, by - 6),
-                    (bx - 4, by + 1),
-                    (bx, by + 1),
-                    (bx - 2, by + 6),
-                    (bx + 4, by - 1),
-                    (bx, by - 1)
-                ]
-                d.polygon(bolt_pts, fill=(251, 191, 36, 255))
+                # Tronco vertical de la R
+                d.polygon([(bx - 5, by - 6), (bx - 2, by - 6), (bx - 2, by + 6), (bx - 5, by + 6)], fill=(56, 189, 248, 255))
+                # Bucle superior estilizado
+                d.polygon([(bx - 2, by - 6), (bx + 4, by - 6), (bx + 6, by - 3), (bx + 4, by), (bx - 2, by)], fill=(56, 189, 248, 255))
+                d.polygon([(bx - 1, by - 4), (bx + 2, by - 4), (bx + 3, by - 3), (bx + 2, by - 1), (bx - 1, by - 1)], fill=(10, 14, 22, 255))
+                # Pata diagonal futurista de la R
+                d.polygon([(bx - 1, by), (bx + 2, by), (bx + 6, by + 6), (bx + 2, by + 6)], fill=(255, 255, 255, 255))
+                
                 d.text(
-                    (tx + 24, ty + 12),
-                    "KAI COPILOT",
+                    (tx + 26, ty + 12),
+                    "KAI RODRIGUEZ",
                     font=f_tag,
                     fill=(255, 255, 255, 255),
                     anchor="lm",
@@ -215,20 +214,33 @@ class AvatarRenderer:
 
                 canvas.save(temp_dir / f"f_{i:04d}.png")
 
-            cmd = [
-                "ffmpeg", "-y",
-                "-framerate", str(fps),
-                "-i", str(temp_dir / "f_%04d.png"),
-                "-c:v", "libvpx-vp9",
-                "-pix_fmt", "yuva420p",
-                "-b:v", "0",
-                "-crf", "25",
-                str(out_path),
-            ]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if out_path.suffix.lower() == ".mov":
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-framerate", str(fps),
+                    "-i", str(temp_dir / "f_%04d.png"),
+                    "-c:v", "qtrle",
+                    str(out_path),
+                ]
+            else:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-framerate", str(fps),
+                    "-i", str(temp_dir / "f_%04d.png"),
+                    "-c:v", "libvpx-vp9",
+                    "-pix_fmt", "yuva420p",
+                    "-auto-alt-ref", "0",
+                    "-deadline", "realtime",
+                    "-cpu-used", "4",
+                    "-threads", "4",
+                    "-b:v", "0",
+                    "-crf", "25",
+                    str(out_path),
+                ]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if res.returncode == 0 and out_path.exists():
                 return out_path
-            print(f"[AvatarRenderer] Falló codificación WebM: {res.stderr[-400:]}")
+            print(f"[AvatarRenderer] Falló codificación de avatar: {res.stderr[-400:]}")
             return None
         except Exception as exc:
             print(f"[AvatarRenderer] Error renderizando avatar: {exc}")

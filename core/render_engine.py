@@ -226,10 +226,10 @@ class VideoRenderEngine:
                 )
                 pos_x, pos_y = "0", "0"
             elif it["kind"] == "avatar":
-                cmd += ["-t", f"{d:.2f}", "-i", it["path"]]
+                cmd += ["-c:v", "libvpx-vp9", "-t", f"{d:.2f}", "-i", it["path"]]
                 av_size = int(min(W, H) * 0.28)
                 chains.append(
-                    f"[{i}:v]scale={av_size}:{av_size},fps={self.fps},format=yuva420p,"
+                    f"[{i}:v]scale={av_size}:{av_size},fps={self.fps},format=rgba,"
                     f"fade=t=in:st=0:d=0.25:alpha=1,fade=t=out:st={fo:.2f}:d=0.3:alpha=1,"
                     f"setpts=PTS-STARTPTS+{s:.3f}/TB[o{i}]"
                 )
@@ -264,7 +264,7 @@ class VideoRenderEngine:
                     pos_y = str(margin_y)
             nxt = f"b{i}"
             chains.append(
-                f"[{cur}][o{i}]overlay=x='{pos_x}':y='{pos_y}':eof_action=pass:"
+                f"[{cur}][o{i}]overlay=x='{pos_x}':y='{pos_y}':eof_action=pass:format=auto:"
                 f"enable='between(t,{s:.3f},{s + d:.3f})'[{nxt}]"
             )
             cur = nxt

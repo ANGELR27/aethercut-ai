@@ -18,8 +18,9 @@ import edge_tts
 
 from core.models import InfoCard
 
-DEFAULT_VOICE = "es-CO-GonzaloNeural"  # Voz ultra-natural, conversacional y neutra (sin tono robótico)
+DEFAULT_VOICE = "es-MX-JorgeNeural"  # Voz hiper-natural, conversacional y expresiva para streamers
 VOICE_LATINO = "es-US-AlonsoNeural"    # Voz neutra estilo locutor internacional
+VOICE_COLOMBIA = "es-CO-GonzaloNeural" # Voz neutra colombiana
 VOICE_FEMALE = "es-MX-DaliaNeural"     # Voz femenina cálida y amigable
 VOICE_SPAIN = "es-ES-AlvaroNeural"      # Voz estilo divulgación tecnológica España
 
@@ -154,12 +155,55 @@ REGLAS ESTRICTAS:
         return self.craft_dialogue(card)
 
     async def synthesize(self, text: str, out_path: Path, voice: Optional[str] = None) -> Tuple[Path, float]:
-        """Genera el archivo de audio MP3 y devuelve su duración exacta en segundos."""
+        """Genera el archivo de audio MP3 y devuelve su duración exacta en segundos con entonación natural."""
         chosen_voice = voice or self.voice
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        communicate = edge_tts.Communicate(text, chosen_voice, rate="+0%")
-        await communicate.save(str(out_path))
+        # Dividir textos extensos en bloques naturales para evitar degradación a voz robótica/monótona
+        raw_paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+        paragraphs = []
+        for p in raw_paragraphs:
+            words = p.split()
+            if len(words) > 45:
+                sentences = re.split(r"(?<=[.!?…])\s+", p)
+                current: List[str] = []
+                for s in sentences:
+                    current.append(s)
+                    if len(" ".join(current).split()) >= 28:
+                        paragraphs.append(" ".join(current))
+                        current = []
+                if current:
+                    paragraphs.append(" ".join(current))
+            else:
+                paragraphs.append(p)
+
+        if len(paragraphs) <= 1:
+            communicate = edge_tts.Communicate(text, chosen_voice, rate="+1%")
+            await communicate.save(str(out_path))
+        else:
+            chunks_dir = out_path.parent / f"chunks_{out_path.stem}"
+            chunks_dir.mkdir(parents=True, exist_ok=True)
+            chunk_files = []
+            for idx, p in enumerate(paragraphs):
+                cp = chunks_dir / f"p_{idx:03d}.mp3"
+                rate_mod = "+4%" if idx == 0 else ("+0%" if idx % 2 == 0 else "+2%")
+                pitch_mod = "+2Hz" if idx % 3 == 0 else ("-2Hz" if idx % 2 == 0 else "+0Hz")
+                comm = edge_tts.Communicate(p, chosen_voice, rate=rate_mod, pitch=pitch_mod)
+                await comm.save(str(cp))
+                chunk_files.append(cp)
+
+            concat_txt = chunks_dir / "concat.txt"
+            with open(concat_txt, "w", encoding="utf-8") as f:
+                for cf in chunk_files:
+                    f.write(f"file '{cf.resolve().as_posix()}'\n")
+
+            cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_txt), "-c", "copy", str(out_path)]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
 
         duration = self.get_audio_duration(out_path)
         return out_path, duration

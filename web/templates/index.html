@@ -3,207 +3,643 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="AetherCut AI analiza, recorta y prepara videos para compartir.">
-    <title>AetherCut AI | Editor de video</title>
+    <meta name="description" content="AetherCut AI | Studio Inteligente de Video con KAI Streamer y Edición Neural">
+    <title>AetherCut AI | Studio de Video</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=5">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css?v=9">
+    <script src="https://cdn.jsdelivr.net/npm/motion@11.11.17/dist/motion.js"></script>
 </head>
 <body>
-<div class="shell">
-    <header class="topbar">
-        <div class="brand-lockup">
-            <div class="avatar" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
-            </div>
-            <div>
-                <h1>AetherCut <span>AI</span></h1>
-                <p>Edición inteligente para video</p>
+
+<!-- 1. BARRA LATERAL FLOTANTE TIPO DOCK (IDÉNTICA A LA REFERENCIA) -->
+<nav class="floating-dock" aria-label="Navegación principal de AetherCut">
+    <!-- 1. Micrófono (Streamer / Emisión) -->
+    <button type="button" class="dock-btn active" id="dockStreamer" title="KAI Streamer Transmisión">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+    </button>
+    <!-- 2. TV / Pantalla (Editor Co-Piloto) -->
+    <button type="button" class="dock-btn" id="dockCopilot" title="Editor Co-Piloto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+    </button>
+    <!-- 3. Diana / Objetivo concéntrico (Mesa de Edición) -->
+    <button type="button" class="dock-btn" id="dockStudio" title="Mesa de Edición">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+    </button>
+    <!-- 4. Carpeta (Biblioteca / Proyectos Guardados) -->
+    <button type="button" class="dock-btn" id="dockProjects" title="Proyectos Guardados">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
+    </button>
+    <!-- 5. Papelera (Limpieza de almacenamiento) -->
+    <button type="button" class="dock-btn" id="cleanupStorageBtn" title="Limpiar almacenamiento temporal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h8c1 0 2 1 2 2v2"/></svg>
+    </button>
+</nav>
+
+<!-- 2. VENTANA PRINCIPAL GLASSMORPHIC BENTO (ESTRUCTURA IDÉNTICA AL DISEÑO) -->
+<main class="glass-studio-window" id="mainStudioWindow">
+
+    <!-- BARRA SUPERIOR DE LA VENTANA -->
+    <header class="window-topbar">
+        <div class="brand-monogram">
+            <div class="brand-logo-pill" aria-hidden="true">qb</div>
+            <div class="brand-info">
+                <h1>AetherCut Studio</h1>
+                <p>AI Video Copilot &amp; Streamer</p>
             </div>
         </div>
-        <div class="top-note"><i></i> Análisis con Gemini · avance por etapas</div>
+
+        <!-- SELECTOR DE PESTAÑAS EN FORMA DE PÍLDORA -->
+        <nav class="segmented-nav-pill" role="tablist">
+            <button type="button" class="tab-pill active" id="tabModeStreamer" role="tab" aria-selected="true">
+                KAI Streamer
+            </button>
+            <button type="button" class="tab-pill" id="tabModeCopilot" role="tab" aria-selected="false">
+                Editor Co-Piloto
+            </button>
+            <button type="button" class="tab-pill" id="tabModeStudio" role="tab" aria-selected="false">
+                Mesa de Edición
+            </button>
+            <button type="button" class="tab-pill" id="tabModeProjects" role="tab" aria-selected="false">
+                Proyectos
+            </button>
+        </nav>
+
+        <!-- PERFIL / INDICADOR KAI -->
+        <div class="profile-pill">
+            <div class="avatar-circle">🧑‍🚀</div>
+            <div class="profile-meta">
+                <span class="profile-name">KAI Copilot</span>
+                <span class="profile-role" id="connectionStatus">● Listo</span>
+            </div>
+        </div>
     </header>
 
-    <main class="workspace">
-        <aside class="controls-column">
-            <section class="card ingest-card">
-                <div class="section-heading">
-                    <span class="section-kicker">PREPARAR</span>
-                    <h2>Tu video</h2>
-                    <p>Elige el archivo y decide qué quieres incluir en la edición.</p>
+    <!-- FILA HERO CON TÍTULO GRANDE, ANILLO DONUT Y MÉTRICAS CLAVE -->
+    <section class="hero-stats-row">
+        <div class="hero-title-group">
+            <h2 id="heroTitle">Transmisión Autónoma</h2>
+            <p id="heroSubtitle">KAI investiga la web, redacta el guión y produce el video broadcast en vivo</p>
+        </div>
+
+        <div class="hero-metrics-cluster">
+            <!-- ANILLO DONUT SVG (IDÉNTICO AL 11% DE LA IMAGEN) -->
+            <div class="donut-gauge">
+                <div class="donut-svg-wrap">
+                    <svg viewBox="0 0 36 36" width="64" height="64">
+                        <path class="donut-bg-ring" fill="none" stroke-width="3.5" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        <path class="donut-active-ring" id="donutProgressArc" fill="none" stroke-width="3.5" stroke-dasharray="100, 100" stroke-dashoffset="0" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    </svg>
+                    <span class="donut-value" id="donutPctText">100%</span>
+                </div>
+                <div class="donut-label">
+                    <span>Estado Motor</span>
+                    <strong id="donutLabelText">Listo</strong>
+                </div>
+            </div>
+
+            <!-- MÉTRICAS EN FORMATO NUMÉRICO DINÁMICO -->
+            <div class="hero-stat-item">
+                <span class="hero-stat-label">Duración Objetivo</span>
+                <span class="hero-stat-val" id="heroDurationVal">5<sup>min</sup></span>
+            </div>
+            <div class="hero-stat-item">
+                <span class="hero-stat-label">Resolución Master</span>
+                <span class="hero-stat-val" id="heroResolutionVal">1080p<sup>FHD</sup></span>
+            </div>
+            <div class="hero-stat-item">
+                <span class="hero-stat-label">Escenas &amp; B-Roll</span>
+                <span class="hero-stat-val" id="heroScenesVal">Auto<sup>Modular</sup></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- FILA DE FILTROS Y CHIPS DINÁMICOS DE TENDENCIAS EN LA WEB -->
+    <section class="chips-filter-row" id="trendingChipsRow" aria-label="Temas en tendencia web">
+        <span style="font-size:11px; font-weight:700; color:var(--text-muted); display:inline-flex; align-items:center; gap:4px; margin-right:4px;">
+            🔥 Tendencias Web:
+        </span>
+        <button type="button" class="filter-chip active chip-trend-btn" data-topic="Avances en Computación Cuántica y Chips Fotónicos">⚛️ Computación Cuántica</button>
+        <button type="button" class="filter-chip chip-trend-btn" data-topic="Misión Europa Clipper y Océanos en el Sistema Solar">🚀 Europa Clipper</button>
+        <button type="button" class="filter-chip chip-trend-btn" data-topic="Modelos de IA de Razonamiento Profundo en 2026">🧠 Razonamiento IA</button>
+        <button type="button" class="filter-chip chip-trend-btn" data-topic="Fusión Nuclear y Récords de Confinamiento">⚡ Fusión Nuclear</button>
+        <button type="button" class="filter-chip chip-trend-btn" data-topic="Telescopio Espacial James Webb Nuevos Hallazgos">🔭 Cosmos Webb</button>
+        <button type="button" class="filter-chip filter-chip-add chip-quick-topic" id="refreshTrendingBtn" title="Cargar más tendencias web">↻</button>
+    </section>
+
+    <!-- CONTENEDOR BENTO GRID ASIMÉTRICO (COLUMNA PRINCIPAL Y COLUMNA LATERAL) -->
+    <div class="bento-grid-container" id="streamerTabPane">
+
+        <!-- COLUMNA IZQUIERDA: TARJETA BENTO GRANDE PRINCIPAL -->
+        <section class="bento-main-card">
+            <header class="bento-card-header">
+                <div class="bento-header-left">
+                    <div class="app-badge-icon" aria-hidden="true">🎬</div>
+                    <div>
+                        <h3 id="bentoCardTitle">Mesa de Transmisión KAI</h3>
+                        <p id="bentoCardSub">Configuración de emisión y vista previa en tiempo real</p>
+                    </div>
                 </div>
 
-                <form id="uploadForm">
-                    <fieldset id="uploadControls">
+                <!-- STACK DE AVATARES DEL EQUIPO (TAL CUAL A LA IMAGEN) -->
+                <div class="avatar-stack" aria-label="Copilotos activos">
+                    <span class="avatar-stack-item">🧑‍💻</span>
+                    <span class="avatar-stack-item">🤖</span>
+                    <span class="avatar-stack-item">🎨</span>
+                    <span class="avatar-stack-item">🚀</span>
+                    <span class="avatar-stack-item avatar-stack-add">+</span>
+                </div>
+            </header>
+
+            <!-- 3 SUB-TARJETAS MODULARES CONECTADAS -->
+            <div class="bento-subcards-row">
+
+                <!-- SUB-CARD 1: VISTA PREVIA / ZONA DE VIDEO -->
+                <div class="bento-subcard">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <span class="bento-subcard-title" style="margin:0;">Monitor de Emisión</span>
+                        <div id="monitorDownloadBar" style="display:flex; gap:6px;" hidden>
+                            <a href="#" class="subcard-pill-btn active" id="downloadMasterBtn" download style="text-decoration:none; padding:4px 10px; font-size:11px; display:inline-flex; align-items:center; gap:4px;">
+                                📥 Descargar Master ↗
+                            </a>
+                            <a href="#" class="subcard-pill-btn" id="downloadShortBtn" download style="text-decoration:none; padding:4px 10px; font-size:11px; display:inline-flex; align-items:center; gap:4px;" hidden>
+                                📱 Short ↗
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- Reproductor en vivo (ÚNICO Y CONSOLIDADO CON HUD PROMAX) -->
+                    <div class="stage-preview-box" id="previewContainer">
+                        <video id="projectPreview" playsinline preload="metadata"></video>
+                        <div class="stage-badge-rec" id="stageBadgeRec"><i></i> REC VIVO</div>
+                        <!-- Custom HUD Overlay -->
+                        <div class="video-hud-overlay" id="previewHud">
+                            <div class="video-hud-scrubber-wrap" id="hudScrubberWrap">
+                                <div class="video-hud-scrubber-bar" id="hudScrubberBar"></div>
+                            </div>
+                            <div class="video-hud-controls-row">
+                                <div class="video-hud-left">
+                                    <button type="button" class="hud-btn" id="hudPlayBtn" title="Reproducir / Pausar">▶</button>
+                                    <button type="button" class="hud-btn" id="hudMuteBtn" title="Silenciar / Activar sonido">🔊</button>
+                                    <span class="hud-timecode" id="hudTimecode">00:00 / 00:00</span>
+                                </div>
+                                <div class="video-hud-right">
+                                    <button type="button" class="hud-btn" id="hudSpeedBtn" title="Velocidad de reproducción">1x</button>
+                                    <a href="#" class="hud-dl-pill" id="hudDownloadBtn" download title="Descargar Video .MP4">📥 MP4</a>
+                                    <button type="button" class="hud-btn" id="hudFullscreenBtn" title="Pantalla completa">⛶</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dropzone alternativo para modo Copiloto -->
+                    <div id="copilotDropWrap" hidden>
                         <input type="file" id="videoFileInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-msvideo,.m4v" hidden>
-                        <button class="drop" id="dropzone" type="button" aria-label="Seleccionar o soltar un video">
-                            <span class="drop-ico" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
-                            </span>
-                            <span class="drop-main">Suelta tu video aquí</span>
-                            <span class="drop-sub">o <u>busca un archivo</u></span>
-                            <span class="format-note">MP4 · MOV · MKV · WEBM · AVI · M4V · hasta 2 GB</span>
+                        <button class="dropzone-bento" id="dropzone" type="button">
+                            <span style="font-size:22px; margin-bottom:4px;">📥</span>
+                            <strong style="font-size:12px;">Arrastra un video aquí</strong>
+                            <span style="font-size:10px; color:var(--text-muted);">o haz clic para explorar</span>
                         </button>
                         <div class="file-chip" id="selectedFileBadge" hidden>
-                            <span class="file-mark" aria-hidden="true">▶</span>
+                            <span class="file-mark">▶</span>
                             <span id="selectedFileName">video.mp4</span>
-                            <button id="removeFileBtn" type="button" aria-label="Quitar video">×</button>
+                            <button id="removeFileBtn" type="button">×</button>
                         </div>
+                    </div>
+                </div>
 
-                        <div class="option-heading"><h3>Elementos de edición</h3><span>Activa lo que necesites</span></div>
-                        <div class="toggles">
-                            <label class="tg"><input type="checkbox" id="enableBRoll" checked><span class="toggle-copy"><b>B-Roll</b><em>Apoyos visuales</em></span><i class="switch" aria-hidden="true"></i></label>
-                            <label class="tg"><input type="checkbox" id="enableCards" checked><span class="toggle-copy"><b>Tarjetas</b><em>Datos con fuentes</em></span><i class="switch" aria-hidden="true"></i></label>
-                            <label class="tg"><input type="checkbox" id="enableCaptions"><span class="toggle-copy"><b>Subtítulos</b><em>Transcripción local</em></span><i class="switch" aria-hidden="true"></i></label>
-                            <label class="tg"><input type="checkbox" id="enableShorts" checked><span class="toggle-copy"><b>Short vertical</b><em>Formato 9:16</em></span><i class="switch" aria-hidden="true"></i></label>
-                        </div>
+                <!-- SUB-CARD 2: FORMATO, DURACIÓN Y ESTILO (ORGANIZADO) -->
+                <div class="bento-subcard">
+                    <span class="bento-subcard-title">Formato &amp; Duración</span>
+                    
+                    <!-- Formato pills -->
+                    <div class="subcard-pills-wrap" id="formatPillsWrap">
+                        <button type="button" class="subcard-pill-btn active" data-fmt="16:9">16:9 Horizontal</button>
+                        <button type="button" class="subcard-pill-btn" data-fmt="9:16">9:16 Vertical</button>
+                    </div>
 
-                        <div class="slider-box">
-                            <div class="slider-top"><label for="silenceThreshold">Cortar pausas mayores a</label><b id="silenceVal">1.5 s</b></div>
-                            <input type="range" id="silenceThreshold" min="0.8" max="3.0" step="0.1" value="1.5">
-                            <div class="ticks"><span>0.8 s</span><span>3.0 s</span></div>
-                        </div>
+                    <!-- Duración pills -->
+                    <span class="bento-subcard-title" style="margin-top:4px;">Duración Objetivo</span>
+                    <div class="subcard-pills-wrap" id="durationPillsWrap">
+                        <button type="button" class="subcard-pill-btn" data-sec="60">1 min</button>
+                        <button type="button" class="subcard-pill-btn" data-sec="180">3 min</button>
+                        <button type="button" class="subcard-pill-btn active" data-sec="300">5 min</button>
+                        <button type="button" class="subcard-pill-btn" data-sec="600">10 min</button>
+                    </div>
 
-                        <button type="submit" class="cta" id="startBtn" disabled>
-                            <span id="startBtnText">Selecciona un video</span>
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>
-                        </button>
-                    </fieldset>
-                </form>
-                <p class="local-note">El análisis del contenido se envía a Gemini. Las opciones web consultan sus fuentes cuando están activadas.</p>
-            </section>
-            <section class="card projects-card" id="savedProjectsCard" hidden>
-                <div class="section-heading compact-heading" style="display:flex; justify-content:space-between; align-items:center;">
+                    <!-- Selects nativos sincronizados ocultos -->
+                    <select id="streamerFormat" hidden>
+                        <option value="16:9" selected>16:9</option>
+                        <option value="9:16">9:16</option>
+                    </select>
+                    <select id="streamerDuration" hidden>
+                        <option value="60">60</option>
+                        <option value="180">180</option>
+                        <option value="300" selected>300</option>
+                        <option value="600">600</option>
+                        <option value="900">900</option>
+                    </select>
+                    <select id="streamerStyle" hidden>
+                        <option value="divulgacion" selected>divulgacion</option>
+                        <option value="debate">debate</option>
+                        <option value="analisis">analisis</option>
+                        <option value="noticias">noticias</option>
+                        <option value="podcast">podcast</option>
+                        <option value="mitos">mitos</option>
+                    </select>
+                </div>
+
+                <!-- SUB-CARD 3: VOZ NEURAL Y RECURSOS -->
+                <div class="bento-subcard">
+                    <span class="bento-subcard-title">Voz Neural &amp; Locutor</span>
+                    
+                    <select id="streamerVoice" class="select-input">
+                        <option value="es-MX-JorgeNeural" selected>🎙️ Jorge (Conversacional &amp; Natural)</option>
+                        <option value="es-CO-GonzaloNeural">🎙️ Gonzalo (Neutro &amp; Calmo)</option>
+                        <option value="es-US-AlonsoNeural">🎙️ Alonso (Broadcast Internacional)</option>
+                        <option value="es-ES-AlvaroNeural">🎙️ Álvaro (Tech Divulgación)</option>
+                        <option value="es-MX-DaliaNeural">🎙️ Dalia (Femenina Dinámica)</option>
+                    </select>
+
+                    <span class="bento-subcard-title" style="margin-top:6px;">Tema para KAI</span>
+                    <textarea id="streamerTopic" rows="2" class="text-input" placeholder="Ej: Avances y desafíos de la IA Cuántica en 2026..."></textarea>
+                </div>
+            </div>
+
+            <!-- BOTÓN EXPANDIBLE PARA OPCIONES AVANZADAS (AUDIO 2: ORGANIZADO Y EXPANDIBLE) -->
+            <button type="button" class="expand-accordion-toggle" id="toggleAdvancedDrawer">
+                <span>⚙️ Opciones avanzadas (Corte de pausas, tema de tarjetas, transcripción)</span>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+
+            <!-- DRAWER EXPANDIBLE -->
+            <div class="expanded-settings-drawer" id="advancedDrawer" hidden>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:14px; align-items:center;">
                     <div>
-                        <span class="section-kicker">PROYECTOS GUARDADOS</span>
-                        <h2>Continuar una edición</h2>
+                        <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;" for="streamerCardTheme">Tema de Tarjetas Bento</label>
+                        <select id="streamerCardTheme" class="select-input">
+                            <option value="dark" selected>Negro Mate Carbono</option>
+                            <option value="light">Porcelain Blanco Claro</option>
+                        </select>
                     </div>
-                    <button id="cleanupStorageBtn" type="button" class="cancel-task" style="margin-left:auto; font-size:10px; border-color:var(--border); color:var(--secondary);" title="Liberar espacio y limpiar archivos temporales">🧹 Limpiar</button>
-                </div>
-                <div id="savedProjectsList" class="saved-projects"></div>
-            </section>
-        </aside>
-
-        <section class="main-column" aria-label="Estado y resultados">
-            <section class="card status-card" aria-labelledby="statusTitle">
-                <div class="status-topline">
-                    <span class="section-kicker">SESIÓN DE EDICIÓN</span>
-                    <button class="cancel-task" id="cancelTaskBtn" type="button" hidden>Cancelar</button>
-                    <span id="connectionStatus" class="live-badge"><i></i><span>Listo</span></span>
-                </div>
-                <div class="current-work">
-                    <div class="work-indicator" id="workIndicator" aria-hidden="true"><span></span></div>
-                    <div class="work-copy">
-                        <h2 id="statusTitle">Carga un video para empezar</h2>
-                        <p id="pipelineStatusText">Aquí verás qué etapa está activa y la última acción reportada por el proceso.</p>
-                    </div>
-                    <strong class="progress-number" id="progressPctText">0%</strong>
-                </div>
-
-                <div class="progress-track" role="progressbar" aria-label="Progreso de la edición" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                    <div class="progress-fill" id="progressBarFill"></div>
-                </div>
-                <div class="progress-meta"><span id="jobFileName">Sin archivo seleccionado</span><span>Avance por etapas</span><span id="lastUpdateText">En espera</span></div>
-
-                <ol class="phase-track" aria-label="Etapas de edición">
-                    <li id="phase-input"><span class="phase-dot">1</span><span>Preparar</span></li>
-                    <li id="phase-analyze"><span class="phase-dot">2</span><span>Analizar</span></li>
-                    <li id="phase-cut"><span class="phase-dot">3</span><span>Detectar pausas</span></li>
-                    <li id="phase-enrich"><span class="phase-dot">4</span><span>Buscar recursos</span></li>
-                    <li id="phase-render"><span class="phase-dot">5</span><span>Renderizar</span></li>
-                </ol>
-
-                <div class="time-row">
-                    <div><span id="totalElapsedLabel">Tiempo total</span><b id="totalElapsed">00:00</b></div>
-                    <div><span>En esta etapa</span><b id="stageElapsed">00:00</b></div>
-                    <div><span>Última señal</span><b id="signalAge">—</b></div>
-                </div>
-                <p class="wait-note" id="waitNote" hidden></p>
-            </section>
-
-            <section class="card studio-card" id="studioSection" hidden aria-labelledby="studioTitle">
-                <div class="activity-heading studio-heading">
                     <div>
-                        <span class="section-kicker">MESA DE EDICIÓN</span>
-                        <h2 id="studioTitle">Plan que está construyendo AetherCut</h2>
-                    </div>
-                    <span class="activity-count" id="studioSummary">Esperando análisis</span>
-                </div>
-                <p class="studio-intro" id="studioIntro">Aquí aparecerán los elementos en el momento exacto en que el sistema los detecte.</p>
-                <div class="studio-grid">
-                    <div class="preview-pane">
-                        <div class="preview-stage">
-                            <video id="projectPreview" controls muted playsinline preload="metadata"></video>
-                            <div class="preview-empty" id="previewEmpty">La previsualización se prepara junto al análisis.</div>
+                        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:4px;">
+                            <span style="color:var(--text-muted);">Cortar pausas mayores a:</span>
+                            <b id="silenceVal">1.5 s</b>
                         </div>
-                        <div class="time-readout"><span id="previewCurrentTime">00:00</span><span id="previewDuration">00:00</span></div>
-                        <input id="timelineCursor" class="timeline-cursor" type="range" min="0" max="1" value="0" step="0.1" aria-label="Posición de la previsualización">
-                        <div class="timeline-thumbnails" id="timelineThumbnails" aria-label="Miniaturas de la línea de tiempo" hidden></div>
-                        <p class="thumbnail-status" id="thumbnailStatus">Las miniaturas se prepararán con la vista previa.</p>
+                        <input type="range" id="silenceThreshold" min="0.8" max="3.0" step="0.1" value="1.5">
                     </div>
-                    <aside class="inspector-pane" aria-live="polite">
-                        <span class="section-kicker">INSPECTOR</span>
-                        <div id="editorInspector" class="editor-inspector">
-                            <b>Selecciona un elemento de la línea de tiempo</b>
-                            <p>Podrás cambiar su momento, duración, posición o retirarlo antes de una nueva exportación.</p>
-                        </div>
-                    </aside>
-                </div>
-                <div class="timeline-legend" aria-hidden="true"><span class="legend-card">Tarjetas</span><span class="legend-broll">B-Roll</span><span class="legend-short">Shorts</span><span class="legend-cut">Pausas</span></div>
-                <div class="timeline-scroll">
-                    <div class="timeline-ruler" id="timelineRuler"></div>
-                    <div class="timeline-tracks" id="timelineTracks" aria-label="Línea de tiempo editable"></div>
-                </div>
-                <div class="studio-actions">
-                    <span id="editorSaveState" class="editor-save-state">Los cambios se guardan en este proyecto.</span>
-                    <div class="studio-buttons">
-                        <button id="saveTimelineBtn" class="secondary-cta" type="button" disabled>Guardar cambios</button>
-                        <button id="exportTimelineBtn" class="secondary-cta" type="button" disabled>Exportar versión</button>
-                    </div>
-                </div>
-            </section>
-
-            <section class="card activity-card" aria-labelledby="activityTitle">
-                <div class="activity-heading">
                     <div>
-                        <span class="section-kicker">SEÑALES DEL PROCESO</span>
-                        <h2 id="activityTitle">Actividad</h2>
+                        <label class="pill-toggle-control" style="display:flex; align-items:center; gap:8px;">
+                            <input type="checkbox" id="enableCaptions" checked>
+                            <div class="pill-toggle-track">
+                                <span class="icon-x">✕</span>
+                                <span class="icon-check">✓</span>
+                                <span class="pill-toggle-knob"></span>
+                            </div>
+                            <span style="font-size:12px; font-weight:600;">Subtítulos dinámicos</span>
+                        </label>
+                        <input type="checkbox" id="enableShorts" checked hidden>
                     </div>
-                    <span class="activity-count" id="activityCount">0 eventos</span>
-                </div>
-                <div class="activity-feed" id="activityFeed" role="log" aria-live="polite" aria-relevant="additions">
-                    <div class="empty-activity" id="emptyActivity">
-                        <span aria-hidden="true">◷</span>
-                        <p>Cuando inicie el trabajo, aquí aparecerá cada acción reportada.</p>
-                    </div>
-                </div>
-            </section>
 
-            <section class="card results-card" id="resultsSection" hidden>
-                <div class="activity-heading result-heading">
-                    <div><span class="section-kicker">LISTO PARA REVISAR</span><h2>Resultados</h2></div>
-                    <a href="#" class="download-link" id="downloadMasterBtn" download>Descargar video ↗</a>
+                    <!-- TRANSMISIÓN EN DIRECTO RTMP (YOUTUBE LIVE, TWITCH, KICK) -->
+                    <div style="grid-column: 1 / -1; margin-top: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <span style="font-size:12px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                                <span style="color:#ef4444;">🔴</span> Emisión en Directo (YouTube / Twitch / Kick)
+                            </span>
+                            <span style="font-size:11px; color:var(--text-muted);">Transmite vía RTMP en vivo y guarda el video en la plataforma</span>
+                        </div>
+                        <div style="display:grid; grid-template-columns: 200px 1fr; gap:10px; align-items:center;">
+                            <div>
+                                <select id="streamerLivePlatform" class="select-input">
+                                    <option value="none" selected>Ninguna (Solo guardar MP4 local)</option>
+                                    <option value="youtube">YouTube Live</option>
+                                    <option value="twitch">Twitch</option>
+                                    <option value="kick">Kick</option>
+                                    <option value="custom">RTMP Personalizado</option>
+                                </select>
+                            </div>
+                            <div>
+                                <input type="password" id="streamerStreamKey" class="text-input" placeholder="Clave de emisión / Stream Key (ej: abcd-1234-...)" style="display:none;">
+                                <input type="text" id="streamerCustomRtmp" class="text-input" placeholder="URL RTMP completa (ej: rtmp://servidor/live/clave)" style="display:none;">
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="players">
-                    <div class="master-player"><span class="media-label">Video editado · 16:9</span><video id="masterVideoPlayer" controls playsinline></video></div>
-                    <div id="shortContainer"><div class="media-label">Short · 9:16 <a href="#" class="download-link small" id="downloadShortBtn" download>Descargar ↗</a></div><video id="shortVideoPlayer" class="short-player" controls playsinline></video></div>
+            </div>
+
+            <!-- LÍNEA DE LECTURA INFERIOR CON DATOS EN FORMATO GRANDE -->
+            <div class="subcard-readout-row">
+                <div class="readout-col">
+                    <span>Transmisión</span>
+                    <strong id="readoutTopicShort">IA Cuántica</strong>
                 </div>
-                <div class="shorts-list" id="shortsList" hidden></div>
-                <div class="result-stats">
-                    <div><b id="statCuts">0</b><span>pausas cortadas</span></div>
-                    <div><b id="statBRolls">0</b><span>apoyos visuales</span></div>
-                    <div><b id="statCards">0</b><span>tarjetas mostradas</span></div>
-                    <div><b id="statTimeSaved">0 s</b><span>tiempo ahorrado</span></div>
+                <div class="readout-col">
+                    <span>Duración</span>
+                    <strong id="readoutDuration">5 min</strong>
                 </div>
-                <div class="facts-wrap" id="factsWrap" hidden>
-                    <div class="facts-heading"><h3>Datos revisados</h3><span id="factsSummary"></span></div>
-                    <ul class="facts" id="factsList"></ul>
+                <div class="readout-col">
+                    <span>Formato</span>
+                    <strong id="readoutFormat">16:9 FHD</strong>
                 </div>
-            </section>
+                <div class="readout-col">
+                    <span>Voz Activa</span>
+                    <strong>Jorge Neural</strong>
+                </div>
+            </div>
+
+            <!-- ESTADO DEL PROCESO Y ACCIÓN PRINCIPAL (BOTÓN CTA) -->
+            <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+                <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                    <span id="pipelineStatusText" style="font-size:12px; color:var(--text-secondary);">Listo para iniciar la transmisión con KAI.</span>
+                    <strong id="progressPctText" style="font-size:14px; font-weight:700;">0%</strong>
+                </div>
+                <div class="progress-track-bento">
+                    <div class="progress-fill-bento" id="progressBarFill" style="width: 0%;"></div>
+                </div>
+                <ul class="phase-track-bento">
+                    <li id="phase-input">1. Investigar</li>
+                    <li id="phase-analyze">2. Guión IA</li>
+                    <li id="phase-cut">3. Voz Neural</li>
+                    <li id="phase-enrich">4. B-Roll &amp; Bento</li>
+                    <li id="phase-render">5. Broadcast</li>
+                </ul>
+            </div>
+
+            <!-- BANNER DE COMPLETADO CLARO Y VISIBLE -->
+            <div id="broadcastCompleteBanner" style="display:none; background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.3); border-radius:14px; padding:14px 18px; margin-bottom:12px; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:22px;">🎉</span>
+                    <div>
+                        <strong style="color:#22c55e; font-size:13px; display:block;">¡Transmisión Master Completada!</strong>
+                        <span style="color:var(--text-muted); font-size:11px;">Video master 1080p listo para reproducir y descargar.</span>
+                    </div>
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                    <button type="button" id="bannerWatchBtn" class="subcard-pill-btn active" style="padding:8px 16px; font-size:12px; cursor:pointer; background:linear-gradient(135deg, #38bdf8, #2563eb); color:#fff; border:0; border-radius:8px; font-weight:700;">
+                        ▶ Ver Master en Pantalla Completa
+                    </button>
+                    <a id="bannerDownloadBtn" href="#" class="subcard-pill-btn active" style="padding:8px 14px; font-size:12px; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
+                        📥 Descargar .MP4
+                    </a>
+                    <button type="button" id="bannerFolderBtn" class="subcard-pill-btn" style="padding:8px 14px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.12); color:#fff;">
+                        📂 Abrir Carpeta en Windows
+                    </button>
+                </div>
+            </div>
+
+            <!-- BOTONES DE ACCIÓN PRINCIPALES -->
+            <form id="streamerForm" style="margin:0;">
+                <button type="submit" class="cta-broadcast-btn" id="startStreamerBtn">
+                    <span id="startStreamerBtnText">🚀 Iniciar Transmisión de KAI</span>
+                </button>
+            </form>
+            
+            <form id="uploadForm" hidden style="margin:0;">
+                <fieldset id="uploadControls" style="border:0; padding:0; margin:0;">
+                    <button type="submit" class="cta-broadcast-btn" id="startBtn" disabled>
+                        <span id="startBtnText">Selecciona un video</span>
+                    </button>
+                </fieldset>
+            </form>
+
+            <button type="button" id="cancelTaskBtn" class="dock-btn" style="width:100%; border-radius:12px; height:36px; font-size:12px; background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.3);" hidden>
+                Cancelar Transmisión
+            </button>
         </section>
-    </main>
-</div>
-<script src="/static/js/app.js?v=7"></script>
+
+        <!-- COLUMNA DERECHA: 2 TARJETAS BENTO LATERALES (OSCURA Y CREMA INVERTIDA) -->
+        <aside class="bento-right-column">
+
+            <!-- TARJETA LATERAL 1 (VIDRIO OSCURO): B-ROLL CINEMATOGRÁFICO ROTATIVO -->
+            <div class="bento-side-card">
+                <div class="side-card-top">
+                    <div class="side-card-badge" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    </div>
+                    <div class="side-card-info">
+                        <h4>B-Roll Dinámico</h4>
+                        <p>Rotación de fondos 100% full-frame</p>
+                    </div>
+                </div>
+
+                <div class="side-card-bottom">
+                    <div class="side-card-stat">
+                        <span>Cobertura de Pantalla</span>
+                        <strong>100%<sup>Bleed</sup></strong>
+                    </div>
+
+                    <!-- SWITCH CON CRUZ Y CHECKMARK (x | ✓) -->
+                    <label class="pill-toggle-control" title="Activar/Desactivar B-Roll">
+                        <input type="checkbox" id="enableBRoll" checked>
+                        <div class="pill-toggle-track">
+                            <span class="icon-x">✕</span>
+                            <span class="icon-check">✓</span>
+                            <span class="pill-toggle-knob"></span>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- TARJETA LATERAL 2 (LUJOSA CREMA/IVORY INVERTIDA): TARJETAS BENTO & CIFRAS -->
+            <div class="bento-side-card inverted-cream-card">
+                <div class="side-card-top">
+                    <div class="side-card-badge" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+                    </div>
+                    <div class="side-card-info">
+                        <h4>Tarjetas Bento &amp; Cifras</h4>
+                        <p>Gráficos flotantes con fuentes verificadas</p>
+                    </div>
+                </div>
+
+                <div class="side-card-bottom">
+                    <div class="side-card-stat">
+                        <span>Metodología de Análisis</span>
+                        <strong>Dato<sup>Relato</sup></strong>
+                    </div>
+
+                    <!-- SWITCH INVERTIDO CON CRUZ Y CHECKMARK (x | ✓) -->
+                    <label class="pill-toggle-control" title="Activar/Desactivar Tarjetas Bento">
+                        <input type="checkbox" id="enableCards" checked>
+                        <div class="pill-toggle-track">
+                            <span class="icon-x">✕</span>
+                            <span class="icon-check">✓</span>
+                            <span class="pill-toggle-knob"></span>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- BOTÓN FLOTANTE INFERIOR DERECHO PARA PANTALLA COMPLETA / EXPANDIR (IDÉNTICO A LA REFERENCIA) -->
+            <button type="button" class="fullscreen-expand-btn" id="fullscreenExpandBtn" title="Expandir pantalla completa">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+        </aside>
+    </div>
+
+    <!-- APARTADO EXCLUSIVO: PRODUCCIÓN MASTER & ESTUDIO DE MATERIALES -->
+    <section class="bento-main-card" id="resultsSection" hidden style="margin-top: 14px; padding: 22px;">
+        <header class="bento-card-header" style="flex-wrap: wrap; gap: 12px; align-items: flex-start;">
+            <div>
+                <span class="bento-subcard-title" style="display:inline-flex; align-items:center; gap:6px; color:#22c55e;">
+                    <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#22c55e;"></span>
+                    PRODUCCIÓN MASTER BROADCAST LISTA
+                </span>
+                <h3 id="resVideoTitle" style="margin:4px 0 2px; font-size:20px; font-weight:800; color:#fff;">Producción KAI Completada</h3>
+                <p id="resVideoSub" style="margin:0; font-size:12px; color:var(--text-muted);">Transmisión completa en 1080p FHD con escenas modulares, B-roll y tarjetas Bento</p>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                <a href="#" class="subcard-pill-btn active" id="downloadMasterBtnSec" download="KAI_Master.mp4" style="text-decoration:none; padding:8px 16px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:6px;">
+                    📥 Descargar Video Master (.MP4)
+                </a>
+                <a href="#" class="subcard-pill-btn" id="downloadZipBtn" download="Materiales_KAI.zip" style="text-decoration:none; padding:8px 16px; font-size:12px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">
+                    📦 Descargar Todos los Materiales (.ZIP)
+                </a>
+                <button type="button" class="subcard-pill-btn" id="openFolderBtn" style="padding:8px 16px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                    📂 Abrir Carpeta en Windows
+                </button>
+            </div>
+        </header>
+
+        <!-- REPRODUCTOR CINE MASTER GRANDE CON HUD PROMAX -->
+        <div class="stage-preview-box" id="masterStageWrap" style="margin-top:16px;">
+            <video id="masterVideoPlayer" playsinline preload="metadata"></video>
+            <div class="stage-badge-rec" style="top:12px; left:12px;"><i></i> MASTER BROADCAST 1080p</div>
+            <div class="video-hud-overlay" id="masterHud">
+                <div class="video-hud-scrubber-wrap" id="masterScrubberWrap">
+                    <div class="video-hud-scrubber-bar" id="masterScrubberBar"></div>
+                </div>
+                <div class="video-hud-controls-row">
+                    <div class="video-hud-left">
+                        <button type="button" class="hud-btn" id="masterPlayBtn" title="Reproducir / Pausar">▶</button>
+                        <button type="button" class="hud-btn" id="masterMuteBtn" title="Silenciar / Activar sonido">🔊</button>
+                        <span class="hud-timecode" id="masterTimecode">00:00 / 00:00</span>
+                    </div>
+                    <div class="video-hud-right">
+                        <button type="button" class="hud-btn" id="masterSpeedBtn" title="Velocidad">1x</button>
+                        <a href="#" class="hud-dl-pill" id="masterDownloadHudBtn" download title="Descargar Video .MP4">📥 Descargar .MP4</a>
+                        <button type="button" class="hud-btn" id="masterFullscreenBtn" title="Pantalla completa">⛶</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LECTURA DE MÉTRICAS BROADCAST -->
+        <div class="subcard-readout-row" style="margin-top:16px;">
+            <div class="readout-col">
+                <span>Estado Broadcast</span>
+                <strong style="color:#22c55e;">● Master 1080p</strong>
+            </div>
+            <div class="readout-col">
+                <span>Escenas Dirigidas</span>
+                <strong id="resScenesCount">0</strong>
+            </div>
+            <div class="readout-col">
+                <span>B-Rolls &amp; Fondos</span>
+                <strong id="statBRolls">0</strong>
+            </div>
+            <div class="readout-col">
+                <span>Tarjetas Bento HUD</span>
+                <strong id="statCards">0</strong>
+            </div>
+            <div class="readout-col">
+                <span>Pausas Cortadas</span>
+                <strong id="statCuts">0</strong>
+            </div>
+            <div class="readout-col">
+                <span>Tiempo Optimizado</span>
+                <strong id="statTimeSaved">0 s</strong>
+            </div>
+        </div>
+
+        <!-- DESGLOSE DE ESCENAS DIRIGIDAS POR LA IA -->
+        <div style="margin-top:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <span class="bento-subcard-title" style="margin:0; font-size:13px; font-weight:700; color:#fff;">
+                    🎬 Desglose de Escenas del AI Director
+                </span>
+                <span style="font-size:11px; color:var(--text-muted);">Estructura audiovisual cronometrada</span>
+            </div>
+            <div id="resScenesList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px;"></div>
+        </div>
+
+        <!-- INVENTARIO COMPLETO DE MATERIALES Y ARCHIVOS -->
+        <div style="margin-top:18px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <span class="bento-subcard-title" style="margin:0; font-size:13px; font-weight:700; color:#fff;">
+                    📁 Inventario de Materiales del Proyecto
+                </span>
+                <span style="font-size:11px; color:var(--text-muted);">Clips por escena, audio neural, subtítulos y tarjetas</span>
+            </div>
+            <div id="resFilesList" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+        </div>
+
+        <div id="shortsList" style="display:flex; gap:8px; margin-top:12px;" hidden></div>
+        <!-- Elementos de soporte -->
+        <div id="shortContainer" style="display:none;" aria-hidden="true">
+            <video id="shortVideoPlayer" style="display:none;" aria-hidden="true"></video>
+        </div>
+    </section>
+
+    <!-- MESA DE EDICIÓN & TIMELINE (DISPONIBLE AL ACTIVAR PESTAÑA) -->
+    <section class="bento-main-card" id="studioSection" hidden style="margin-top: 10px;">
+        <div class="bento-card-header">
+            <div>
+                <span class="bento-subcard-title">Mesa de Edición</span>
+                <h3 id="studioTitle">Plan de Edición &amp; Timeline</h3>
+            </div>
+            <span id="studioSummary" style="font-size:12px; color:var(--text-muted);">Esperando análisis</span>
+        </div>
+        <div class="timeline-scroll">
+            <div id="timelineRuler"></div>
+            <div id="timelineTracks"></div>
+        </div>
+        <aside id="editorInspector" style="margin-top:10px; font-size:12px; color:var(--text-secondary);"></aside>
+    </section>
+
+    <!-- PROYECTOS GUARDADOS (DISPONIBLE AL ACTIVAR PESTAÑA) -->
+    <section class="bento-main-card" id="savedProjectsCard" hidden style="margin-top: 10px;">
+        <div class="bento-card-header">
+            <div>
+                <span class="bento-subcard-title">Biblioteca</span>
+                <h3>Proyectos Guardados</h3>
+            </div>
+        </div>
+        <div id="savedProjectsList" style="display:flex; flex-direction:column; gap:8px;"></div>
+    </section>
+
+    <!-- ELEMENTOS OCULTOS DE TELEMETRÍA Y CONTROLES NECESARIOS PARA APP.JS -->
+    <div style="display:none;" aria-hidden="true">
+        <h2 id="statusTitle"></h2>
+        <span id="jobFileName"></span>
+        <span id="lastUpdateText"></span>
+        <b id="totalElapsed">00:00</b>
+        <b id="stageElapsed">00:00</b>
+        <b id="signalAge">—</b>
+        <p id="waitNote"></p>
+        <p id="studioIntro"></p>
+        <div id="previewEmpty"></div>
+        <span id="previewCurrentTime">00:00</span>
+        <span id="previewDuration">00:00</span>
+        <input id="timelineCursor" type="range" min="0" max="1" value="0">
+        <div id="timelineThumbnails"></div>
+        <p id="thumbnailStatus"></p>
+        <button id="saveTimelineBtn"></button>
+        <button id="exportTimelineBtn"></button>
+        <span id="editorSaveState"></span>
+        <h2 id="activityTitle"></h2>
+        <span id="activityCount"></span>
+        <div id="activityFeed"><div id="emptyActivity"></div></div>
+        <div id="factsWrap"><span id="factsSummary"></span><ul id="factsList"></ul></div>
+        <span id="totalElapsedLabel"></span>
+        <span id="workIndicator"></span>
+    </div>
+
+</main>
+
+<script src="/static/js/app.js?v=26"></script>
 </body>
 </html>

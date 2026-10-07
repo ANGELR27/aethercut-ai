@@ -174,38 +174,29 @@ class PexelsAssetProvider(AssetProvider):
 
 class OpenStockAssetProvider(AssetProvider):
     """
-    Proveedor de Stock 100% abierto y gratuito SIN NECESIDAD DE API KEY.
-    Utiliza Unsplash y repositorios abiertos para obtener imágenes reales en HD (1080p)
-    inmediatamente según el concepto de búsqueda.
+    Proveedor de fotos e ilustraciones enciclopédicas reales verificadas de alta resolución
+    mediante Wikimedia Commons y bibliotecas abiertas (100% libre de IA deforme).
     """
 
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
+        from core.web_media import WikiMediaClient
         query = cue.search_query_en or cue.concept
-        # Reemplazar espacios para URL
-        sanitized_query = query.replace(" ", "%20")
-        
-        # Endpoint de imagen real de alta definición temática sin clave
-        download_url = f"https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1920&q=80"
-        
-        # También probamos el motor dinámico temático abierto de Pollinations/Unsplash
-        dynamic_url = f"https://image.pollinations.ai/prompt/{sanitized_query}%20cinematic%20photorealistic%204k?width=1920&height=1080&nologo=true"
-        
-        out_path = target_dir / f"{cue.cue_id}_real.jpg"
-        print(f"[OpenStockProvider] Obteniendo B-Roll real abierto para '{query}'...")
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(dynamic_url, timeout=15) as resp:
-                    if resp.status == 200:
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        async with aiofiles.open(out_path, mode="wb") as f:
-                            async for chunk in resp.content.iter_chunked(256 * 1024):
-                                await f.write(chunk)
-                        print(f"[OpenStockProvider] B-Roll real descargado con éxito: {out_path.name}")
-                        return out_path
-        except Exception as e:
-            print(f"[OpenStockProvider] Fallback en descarga abierta: {e}")
-
+        print(f"[OpenStockProvider] Buscando fotografía real enciclopédica para '{query}'...")
+        client = WikiMediaClient()
+        res = await client.search(query, langs=["es", "en"])
+        if res and res.image_url:
+            out_path = target_dir / f"{cue.cue_id}_wiki.jpg"
+            if await client.download_image(res.image_url, out_path):
+                try:
+                    from PIL import Image
+                    with Image.open(out_path) as im:
+                        # Asegurar resolución aceptable
+                        if im.size[0] >= 640 and im.size[1] >= 360:
+                            print(f"[OpenStockProvider] Foto real verificada obtenida: {out_path.name} ({im.size})")
+                            return out_path
+                except Exception:
+                    pass
+                out_path.unlink(missing_ok=True)
         return None
 
 
@@ -217,56 +208,89 @@ class FallbackSyntheticAssetProvider(AssetProvider):
     """
 
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
 
         out_path = target_dir / f"{cue.cue_id}_fallback.jpg"
         target_dir.mkdir(parents=True, exist_ok=True)
         print(f"[FallbackProvider] Generando asset sintético de alta resolución para '{cue.concept}'...")
 
-        # Generar un lienzo oscuro con gradiente cinematográfico
         width, height = 1920, 1080
-        img = Image.new("RGB", (width, height), color=(15, 23, 42)) # Slate oscuro estilo Galaxy
+        img = Image.new("RGB", (width, height), color=(15, 23, 42))
         draw = ImageDraw.Draw(img)
 
-        # Marco visual translúcido / acento
-        draw.rectangle([60, 60, width - 60, height - 60], outline=(56, 189, 248), width=3) # Cyan glow
+        draw.rectangle([60, 60, width - 60, height - 60], outline=(56, 189, 248), width=3)
 
-        # Texto del concepto
         title = f"[B-ROLL: {cue.concept.upper()}]"
         subtitle = f"Visual Cue: {cue.search_query_en} ({cue.asset_type})"
         meta = f"Duración: {round(cue.end_sec - cue.start_sec, 2)}s | Motivo: {cue.reasoning}"
 
-        # Dibujar textos
         draw.text((120, height // 2 - 80), title, fill=(248, 250, 252))
         draw.text((120, height // 2), subtitle, fill=(148, 163, 184))
         draw.text((120, height // 2 + 60), meta, fill=(56, 189, 248))
 
         img.save(out_path, "JPEG", quality=95)
-        print(f"[FallbackProvider] Asset sintético creado en: {out_path.name}")
         return out_path
 
 
 class WebPhotoAssetProvider(AssetProvider):
-    """Foto REAL desde la búsqueda de imágenes web (DuckDuckGo), validada con Pillow. Sin API key."""
+    """Foto REAL desde la búsqueda de imágenes web (DuckDuckGo), filtrando marcas de agua comerciales y exigiendo alta resolución."""
+
+    WATERMARK_DOMAINS = (
+        "dreamstime", "alamy", "shutterstock", "istockphoto", 
+        "gettyimages", "123rf", "adobestock", "depositphotos", "bigstockphoto", "canstockphoto",
+        "freepik", "vectorstock"
+    )
 
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
         import asyncio
         from PIL import Image
         from core.web_media import WikiMediaClient
 
+        query = cue.search_query_en or cue.concept
+
         def search() -> list:
             try:
                 from ddgs import DDGS
                 with DDGS() as ddgs:
-                    res = list(ddgs.images(cue.search_query_en or cue.concept, max_results=8))
-                return [r.get("image") for r in res
-                        if (r.get("image") or "").startswith("http") and min(int(r.get("width") or 0), int(r.get("height") or 0)) >= 480]
+                    # Priorizar imágenes Wallpaper o Large fotorrealistas
+                    res = []
+                    search_term = f"{query} hd photography"
+                    try:
+                        res = list(ddgs.images(search_term, size="Wallpaper", max_results=15))
+                    except Exception:
+                        pass
+                    if not res:
+                        try:
+                            res = list(ddgs.images(search_term, size="Large", max_results=15))
+                        except Exception:
+                            pass
+                    if not res:
+                        res = list(ddgs.images(query, size="Large", max_results=15))
+                    if not res:
+                        res = list(ddgs.images(query, max_results=15))
+
+                clean_urls = []
+                for r in res:
+                    img_url = r.get("image") or ""
+                    if not img_url.startswith("http"):
+                        continue
+                    if any(bad_dom in img_url.lower() for bad_dom in self.WATERMARK_DOMAINS):
+                        continue
+                    w = int(r.get("width") or 0)
+                    h = int(r.get("height") or 0)
+                    # Exigir alta definición mínima (HD real) y evitar banners deformes
+                    if (w >= 1280 and h >= 720) or (w >= 1000 and 1.2 <= (w / max(1, h)) <= 2.2):
+                        clean_urls.append(img_url)
+                    elif not clean_urls and min(w, h) >= 800:
+                        clean_urls.append(img_url)
+                return clean_urls
             except Exception as exc:
                 print(f"[WebPhotoProvider] Búsqueda falló: {exc}")
                 return []
 
         client = WikiMediaClient()
-        for i, url in enumerate((await asyncio.to_thread(search))[:4]):
+        urls = await asyncio.to_thread(search)
+        for i, url in enumerate(urls[:8]):
             dest = target_dir / f"{cue.cue_id}_web{i}.jpg"
             if not await client.download_image(url, dest):
                 continue
@@ -274,7 +298,10 @@ class WebPhotoAssetProvider(AssetProvider):
                 with Image.open(dest) as im:
                     im.verify()
                 with Image.open(dest) as im:
-                    if min(im.size) >= 400:
+                    # Filtro de calidad estricto: mínimo 900x500 y no cuadrado ni hiper-alargado
+                    aspect = im.size[0] / max(1, im.size[1])
+                    if im.size[0] >= 900 and im.size[1] >= 500 and 1.1 <= aspect <= 2.4:
+                        print(f"[WebPhotoProvider] Imagen HD real descargada: {dest.name} ({im.size})")
                         return dest
             except Exception:
                 pass
@@ -283,15 +310,16 @@ class WebPhotoAssetProvider(AssetProvider):
 
 
 class AssetProviderFactory:
-    """Fábrica que elige el mejor proveedor disponible en cascada (solo material real)."""
+    """Fábrica que prioriza fotos reales web de alta resolución sin marcas de agua ni deformaciones."""
 
     @staticmethod
     def get_providers():
         providers = []
-        if settings.PIXABAY_API_KEY:
-            providers.append(PixabayAssetProvider())
         if settings.PEXELS_API_KEY:
             providers.append(PexelsAssetProvider())
+        if settings.PIXABAY_API_KEY:
+            providers.append(PixabayAssetProvider())
+        # Priorizar fotos reales web de alta definición
         providers.append(WebPhotoAssetProvider())
-        # Sin placeholders sintéticos: si no hay material real, el B-Roll se omite.
+        providers.append(OpenStockAssetProvider())
         return providers

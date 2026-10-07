@@ -1,16 +1,17 @@
 """Módulo de renderizado de tarjetas gráficas (Info Cards) de alto impacto visual.
 
-Diseño profesional oscuro, sólido, limpio y de máximo contraste:
-- Contenedor oscuro sólido con sutil glassmorfismo y borde de 1px.
-- Una sola etiqueta/badge clara y legible (sin saturación de píldoras).
-- Tipografía grande y nítida en blanco puro y slate brillante para máxima legibilidad.
-- Para tarjetas con imagen: foto limpia con sutil difuminado en el borde inferior.
-- Para tarjetas de solo info: tarjeta compacta, sólida y elegante sin espacios vacíos.
+Estilo Pinterest / Modern Bento Glassmorphism:
+- Diseño compacto, elegante y sin espacios vacíos.
+- Soporte para tema Oscuro (Obsidian Glass) y Claro (Porcelain Snow Glass).
+- Formato Bento horizontal para tarjetas con foto: miniatura redondeada a la izquierda,
+  tipografía grande, nítida y de alto contraste a la derecha.
+- Formato Floating Widget para datos de solo texto: altura auto-ajustada al contenido,
+  micro-badge con indicador luminoso y pie de fuente verificado.
+- Sombra difusa multicapa (ambient drop shadow) y sutil reflejo de cristal superior (rim highlight).
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -20,37 +21,55 @@ from core.models import InfoCard
 
 FONT_DIR = Path("C:/Windows/Fonts")
 
-# Paleta para badges e indicadores
-BADGE_PALETTE = {
-    "green": ((16, 185, 129, 45), (52, 211, 153, 220), (52, 211, 153, 255)),
-    "red": ((239, 68, 68, 45), (248, 113, 113, 220), (248, 113, 113, 255)),
-    "amber": ((245, 158, 11, 45), (251, 191, 36, 220), (251, 191, 36, 255)),
-    "cyan": ((14, 165, 233, 45), (56, 189, 248, 220), (56, 189, 248, 255)),
-    "purple": ((147, 51, 234, 45), (192, 132, 252, 220), (192, 132, 252, 255)),
-    "slate": ((71, 85, 105, 45), (148, 163, 184, 220), (226, 232, 240, 255)),
+# Paletas calibradas para micro-badges en estilo Negro Mate con Blanco puro (Zero azul, Zero morado)
+BADGE_THEMES = {
+    "white": {
+        "dark": {"bg": (22, 22, 22, 255), "border": (255, 255, 255, 75), "text": (255, 255, 255, 255), "pip": (255, 255, 255, 255)},
+        "light": {"bg": (245, 245, 245, 255), "border": (210, 210, 210, 255), "text": (15, 15, 15, 255), "pip": (15, 15, 15, 255)},
+    },
+    "green": {
+        "dark": {"bg": (22, 22, 22, 255), "border": (255, 255, 255, 60), "text": (255, 255, 255, 255), "pip": (52, 211, 153, 255)},
+        "light": {"bg": (241, 245, 249, 255), "border": (226, 232, 240, 255), "text": (15, 23, 42, 255), "pip": (16, 185, 129, 255)},
+    },
+    "amber": {
+        "dark": {"bg": (22, 22, 22, 255), "border": (255, 255, 255, 60), "text": (255, 255, 255, 255), "pip": (251, 191, 36, 255)},
+        "light": {"bg": (241, 245, 249, 255), "border": (226, 232, 240, 255), "text": (15, 23, 42, 255), "pip": (245, 158, 11, 255)},
+    },
+    "red": {
+        "dark": {"bg": (22, 22, 22, 255), "border": (255, 255, 255, 60), "text": (255, 255, 255, 255), "pip": (248, 113, 113, 255)},
+        "light": {"bg": (241, 245, 249, 255), "border": (226, 232, 240, 255), "text": (15, 23, 42, 255), "pip": (239, 68, 68, 255)},
+    },
+    "cyan": {
+        "dark": {"bg": (22, 22, 22, 255), "border": (255, 255, 255, 75), "text": (255, 255, 255, 255), "pip": (255, 255, 255, 255)},
+        "light": {"bg": (241, 245, 249, 255), "border": (226, 232, 240, 255), "text": (15, 23, 42, 255), "pip": (6, 182, 212, 255)},
+    },
+    "purple": {
+        "dark": {"bg": (22, 22, 22, 255), "border": (255, 255, 255, 75), "text": (255, 255, 255, 255), "pip": (255, 255, 255, 255)},
+        "light": {"bg": (241, 245, 249, 255), "border": (226, 232, 240, 255), "text": (15, 23, 42, 255), "pip": (168, 85, 247, 255)},
+    },
 }
 
 KIND_LABELS = {
-    "ley": ("LEY CONFIRMADA", "cyan"),
-    "normativa": ("NORMATIVA OFICIAL", "cyan"),
-    "articulo": ("ARTÍCULO LEGAL", "cyan"),
-    "cifra": ("ESTADÍSTICA", "amber"),
-    "estadistica": ("ESTADÍSTICA", "amber"),
-    "fecha": ("CRONOLOGÍA", "purple"),
-    "persona": ("PERFIL", "purple"),
-    "lugar": ("UBICACIÓN", "cyan"),
-    "organizacion": ("INSTITUCIÓN", "cyan"),
-    "organización": ("INSTITUCIÓN", "cyan"),
-    "hardware": ("ESPECIFICACIÓN", "slate"),
-    "concepto": ("CONCEPTO CLAVE", "purple"),
-    "complemento": ("REFUERZO CLAVE", "purple"),
-    "refuerzo": ("REFUERZO CLAVE", "purple"),
-    "dato_extra": ("DATO EXTRA", "amber"),
-    "impacto": ("ESTUDIO DE IMPACTO", "cyan"),
-    "contexto": ("CONTEXTO GLOBAL", "cyan"),
-    "dato": ("DATO VERIFICADO", "green"),
-    "confirmacion": ("CONFIRMADO", "green"),
-    "confirmación": ("CONFIRMADO", "green"),
+    "ley": ("NORMATIVA LEGAL", "white"),
+    "normativa": ("NORMATIVA OFICIAL", "white"),
+    "articulo": ("ARTÍCULO LEGAL", "white"),
+    "cifra": ("ESTADÍSTICA", "white"),
+    "estadistica": ("ESTADÍSTICA", "white"),
+    "fecha": ("CRONOLOGÍA", "white"),
+    "persona": ("PERFIL", "white"),
+    "lugar": ("UBICACIÓN", "white"),
+    "organizacion": ("INSTITUCIÓN", "white"),
+    "organización": ("INSTITUCIÓN", "white"),
+    "hardware": ("ESPECIFICACIÓN", "white"),
+    "concepto": ("CONCEPTO CLAVE", "white"),
+    "complemento": ("REFUERZO CLAVE", "white"),
+    "refuerzo": ("REFUERZO CLAVE", "white"),
+    "dato_extra": ("DATO EXTRA", "white"),
+    "impacto": ("ESTUDIO DE IMPACTO", "white"),
+    "contexto": ("CONTEXTO GLOBAL", "white"),
+    "dato": ("DATO VERIFICADO", "white"),
+    "confirmacion": ("CONFIRMADO", "white"),
+    "confirmación": ("CONFIRMADO", "white"),
 }
 
 
@@ -67,23 +86,19 @@ def _font(names: List[str], size: int) -> ImageFont.FreeTypeFont:
 
 class InfoCardRenderer:
     """
-    Renderizador de tarjetas broadcast limpias, oscuras y de máximo contraste.
+    Renderizador de tarjetas estilo Pinterest / Bento Glassmorphism.
     """
 
-    def __init__(self, frame_w: int, frame_h: int):
-        portrait = frame_h > frame_w
-        self.card_w = int(frame_w * (0.84 if portrait else 0.32))
-        self.card_w = max(self.card_w, 420)
-        self.s = self.card_w / 640.0
-
-    def _px(self, v: float) -> int:
-        return max(1, int(round(v * self.s)))
+    def __init__(self, frame_w: int, frame_h: int, theme: str = "dark"):
+        self.frame_w = frame_w
+        self.frame_h = frame_h
+        self.theme = theme if theme in ("dark", "light") else "dark"
+        self.portrait = frame_h > frame_w
 
     @staticmethod
     def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int, max_lines: int) -> List[str]:
         lines: List[str] = []
-        paragraphs = (text or "").split("\n")
-        for p in paragraphs:
+        for p in (text or "").split("\n"):
             p = p.strip()
             if not p:
                 continue
@@ -104,14 +119,6 @@ class InfoCardRenderer:
             lines[-1] = lines[-1].rstrip(" .,;:") + "…"
         return lines
 
-    def _cover(self, img: Image.Image, w: int, h: int) -> Image.Image:
-        img = img.convert("RGB")
-        ratio = max(w / img.width, h / img.height)
-        img = img.resize((int(img.width * ratio) + 1, int(img.height * ratio) + 1), Image.LANCZOS)
-        left = (img.width - w) // 2
-        top = (img.height - h) // 3
-        return img.crop((left, top, left + w, top + h))
-
     def _get_single_badge(self, card: InfoCard) -> Tuple[str, str]:
         verdict = (card.verdict or "").lower()
         if verdict == "contradicted":
@@ -126,171 +133,224 @@ class InfoCardRenderer:
         if kind in KIND_LABELS:
             return KIND_LABELS[kind]
 
-        return ("VERIFICADO", "green")
+        return ("DATO CONFIRMADO", "green")
 
-    def _render_solid_dark_card(
+    def _render_pinterest_glass_card(
         self,
         headline: str,
         body: str,
         badge_text: str,
-        badge_color: str = "green",
+        badge_tone: str = "white",
         image_path: Optional[str] = None,
         source_domain: str = "Registro oficial",
         out_path: Optional[Path] = None,
     ) -> Path:
-        """Renderiza una tarjeta profesional sólida, oscura y limpia."""
-        w = self.card_w
-        pad_x = self._px(28)
-        inner_w = w - 2 * pad_x
-        radius = self._px(22)
+        """
+        Renderiza la tarjeta con estética Pinterest Glassmorphism compacta y elegante.
+        """
+        scale = 2  # Super-sampling para máxima nitidez
 
-        f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(13))
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(28))
-        f_body = _font(["segoeuib.ttf", "segoeui.ttf", "arialbd.ttf"], self._px(20))
-        f_src = _font(["segoeuib.ttf", "arialbd.ttf"], self._px(13))
+        # Fuentes calibradas
+        f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], 11 * scale)
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], 19 * scale)
+        f_body = _font(["segoeui.ttf", "arial.ttf"], 14 * scale)
+        f_src = _font(["segoeuib.ttf", "segoeui.ttf"], 11 * scale)
 
-        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
-        title_lines = self._wrap(probe, headline, f_title, inner_w, 2)
-        body_lines = self._wrap(probe, body, f_body, inner_w, 4)
+        # Paleta según tema
+        if self.theme == "dark":
+            # Negro mate puro (Strictly R=G=B, Zero azul, Zero morado) con blanco puro de alto contraste
+            bg_card_top = (14, 14, 14, 252)
+            bg_card_bot = (7, 7, 7, 254)
+            border_top = (255, 255, 255, 60)
+            title_color = (255, 255, 255, 255)
+            body_color = (245, 245, 245, 255)
+            src_color = (175, 175, 175, 245)
+            shadow_color = (0, 0, 0, 180)
+        else:
+            bg_card_top = (255, 255, 255, 248)
+            bg_card_bot = (245, 247, 250, 252)
+            border_top = (255, 255, 255, 230)
+            title_color = (15, 23, 42, 255)
+            body_color = (51, 65, 85, 255)
+            src_color = (100, 116, 139, 230)
+            shadow_color = (15, 23, 42, 50)
 
-        title_lh = f_title.size + self._px(6)
-        body_lh = f_body.size + self._px(8)
-        badge_h = self._px(28)
+        bcfg = BADGE_THEMES.get(badge_tone, BADGE_THEMES["white"])[self.theme]
+        badge_bg = bcfg["bg"]
+        badge_border = bcfg["border"]
+        badge_txt_col = bcfg["text"]
+        pip_col = bcfg["pip"]
 
         has_photo = bool(image_path and Path(image_path).exists())
-        photo_h = self._px(160) if has_photo else 0
 
-        if has_photo:
-            h = (
-                photo_h
-                + self._px(16)
-                + badge_h
-                + self._px(12)
-                + (len(title_lines) * title_lh)
-                + self._px(10)
-                + (len(body_lines) * body_lh)
-                + self._px(16)
-                + f_src.size
-                + self._px(24)
-            )
-        else:
-            h = (
-                self._px(24)
-                + badge_h
-                + self._px(12)
-                + (len(title_lines) * title_lh)
-                + self._px(10)
-                + (len(body_lines) * body_lh)
-                + self._px(16)
-                + f_src.size
-                + self._px(24)
-            )
+        # Dimensiones compactas y ergonómicas
+        card_w = 480 if not has_photo else 560
+        if self.portrait:
+            card_w = min(card_w, int(self.frame_w * 0.88))
 
-        ss = 2
-        W, H = w * ss, h * ss
-        # Fondo oscuro profesional sólido de máxima legibilidad
-        card = Image.new("RGBA", (W, H), (14, 19, 32, 248))
+        pad_x = 22
+        pad_y = 20
+        radius = 18
 
-        if has_photo:
-            try:
-                raw_photo = Image.open(image_path).convert("RGB")
-                photo = self._cover(raw_photo, W, photo_h * ss).convert("RGBA")
+        # Layout horizontal si hay foto (Bento split)
+        photo_w = 150 if has_photo else 0
+        photo_gap = 18 if has_photo else 0
 
-                # Difuminado muy sutil solo en el último 22% del borde inferior
-                fade_start = int(photo_h * ss * 0.78)
-                fade_len = max(1, (photo_h * ss) - fade_start)
-                mask = Image.new("L", (W, photo_h * ss), 255)
-                m_data = []
-                for py in range(photo_h * ss):
-                    if py < fade_start:
-                        a = 255
-                    else:
-                        t = (py - fade_start) / fade_len
-                        a = int(255 * (1.0 - t))
-                    m_data.extend([a] * W)
-                mask.putdata(m_data)
-                card.paste(photo, (0, 0), mask)
-            except Exception as exc:
-                print(f"[CardRenderer] Error cargando foto {image_path}: {exc}")
-                has_photo = False
+        text_avail_w = card_w - (pad_x * 2) - photo_w - photo_gap
 
-        d = ImageDraw.Draw(card)
-        y = (photo_h + self._px(16)) * ss if has_photo else self._px(24) * ss
+        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+        title_lines = self._wrap(probe, headline, f_title, text_avail_w * scale, max_lines=2)
+        body_lines = self._wrap(probe, body, f_body, text_avail_w * scale, max_lines=4)
 
-        # Badge único y limpio con punto luminoso
-        bg_col, border_col, text_col = BADGE_PALETTE.get(badge_color, BADGE_PALETTE["green"])
-        text_w = int(d.textlength(badge_text, font=f_badge))
-        bw = text_w + self._px(34) * ss
-        d.rounded_rectangle(
-            (pad_x * ss, y, pad_x * ss + bw, y + badge_h * ss),
-            radius=(badge_h * ss) // 2,
-            fill=bg_col,
-            outline=border_col,
-            width=ss,
+        title_lh = int(24 * scale)
+        body_lh = int(19 * scale)
+        badge_h = int(22 * scale)
+
+        content_h_px = (
+            badge_h
+            + int(10 * scale)
+            + (len(title_lines) * title_lh)
+            + int(6 * scale)
+            + (len(body_lines) * body_lh)
+            + int(10 * scale)
+            + int(14 * scale)
         )
-        dot_cx = pad_x * ss + self._px(12) * ss
-        dot_cy = y + (badge_h * ss) // 2
-        dot_r = self._px(4) * ss
-        d.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=text_col)
-        d.text((pad_x * ss + self._px(24) * ss, dot_cy), badge_text, font=f_badge, fill=text_col, anchor="lm")
-        y += (badge_h + self._px(14)) * ss
+        content_h = content_h_px // scale
 
-        # Titular en blanco puro bold
+        if has_photo:
+            photo_h = max(content_h, 115)
+            card_h = max(content_h + (pad_y * 2), photo_h + (pad_y * 2))
+        else:
+            card_h = content_h + (pad_y * 2)
+
+        W = card_w * scale
+        H = card_h * scale
+        R = radius * scale
+
+        # 1. Gradiente translúcido
+        card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        c_draw = ImageDraw.Draw(card)
+        for y in range(H):
+            t = y / max(1, H - 1)
+            r = int(bg_card_top[0] * (1 - t) + bg_card_bot[0] * t)
+            g = int(bg_card_top[1] * (1 - t) + bg_card_bot[1] * t)
+            b = int(bg_card_top[2] * (1 - t) + bg_card_bot[2] * t)
+            a = int(bg_card_top[3] * (1 - t) + bg_card_bot[3] * t)
+            c_draw.line([(0, y), (W, y)], fill=(r, g, b, a))
+
+        # 2. Máscara redondeada
+        round_mask = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(round_mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=R, fill=255)
+        card_masked = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        card_masked.paste(card, (0, 0), round_mask)
+        d = ImageDraw.Draw(card_masked)
+
+        # 3. Foto a la izquierda si existe
+        text_start_x = (pad_x + photo_w + photo_gap) * scale if has_photo else pad_x * scale
+        if has_photo:
+            pw = photo_w * scale
+            ph = (card_h - (pad_y * 2)) * scale
+            px_pos = pad_x * scale
+            py_pos = pad_y * scale
+            pr = 12 * scale
+
+            try:
+                raw = Image.open(image_path).convert("RGB")
+                ratio = max(pw / raw.width, ph / raw.height)
+                resized = raw.resize((int(raw.width * ratio) + 1, int(raw.height * ratio) + 1), Image.LANCZOS)
+                left = (resized.width - pw) // 2
+                top = (resized.height - ph) // 2
+                cropped = resized.crop((left, top, left + pw, top + ph)).convert("RGBA")
+
+                pmask = Image.new("L", (pw, ph), 0)
+                ImageDraw.Draw(pmask).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=pr, fill=255)
+                card_masked.paste(cropped, (px_pos, py_pos), pmask)
+
+                # Borde sutil a la miniatura
+                d.rounded_rectangle(
+                    (px_pos, py_pos, px_pos + pw - 1, py_pos + ph - 1),
+                    radius=pr,
+                    outline=(255, 255, 255, 50) if self.theme == "dark" else (0, 0, 0, 25),
+                    width=1 * scale,
+                )
+            except Exception as exc:
+                print(f"[CardRenderer] Error procesando imagen {image_path}: {exc}")
+
+        # 4. Texto
+        cur_y = pad_y * scale
+
+        # Micro-badge estilo Pinterest
+        b_text = badge_text.upper()
+        tw = d.textlength(b_text, font=f_badge)
+        b_w = int(tw + (24 * scale))
+        b_rect = (text_start_x, cur_y, text_start_x + b_w, cur_y + badge_h)
+        d.rounded_rectangle(b_rect, radius=badge_h // 2, fill=badge_bg, outline=badge_border, width=1 * scale)
+
+        # Indicador luminoso
+        dot_r = 3 * scale
+        dot_cx = text_start_x + (8 * scale)
+        dot_cy = cur_y + (badge_h // 2)
+        d.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=pip_col)
+
+        # Etiqueta de badge
+        d.text((text_start_x + (16 * scale), dot_cy), b_text, font=f_badge, fill=badge_txt_col, anchor="lm")
+        cur_y += badge_h + int(10 * scale)
+
+        # Titular Bold nítido
         for line in title_lines:
-            d.text((pad_x * ss, y), line, font=f_title, fill=(255, 255, 255, 255))
-            y += title_lh * ss
-        y += self._px(8) * ss
+            d.text((text_start_x, cur_y), line, font=f_title, fill=title_color)
+            cur_y += title_lh
+        cur_y += int(6 * scale)
 
-        # Cuerpo en slate brillante ultra-legible
+        # Cuerpo
         for line in body_lines:
-            d.text((pad_x * ss, y), line, font=f_body, fill=(241, 245, 249, 255))
-            y += body_lh * ss
-        y += self._px(14) * ss
+            d.text((text_start_x, cur_y), line, font=f_body, fill=body_color)
+            cur_y += body_lh
+        cur_y += int(10 * scale)
 
-        # Pie de fuente limpio
-        d.text((pad_x * ss, y), f"Fuente: {source_domain}", font=f_src, fill=(148, 163, 184, 255))
+        # Fuente
+        src_text = f"Fuente: {source_domain}"
+        d.text((text_start_x, cur_y), src_text, font=f_src, fill=src_color)
 
-        # Redimensionado para máxima nitidez
-        card = card.resize((w, h), Image.LANCZOS)
+        # Downscale con Lanczos
+        card_final = card_masked.resize((card_w, card_h), Image.LANCZOS)
 
-        # Máscara de esquinas redondeadas
-        c_mask = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(c_mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
-
-        # Sombra suave que despega la tarjeta del video
-        margin = self._px(18)
-        shadow = Image.new("RGBA", (w + 2 * margin, h + 2 * margin), (0, 0, 0, 0))
+        # 5. Sombra difusa multicapa (ambient drop shadow)
+        margin = 24
+        shadow = Image.new("RGBA", (card_w + 2 * margin, card_h + 2 * margin), (0, 0, 0, 0))
         s_draw = ImageDraw.Draw(shadow)
         s_draw.rounded_rectangle(
-            (margin, margin + self._px(4), margin + w, margin + h + self._px(4)),
+            (margin, margin + 6, margin + card_w, margin + card_h + 6),
             radius=radius,
-            fill=(0, 0, 0, 115),
+            fill=shadow_color,
         )
-        shadow = shadow.filter(ImageFilter.GaussianBlur(self._px(10)))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(12))
 
-        final_img = Image.new("RGBA", (w + 2 * margin, h + 2 * margin), (0, 0, 0, 0))
-        final_img.paste(shadow, (0, 0), shadow)
-        final_img.paste(card, (margin, margin), c_mask)
+        # Compuesto final
+        out_img = Image.new("RGBA", (card_w + 2 * margin, card_h + 2 * margin), (0, 0, 0, 0))
+        out_img.paste(shadow, (0, 0), shadow)
+        out_img.paste(card_final, (margin, margin), card_final)
 
-        # Borde sutil de cristal de 1px
-        b_layer = Image.new("RGBA", (w + 2 * margin, h + 2 * margin), (0, 0, 0, 0))
-        ImageDraw.Draw(b_layer).rounded_rectangle(
-            (margin, margin, margin + w - 1, margin + h - 1),
+        # Borde de cristal con luz superior
+        border_img = Image.new("RGBA", (card_w + 2 * margin, card_h + 2 * margin), (0, 0, 0, 0))
+        b_draw = ImageDraw.Draw(border_img)
+        b_draw.rounded_rectangle(
+            (margin, margin, margin + card_w - 1, margin + card_h - 1),
             radius=radius,
-            outline=(255, 255, 255, 45),
+            outline=border_top,
             width=1,
         )
-        final_img = Image.alpha_composite(final_img, b_layer)
+        out_img = Image.alpha_composite(out_img, border_img)
 
         target_out = out_path or Path("card_output.png")
         target_out.parent.mkdir(parents=True, exist_ok=True)
-        final_img.save(target_out, "PNG")
+        out_img.save(target_out, "PNG")
         return target_out
 
     def render(self, card: InfoCard, out_path: Path) -> str:
-        """Renderiza la tarjeta con el diseño profesional oscuro."""
+        """Renderiza la tarjeta con el diseño Pinterest Bento Glassmorphism."""
         domain = card.sources[0].domain if card.sources else "Registro oficial"
-        badge_text, badge_color = self._get_single_badge(card)
+        badge_text, badge_tone = self._get_single_badge(card)
 
         # 1. Contradicción / Corrección
         if card.verdict == "contradicted":
@@ -299,11 +359,11 @@ class InfoCardRenderer:
             headline = card.headline
             correction_text = card.correction or card.corrected_value or card.note
             body = f"Afirmación: «{card.claim}»\n\nDato real confirmado: {correction_text}"
-            return str(self._render_solid_dark_card(
+            return str(self._render_pinterest_glass_card(
                 headline=headline,
                 body=body,
                 badge_text="CORRECCIÓN OFICIAL",
-                badge_color="red",
+                badge_tone="red",
                 image_path=card.image_path,
                 source_domain=card.correction_source or domain,
                 out_path=out_path,
@@ -313,11 +373,11 @@ class InfoCardRenderer:
         if card.verdict == "insufficient":
             headline = card.headline
             body = card.note or "No se encontraron registros ni evidencia oficial concluyente que respalden esta afirmación."
-            return str(self._render_solid_dark_card(
+            return str(self._render_pinterest_glass_card(
                 headline=headline,
                 body=body,
                 badge_text="EN REVISIÓN",
-                badge_color="amber",
+                badge_tone="amber",
                 image_path=card.image_path,
                 source_domain=domain,
                 out_path=out_path,
@@ -327,11 +387,11 @@ class InfoCardRenderer:
         if card.stat_value:
             headline = card.headline
             body = f"Cifra confirmada: {card.stat_value}. {card.body or card.claim}"
-            return str(self._render_solid_dark_card(
+            return str(self._render_pinterest_glass_card(
                 headline=headline,
                 body=body,
                 badge_text=f"DATO CLAVE: {card.stat_value[:18]}",
-                badge_color="amber",
+                badge_tone="amber",
                 image_path=card.image_path,
                 source_domain=domain,
                 out_path=out_path,
@@ -340,24 +400,24 @@ class InfoCardRenderer:
         # 4. Referencia o Apoyo visual estándar
         headline = card.headline
         body = card.body or card.claim
-        return str(self._render_solid_dark_card(
+        return str(self._render_pinterest_glass_card(
             headline=headline,
             body=body,
             badge_text=badge_text,
-            badge_color=badge_color,
+            badge_tone=badge_tone,
             image_path=card.image_path,
             source_domain=domain,
             out_path=out_path,
         ))
 
     def render_photo_frame(self, image_path: str, label: str, out_path: Path) -> Optional[Path]:
-        """Foto real enmarcada en el formato sólido oscuro con badge de apoyo visual."""
+        """Foto contextual enmarcada en formato Bento con badge de apoyo visual."""
         try:
-            return self._render_solid_dark_card(
+            return self._render_pinterest_glass_card(
                 headline=label.strip(),
                 body="Apoyo visual contextual integrado para ilustrar el argumento expuesto.",
                 badge_text="APOYO VISUAL",
-                badge_color="green",
+                badge_tone="green",
                 image_path=image_path,
                 source_domain="Registro visual",
                 out_path=out_path,
@@ -372,21 +432,21 @@ class InfoCardRenderer:
         path_real = out_path.with_name(f"{out_path.stem}_real.png")
         domain = card.correction_source or (card.sources[0].domain if card.sources else "Registro oficial")
 
-        self._render_solid_dark_card(
+        self._render_pinterest_glass_card(
             headline="Mito Popular",
             body=f"«{card.claim}»",
             badge_text="MITO POPULAR",
-            badge_color="amber",
+            badge_tone="amber",
             image_path=card.image_path,
             source_domain=domain,
             out_path=path_mito,
         )
 
-        self._render_solid_dark_card(
+        self._render_pinterest_glass_card(
             headline=card.headline or "Realidad Verificada",
             body=card.correction or card.corrected_value or card.body,
             badge_text="REALIDAD CONFIRMADA",
-            badge_color="green",
+            badge_tone="green",
             image_path=card.image_path,
             source_domain=domain,
             out_path=path_real,
