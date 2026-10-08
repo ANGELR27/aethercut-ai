@@ -127,14 +127,16 @@ REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
 - Habla de forma directa, cautivadora e inteligente, como un narrador o divulgador de primer nivel dirigiéndose a su público.
 - Evita muletillas o saludos vacíos (como "Hola a todos" o "Bienvenidos a mi canal"); entra directo al tema con energía y datos interesantes.
 
-REGLAS PARA DATOS, ESTADÍSTICAS Y COMPARATIVAS (TARJETAS BENTO HUD):
-- SIEMPRE que se mencione una cifra, porcentaje, estadística, comparativa (ej: perro vs humano, velocidad, capacidad, año récord), o hecho verificable, la escena DEBE ser de tipo "card_focus" O incluir obligatoriamente el objeto "card".
+REGLAS PARA DATOS, MAPAS, ESTADÍSTICAS Y TARJETAS BENTO HUD (AL MENOS 60% DE LAS ESCENAS):
+- ALTO CONTENIDO VISUAL E INFOGRÁFICO OBLIGATORIO: Un video plano o sin gráficos enriquece muy poco la experiencia. Por lo menos el 60% al 70% de las escenas DEBEN contener elementos visuales complementarios: o bien una tarjeta Bento HUD ("card"), o referencias visuales con banderas ("chips"), o un mapa geopolítico.
+- SIEMPRE que se mencione una cifra, porcentaje, estadística, comparativa (ej: perro vs humano, PIB, inflación, velocidad, presupuesto, año récord), o hecho verificable, la escena DEBE incluir obligatoriamente el objeto "card".
+- SIEMPRE que se discutan países, alianzas diplomáticas, conflictos geopolíticos o acuerdos bilaterales (ej: Estados Unidos, Argentina, Israel, China, Brasil), incluye en "card" un headline o stat con los países involucrados O añade el array "chips" con los nombres oficiales completos. El sistema generará automáticamente un mapa geopolítico vectorial de inteligencia o pastillas HUD con sus banderas nacionales.
 - El objeto "card" debe tener:
-  * "headline": Título corto y concreto del dato o comparativa (ej: "Capacidad Olfativa: Perro vs Humano").
-  * "stat": La cifra o métrica clave destacada (ej: "300M vs 6M", "99.8%", "+450%").
+  * "headline": Título corto y concreto del dato, mapa o comparativa (ej: "Alianza Geopolítica: EE.UU. e Israel", "Capacidad Olfativa: Perro vs Humano", "Inflación Mensual").
+  * "stat": La cifra, métrica o relación clave destacada (ej: "300M vs 6M", "52.9%", "+450%", "Alianza Bilateral").
   * "body": Explicación sintética y contundente del dato con fuentes contrastadas.
-  * "badge": "ESTADÍSTICA", "DATO CLAVE", "COMPARATIVA" o "CONFIRMADO".
-- De esta manera el espectador ve el avatar hablando pero al mismo tiempo tiene al lado la tarjeta gráfica animada mostrando los números reales y la comparativa en pantalla.
+  * "badge": "ESTADÍSTICA", "DATO CLAVE", "COMPARATIVA", "MAPA GLOBAL" o "CONFIRMADO".
+- De esta manera el espectador ve el avatar hablando pero al mismo tiempo tiene en pantalla la tarjeta gráfica interactiva mostrando los mapas, números reales y comparativas en pantalla sin sentirse vacío.
 
 REGLAS PARA EDICIÓN AVANZADA Y REFERENCIAS VISUALES ("chips"):
 - SIEMPRE que en la narración se enumeren, comparen o mencionen países (ej: Estados Unidos, China, Argentina, España), marcas o entidades, agrega en la escena el array "chips" con los nombres limpios oficiales (ej: ["Estados Unidos", "China", "Argentina"]).

@@ -62,6 +62,50 @@ class BroadcastChartGenerator:
                 pass
         return None
 
+    # Coordenadas geográficas clave de países y regiones para mapas geopolíticos
+    GEO_COORDINATES: dict[str, tuple[float, float, str]] = {
+        "argentina": (-64.0, -34.0, "ARG"),
+        "estados unidos": (-98.0, 38.0, "EE.UU."),
+        "eeuu": (-98.0, 38.0, "EE.UU."),
+        "usa": (-98.0, 38.0, "EE.UU."),
+        "china": (105.0, 35.0, "CHN"),
+        "brasil": (-51.0, -14.0, "BRA"),
+        "brazil": (-51.0, -14.0, "BRA"),
+        "israel": (34.8, 31.5, "ISR"),
+        "espana": (-3.7, 40.4, "ESP"),
+        "españa": (-3.7, 40.4, "ESP"),
+        "mexico": (-102.5, 23.6, "MEX"),
+        "méxico": (-102.5, 23.6, "MEX"),
+        "colombia": (-74.2, 4.5, "COL"),
+        "chile": (-71.5, -35.6, "CHL"),
+        "peru": (-75.0, -9.1, "PER"),
+        "perú": (-75.0, -9.1, "PER"),
+        "rusia": (60.0, 55.0, "RUS"),
+        "ucrania": (31.1, 48.3, "UKR"),
+        "alemania": (10.4, 51.1, "DEU"),
+        "francia": (2.2, 46.2, "FRA"),
+        "reino unido": (-3.4, 55.3, "GBR"),
+        "italia": (12.5, 41.8, "ITA"),
+        "japon": (138.2, 36.2, "JPN"),
+        "japón": (138.2, 36.2, "JPN"),
+        "india": (78.9, 20.5, "IND"),
+        "canada": (-106.3, 56.1, "CAN"),
+        "canadá": (-106.3, 56.1, "CAN"),
+    }
+
+    @classmethod
+    def _detect_geo_locations(cls, text: str) -> list[tuple[float, float, str]]:
+        """Detecta menciones de países o regiones clave en el texto para proyectar mapa."""
+        low = text.lower()
+        found: list[tuple[float, float, str]] = []
+        seen = set()
+        for name, (lon, lat, code) in cls.GEO_COORDINATES.items():
+            if re.search(r"\b" + re.escape(name) + r"\b", low):
+                if code not in seen:
+                    found.append((lon, lat, code))
+                    seen.add(code)
+        return found
+
     @classmethod
     def render_chart_image(
         cls,
@@ -72,29 +116,39 @@ class BroadcastChartGenerator:
         dpi: int = 150,
     ) -> Optional[Image.Image]:
         """
-        Analiza el dato estadístico y renderiza el gráfico infográfico más apropiado.
-        Devuelve una imagen PIL RGBA con fondo transparente.
+        Analiza el dato estadístico, titular o contexto y renderiza el gráfico infográfico más apropiado:
+        1. Mapa geopolítico si se detectan países o alianzas internacionales.
+        2. Barras comparativas si hay 'A vs B' o comparativas de magnitudes.
+        3. Medidor radial / Gauge si es un porcentaje o proporción.
+        4. Curva de tendencia / Sparkline si hay aceleración o multiplicador.
+        5. Mini ecualizador HUD de datos de alto impacto.
         """
         stat_clean = (stat_value or "").strip()
-        if not stat_clean:
+        combined_text = f"{stat_clean} {headline}".strip()
+        if not combined_text:
             return None
 
-        # 1. Comparativa A vs B
+        # 1. Mapa geopolítico interactivo si se mencionan países o relaciones internacionales
+        geo_nodes = cls._detect_geo_locations(combined_text)
+        if len(geo_nodes) >= 1:
+            return cls._render_geointel_map(geo_nodes, width_px, height_px, dpi)
+
+        # 2. Comparativa A vs B
         comp = cls._parse_comparison(stat_clean) or cls._parse_comparison(headline)
         if comp:
             return cls._render_comparison_bars(comp, width_px, height_px, dpi)
 
-        # 2. Porcentaje o ratio
-        pct = cls._parse_percentage(stat_clean)
+        # 3. Porcentaje o ratio
+        pct = cls._parse_percentage(stat_clean) or cls._parse_percentage(headline)
         if pct is not None:
-            return cls._render_radial_gauge(pct, stat_clean, width_px, height_px, dpi)
+            return cls._render_radial_gauge(pct, stat_clean or headline, width_px, height_px, dpi)
 
-        # 3. Crecimiento o aceleración
-        growth = cls._parse_growth(stat_clean)
+        # 4. Crecimiento o aceleración
+        growth = cls._parse_growth(stat_clean) or cls._parse_growth(headline)
         if growth is not None and abs(growth) > 0:
-            return cls._render_trend_sparkline(growth, stat_clean, width_px, height_px, dpi)
+            return cls._render_trend_sparkline(growth, stat_clean or headline, width_px, height_px, dpi)
 
-        # 4. Fallback a gráfico de métrica visual (Mini Bar HUD)
+        # 5. Fallback a gráfico de métrica visual (Mini Bar HUD)
         return cls._render_metric_hud(stat_clean, width_px, height_px, dpi)
 
     @staticmethod
@@ -276,3 +330,89 @@ class BroadcastChartGenerator:
         plt.close(fig)
         buf.seek(0)
         return Image.open(buf).convert("RGBA")
+
+    @staticmethod
+    def _render_geointel_map(
+        geo_nodes: list[tuple[float, float, str]],
+        width_px: int,
+        height_px: int,
+        dpi: int,
+    ) -> Optional[Image.Image]:
+        """
+        Renderiza un mapa geopolítico vectorial de alta definición estilo HUD / Geospatial Intelligence:
+        - Malla global de puntos sutiles
+        - Contornos y polígonos estilizados de las masas continentales
+        - Marcadores luminosos (pines) en los países involucrados
+        - Arcos o líneas de enlace entre nodos si hay múltiples países
+        """
+        fig_w = width_px / dpi
+        fig_h = height_px / dpi
+
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi, facecolor="none")
+        ax.set_facecolor("none")
+
+        # 1. Matriz de cuadrícula sutil (HUD grid)
+        lons = np.linspace(-150, 150, 16)
+        lats = np.linspace(-50, 70, 8)
+        gx, gy = np.meshgrid(lons, lats)
+        ax.scatter(gx, gy, s=1.2, color="#334155", alpha=0.35, zorder=1)
+
+        # 2. Polígonos simplificados de continentes terrestres
+        continents = [
+            # América del Norte
+            [(-130, 55), (-120, 65), (-80, 65), (-60, 45), (-80, 25), (-100, 20), (-120, 35)],
+            # América del Sur
+            [(-75, 10), (-40, -5), (-35, -20), (-60, -50), (-75, -40), (-80, -10)],
+            # Europa
+            [(-10, 40), (0, 60), (30, 65), (40, 45), (10, 38)],
+            # África
+            [(-15, 30), (35, 30), (45, 10), (30, -30), (15, -34), (0, 5)],
+            # Asia
+            [(40, 45), (70, 70), (140, 60), (120, 25), (100, 10), (60, 25)],
+            # Oceanía / Australia
+            [(115, -20), (150, -20), (145, -38), (120, -35)],
+        ]
+
+        for poly in continents:
+            xs = [p[0] for p in poly] + [poly[0][0]]
+            ys = [p[1] for p in poly] + [poly[0][1]]
+            ax.fill(xs, ys, color="#1e293b", alpha=0.6, zorder=2)
+            ax.plot(xs, ys, color="#475569", lw=0.8, alpha=0.7, zorder=3)
+
+        # 3. Líneas de conexión diplomática o comercial si hay 2 o más nodos
+        if len(geo_nodes) >= 2:
+            node_xs = [n[0] for n in geo_nodes]
+            node_ys = [n[1] for n in geo_nodes]
+            for i in range(len(geo_nodes) - 1):
+                x1, y1 = node_xs[i], node_ys[i]
+                x2, y2 = node_xs[i + 1], node_ys[i + 1]
+                ax.plot([x1, x2], [y1, y2], color="#38bdf8", lw=1.2, ls="--", alpha=0.85, zorder=4)
+
+        # 4. Pines y etiquetas de los países localizados
+        for lon, lat, code in geo_nodes:
+            # Halo exterior difuso
+            ax.scatter([lon], [lat], color="#38bdf8", s=65, alpha=0.35, zorder=5)
+            # Centro blanco brillante
+            ax.scatter([lon], [lat], color="#ffffff", edgecolors="#0284c7", lw=1.5, s=26, zorder=6)
+            # Etiqueta con micro-caja
+            y_offset = 6 if lat >= 0 else -10
+            ax.text(
+                lon, lat + y_offset, code,
+                color="#ffffff", fontsize=7.5, fontweight="bold",
+                ha="center", va="center",
+                fontfamily="sans-serif",
+                bbox=dict(boxstyle="round,pad=0.18", facecolor="#090d16", edgecolor="#38bdf8", alpha=0.85, lw=0.6),
+                zorder=7,
+            )
+
+        ax.set_xlim(-170, 170)
+        ax.set_ylim(-60, 80)
+        ax.axis("off")
+
+        buf = io.BytesIO()
+        plt.tight_layout(pad=0.1)
+        fig.savefig(buf, format="png", transparent=True, dpi=dpi)
+        plt.close(fig)
+        buf.seek(0)
+        return Image.open(buf).convert("RGBA")
+

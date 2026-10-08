@@ -268,12 +268,12 @@ class SceneEngine:
             )
             cur_v = "v_bg_combined"
 
-        # Desenfoque temporal dinámico: si hay tarjeta, solo desenfocar durante su aparición (máx 5.0s)
-        # para que después el video de fondo se vea 100% nítido en todo su esplendor
-        card_duration = min(5.0, duration - 0.8) if (card_img_path and card_img_path.exists()) else 0.0
+        # Desenfoque temporal dinámico: si hay tarjeta, solo desenfocar durante su aparición (hasta 9.5s)
+        # para que el espectador tenga tiempo real de leer el gráfico/mapa antes de volver a la toma nítida
+        card_duration = min(9.5, max(4.5, duration - 1.2)) if (card_img_path and card_img_path.exists()) else 0.0
 
         if card_duration > 0:
-            # Fondo nítido + capa desenfocada activa solo durante los 5s de la tarjeta
+            # Fondo nítido + capa desenfocada activa solo durante la permanencia de la tarjeta
             filter_parts.append(f"[{cur_v}]split[v_crisp][v_to_blur];[v_to_blur]boxblur=5:2,drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.45:t=fill[v_blurred];[v_crisp][v_blurred]overlay=0:0:enable='between(t,0.4,{0.4 + card_duration:.2f})'[v_dim]")
         else:
             filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.15:t=fill[v_dim]")
@@ -463,11 +463,12 @@ class SceneEngine:
             raise RuntimeError(f"Fallo al renderizar la escena {scene.scene_id}: {err_msg[-300:]}")
 
         # Extraer miniatura visual de alta definición para el monitor en vivo del frontend
+        # (Se captura en t=1.8s cuando los gráficos y tarjetas Bento ya hicieron slide-in completo)
         thumb_path = scene_dir / "scene_thumb.jpg"
         try:
             import subprocess
             subprocess.run([
-                "ffmpeg", "-y", "-ss", "0.5", "-i", str(scene_out),
+                "ffmpeg", "-y", "-ss", "1.8", "-i", str(scene_out),
                 "-vframes", "1", "-q:v", "3", str(thumb_path)
             ], capture_output=True, timeout=5)
         except Exception:
