@@ -62,22 +62,16 @@ def numero_a_palabras(n: int) -> str:
 def refine_speech_cadence(text: str) -> str:
     """
     Pule la cadencia oral del texto insertando pausas naturales (comas y puntos):
-    1. Si está disponible NVIDIA Nemotron (o LLM), aplica una refinación rápida de puntuación oral de radio.
-    2. Si no hay conexión o falla, aplica reglas fonéticas deterministas del español (conectores causales,
-       adversativos y temporales) para que la voz neural respire de forma humana sin ahogarse.
+    1. Si está disponible NVIDIA Nemotron (o LLM), extrae la versión puntuada con comas limpias.
+    2. Reglas gramaticales y fonéticas del español para garantizar que ninguna frase de más de 8-10 palabras
+       carezca de coma antes de conectores explicativos, causales o adversativos.
     """
     if not text or len(text.strip()) < 15:
         return text
 
     clean = text.strip()
 
-    # Si ya contiene buena cantidad de comas (más de 1 coma cada 18 palabras), conservarlo
-    words = clean.split()
-    comma_count = clean.count(",")
-    if len(words) > 0 and (comma_count / max(1, len(words))) >= 0.05:
-        return clean
-
-    # Intento 1: NVIDIA Nemotron 3.5 Lightning (Ultrarrápido y preciso para puntuación oral)
+    # Intento 1: NVIDIA Nemotron 3.5 Lightning (si está disponible)
     try:
         from config.settings import settings
         if getattr(settings, "NVIDIA_API_KEY", None):
@@ -87,41 +81,58 @@ def refine_speech_cadence(text: str) -> str:
                 api_key=settings.NVIDIA_API_KEY,
                 timeout=5.0,
             )
-            sys_msg = (
-                "Eres un editor de guiones para locución de radio y televisión en español. "
-                "Tu única tarea es insertar comas y puntos donde correspondan para que el locutor "
-                "tenga pausas de respiración naturales y fluidas. No cambies las palabras, no agregues introducciones "
-                "ni explicaciones, devuelve únicamente el texto puntuado."
+            prompt_refine = (
+                "Reescribe el siguiente texto exactamente igual pero insertando comas naturales donde un locutor de radio "
+                "deba respirar. No agregues saludos ni explicaciones, responde SOLO con el texto puntuado:\n\n" + clean
             )
             resp = client.chat.completions.create(
                 model=settings.NVIDIA_MODEL,
-                messages=[
-                    {"role": "system", "content": sys_msg},
-                    {"role": "user", "content": clean},
-                ],
+                messages=[{"role": "user", "content": prompt_refine}],
                 extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-                max_tokens=len(clean) + 60,
+                max_tokens=len(clean) + 80,
                 temperature=0.1,
             )
-            candidate = resp.choices[0].message.content.strip().strip('"\'')
-            if candidate and len(candidate.split()) >= len(words) - 2 and not candidate.startswith("Aquí"):
-                return candidate
+            raw_ans = resp.choices[0].message.content.strip()
+            # Si el modelo devuelve un bloque con explicaciones o markdown, extraer la línea relevante
+            lines = [l.strip().strip('*"`\'') for l in raw_ans.split("\n") if l.strip() and not l.strip().lower().startswith(("aquí", "por qué", "explicación", "1.", "2."))]
+            for l in lines:
+                if len(l.split()) >= len(clean.split()) - 3:
+                    if l.count(",") >= 1:
+                        return l
     except Exception:
         pass
 
-    # Intento 2: Reglas fonéticas deterministas en español para locución natural
-    # Añadir coma antes de conjunciones adversativas, causales y explicativas que vengan precedidas de 5+ palabras
-    connectors = [
-        "porque", "mientras", "donde", "aunque", "pero", "sino que", 
-        "ya que", "dado que", "tras", "debido a que", "sin embargo", 
-        "a pesar de que", "por lo que", "con lo cual"
+    # Intento 2: Reglas fonéticas deterministas del español para locución de radio
+    # Conectores y cláusulas que requieren pausa oral obligatoria si no llevan coma previa
+    rules = [
+        (r"(\b\w+\b)\s+(porque\b)", r"\1, porque"),
+        (r"(\b\w+\b)\s+(mientras\b)", r"\1, mientras"),
+        (r"(\b\w+\b)\s+(donde\b)", r"\1, donde"),
+        (r"(\b\w+\b)\s+(aunque\b)", r"\1, aunque"),
+        (r"(\b\w+\b)\s+(pero\b)", r"\1, pero"),
+        (r"(\b\w+\b)\s+(sino que\b)", r"\1, sino que"),
+        (r"(\b\w+\b)\s+(ya que\b)", r"\1, ya que"),
+        (r"(\b\w+\b)\s+(dado que\b)", r"\1, dado que"),
+        (r"(\b\w+\b)\s+(debido a que\b)", r"\1, debido a que"),
+        (r"(\b\w+\b)\s+(sin embargo\b)", r"\1, sin embargo,"),
+        (r"(\b\w+\b)\s+(por lo que\b)", r"\1, por lo que"),
+        (r"(\b\w+\b)\s+(con lo cual\b)", r"\1, con lo cual"),
+        (r"(\b\w+\b)\s+(demostrando\b)", r"\1, demostrando"),
+        (r"(\b\w+\b)\s+(afectando\b)", r"\1, afectando"),
+        (r"(\b\w+\b)\s+(generando\b)", r"\1, generando"),
+        (r"(\b\w+\b)\s+(restando\b)", r"\1, restando"),
+        (r"(\b\w+\b)\s+(poniendo en riesgo\b)", r"\1, poniendo en riesgo"),
     ]
-    for conn in connectors:
-        # Si el conector está precedido de una palabra y no tiene coma previa
-        pattern = rf"(\b\w+\b)\s+({conn}\b)"
-        def _add_comma(match):
-            return f"{match.group(1)}, {match.group(2)}"
-        clean = re.sub(pattern, _add_comma, clean, count=2)
+
+    for pat, rep in rules:
+        clean = re.sub(pat, rep, clean, flags=re.IGNORECASE)
+
+    # Si hay oraciones largas de más de 14 palabras sin coma antes de 'y', agregar coma antes de la conjunción
+    clean = re.sub(r"([A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,})\s+y\s+([A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,})", r"\1, y \2", clean)
+
+    # Limpiar dobles comas accidentales
+    clean = re.sub(r",\s*,+", ", ", clean)
+    clean = re.sub(r"\s+,\s*", ", ", clean)
 
     return clean
 

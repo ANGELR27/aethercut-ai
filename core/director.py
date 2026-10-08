@@ -120,8 +120,10 @@ REQUISITO CRÍTICO E INNEGOCIABLE DE DURACIÓN:
 - RITMO AUDIOVISUAL DINÁMICO: Ningún plano ni fondo debe permanecer estático por mucho tiempo. Cada escena debe cambiar de perspectiva: alternar entre el gancho directo del avatar, tomas de B-Roll documental reactivo en pantalla completa, tarjetas Bento con cifras duras y momentos de debate.
 - NUNCA escribas frases cortas de 1-2 líneas como speech. Cada speech debe ser un PÁRRAFO COMPLETO Y NUTRIDO.
 
-REGLAS DE REDACCIÓN Y GUION NARRATIVO:
-- Redacta cada escena como un guion audiovisual profesional: con fluidez, naturalidad y excelente ortografía y puntuación en español (comas y puntos donde correspondan de forma orgánica).
+REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
+- Redacta cada escena como un guion audiovisual para locutor profesional: con cadencia rítmica, pausas de respiración y excelente ortografía en español.
+- CADA ORACIÓN debe tener longitud moderada (de 10 a 16 palabras) separada por comas y puntos. ESTRICTAMENTE PROHIBIDO redactar párrafos de 30 o 40 palabras seguidas sin comas intermedias.
+- Usa comas antes de conjunciones y conectores naturales (ej: ", porque...", ", mientras...", ", donde...", ", pero...", ", y con ello...").
 - Habla de forma directa, cautivadora e inteligente, como un narrador o divulgador de primer nivel dirigiéndose a su público.
 - Evita muletillas o saludos vacíos (como "Hola a todos" o "Bienvenidos a mi canal"); entra directo al tema con energía y datos interesantes.
 
