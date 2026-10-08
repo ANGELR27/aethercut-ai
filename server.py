@@ -19,7 +19,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import aiofiles
-from fastapi import FastAPI, Body, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, BackgroundTasks, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -697,7 +697,7 @@ async def extract_project_clips(task_id: str, background_tasks: BackgroundTasks)
             raise HTTPException(status_code=400, detail="El video master debe estar completado para extraer clips.")
 
     # Obtener escenas y plan para identificar los mejores momentos
-    plan_path = store.work_dir / "broadcast_plan.json"
+    plan_path = store.workdir / "broadcast_plan.json"
     scenes = []
     if plan_path.exists():
         try:
