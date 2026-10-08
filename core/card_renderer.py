@@ -373,24 +373,25 @@ class InfoCardRenderer:
         f_body = _font(["segoeui.ttf", "arial.ttf"], 14 * scale)      # Síntesis
         f_src = _font(["segoeuib.ttf", "segoeui.ttf"], 11 * scale)    # Pie
 
-        # Colores Obsidian Glass / Neon
-        bg_card_top = (16, 16, 18, 252)
-        bg_card_bot = (8, 8, 10, 254)
-        border_top = (255, 255, 255, 75)
-        stat_color = (251, 191, 36, 255) if badge_tone == "amber" else (52, 211, 153, 255)
+        # Colores Obsidian Glass Pro / Neon Studio
+        # Fondo translúcido con gradiente de cristal ahumado profundo (sin opacar el video de fondo como bloque negro tosco)
+        bg_card_top = (15, 23, 42, 225)
+        bg_card_bot = (10, 15, 30, 238)
+        border_top = (148, 163, 184, 110)
+        stat_color = (251, 191, 36, 255) if badge_tone == "amber" else (56, 189, 248, 255)
         title_color = (255, 255, 255, 255)
-        body_color = (226, 232, 240, 255)
-        src_color = (148, 163, 184, 230)
-        shadow_color = (0, 0, 0, 190)
+        body_color = (203, 213, 225, 255)
+        src_color = (148, 163, 184, 210)
+        shadow_color = (0, 0, 0, 140)
 
         bcfg = BADGE_THEMES.get(badge_tone, BADGE_THEMES["white"])[self.theme]
-        badge_bg = bcfg["bg"]
-        badge_border = bcfg["border"]
-        badge_txt_col = bcfg["text"]
-        pip_col = bcfg["pip"]
+        badge_bg = (30, 41, 59, 240)
+        badge_border = (56, 189, 248, 120)
+        badge_txt_col = (255, 255, 255, 255)
+        pip_col = (56, 189, 248, 255) if badge_tone != "amber" else (251, 191, 36, 255)
 
         # 1. Renderizar gráfico infográfico profesional o mapa geopolítico
-        chart_w_logical = 195
+        chart_w_logical = 205
         chart_h_logical = 160
         chart_img: Optional[Image.Image] = None
         try:
@@ -411,7 +412,7 @@ class InfoCardRenderer:
         has_photo = bool(image_path and Path(image_path).exists()) and not has_chart
 
         # Proporción Bento áurea calibrada para video (~2.1:1 en Full HD 1920x1080)
-        card_w = 690
+        card_w = 710
         if self.portrait:
             card_w = min(card_w, int(self.frame_w * 0.92))
 
@@ -483,13 +484,16 @@ class InfoCardRenderer:
         card_masked.paste(card, (0, 0), round_mask)
         d = ImageDraw.Draw(card_masked)
 
-        # Insertar gráfico o foto a la izquierda si aplica
+        # Insertar gráfico o foto a la izquierda con bezel independiente enmarcado
         text_start_x = (pad_x + visual_w + visual_gap) * scale if (has_chart or has_photo) else pad_x * scale
         if has_chart and chart_img is not None:
             cw = visual_w * scale
             ch = chart_h_logical * scale
             cx_pos = pad_x * scale
             cy_pos = int((H - ch) / 2)
+            # Enmarcar en una sub-caja con fondo de cristal sutil y borde neón para que no flote suelto
+            bezel_box = (cx_pos, cy_pos, cx_pos + cw - 1, cy_pos + ch - 1)
+            d.rounded_rectangle(bezel_box, radius=12 * scale, fill=(15, 23, 42, 180), outline=(56, 189, 248, 60), width=1 * scale)
             resized_chart = chart_img.resize((cw, ch), Image.LANCZOS)
             card_masked.paste(resized_chart, (cx_pos, cy_pos), resized_chart)
         elif has_photo and image_path:

@@ -169,7 +169,10 @@ REQUISITO CRÍTICO E INNEGOCIABLE DE DURACIÓN:
 - NUNCA escribas frases cortas de 1-2 líneas como speech. Cada speech debe ser un PÁRRAFO COMPLETO Y NUTRIDO.
 
 REGLAS DE FIDELIDAD TEMÁTICA, LISTAS Y RANKINGS (TOP 10, TOP 5, COMPARATIVAS):
-- FIDELIDAD TOTAL AL TEMA: Si el tema solicita un TOP (ej: "TOP 10 DE LOS PEORES PRESIDENTES EN LOS ÚLTIMOS 6 AÑOS EN AMÉRICA"), la transmisión DEBE ESTRUCTURARSE OBLIGATORIAMENTE COMO ESE TOP. Cada escena debe abordar y nombrar explícitamente a los individuos, mandatarios o puestos concretos (ej: Puesto 10: Pedro Castillo en Perú, Puesto 9: Alberto Fernández en Argentina, etc.) con sus nombres y apellidos reales, años de mandato, cargos y cifras exactas.
+- FIDELIDAD TOTAL AL TEMA: Si el tema solicita un TOP N (ej: "TOP 10 DE LOS PEORES PRESIDENTES EN LOS ÚLTIMOS 6 AÑOS EN AMÉRICA"):
+  * La transmisión DEBE tener EXACTAMENTE UNA ESCENA DEDICADA A CADA UNO DE LOS PUESTOS (desde el Puesto 10 descendiendo uno a uno hasta el Puesto 1).
+  * ESTRICTAMENTE PROHIBIDO saltarse puestos o agrupar varios mandatarios/puestos en una sola escena. Si el usuario pidió un TOP 10, el video debe tener 10 escenas individuales para los 10 personajes distintos, precedidas por la intro y seguidas por la conclusión.
+  * Cada puesto debe nombrar con nombre y apellido completo al mandatario (ej: Puesto 10: Bernardo Arévalo, Puesto 9: Dina Boluarte, Puesto 8: Pedro Castillo, Puesto 7: Alberto Fernández, etc.), su país, sus fechas de mandato y los hechos o porcentajes concretos de su gestión.
 - PROHIBIDO GENERALIZAR O DILUIR TEMAS EN ABSTRACCIONES: Está estrictamente prohibido hablar de "la inestabilidad regional" o "la crisis en general" sin mencionar con nombre y apellido a los personajes centrales del tema solicitado. El espectador entró a ver un TOP con nombres concretos; entregar un discurso genérico sin nombrar a los personajes arruina la producción.
 
 REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
@@ -297,9 +300,16 @@ class AIDirector:
         """Pide a Gemini dirigir la emisión completa escena por escena."""
         safe_log(f"[AIDirector] Planificando y dirigiendo transmisión para: «{topic}» ({duration_target}s)")
 
+        # Detección inteligente de TOPs y Rankings (ej: TOP 10, TOP 5, Ranking 7)
+        ranking_match = re.search(r'\b(?:top|ranking|los mejores|los peores|puesto|puestos)\s*(\d{1,2})\b', topic, re.IGNORECASE)
+        ranked_n = int(ranking_match.group(1)) if ranking_match else None
+
         # Dinamismo profesional de YouTube/TikTok: cambio de escena visual cada 16 a 24 segundos
         dur = max(30, duration_target)
-        if dur <= 60:
+        if ranked_n and 3 <= ranked_n <= 15:
+            # Para un TOP N: 1 escena de intro/gancho + N escenas (una por cada puesto) + 1 escena de conclusión
+            num_scenes = ranked_n + 2
+        elif dur <= 60:
             num_scenes = max(3, dur // 18)
         elif dur <= 180:
             num_scenes = max(6, dur // 22)
@@ -309,8 +319,9 @@ class AIDirector:
             num_scenes = min(20, max(12, dur // 28))
 
         seconds_per_scene = round(dur / num_scenes)
-        # Ritmo de narración natural y elocuente (~120 palabras por minuto = ~2.0 palabras por segundo)
-        words_per_scene = max(22, round(seconds_per_scene * 2.0))
+        # Ritmo de narración natural y elocuente (~130 palabras por minuto = ~2.15 palabras por segundo)
+        # Ajustamos el objetivo de palabras por escena para que el audio Edge TTS llene exactamente la duración deseada
+        words_per_scene = max(26, round(seconds_per_scene * 2.15))
         total_words = words_per_scene * num_scenes
 
         if dur >= 600:

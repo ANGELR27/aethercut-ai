@@ -375,17 +375,41 @@ class BroadcastChartGenerator:
         ax.set_facecolor("none")
 
         # 1. Matriz de cuadrícula sutil (HUD grid)
-        lons = np.linspace(-150, 150, 16)
-        lats = np.linspace(-50, 70, 8)
-        gx, gy = np.meshgrid(lons, lats)
-        ax.scatter(gx, gy, s=1.2, color="#334155", alpha=0.35, zorder=1)
+        # Zoom inteligente enfocado en la región geográfica de los países detectados
+        node_lons = [n[0] for n in geo_nodes]
+        node_lats = [n[1] for n in geo_nodes]
+        min_lon, max_lon = min(node_lons), max(node_lons)
+        min_lat, max_lat = min(node_lats), max(node_lats)
 
-        # 2. Polígonos simplificados de continentes terrestres
+        # Si todos los países están en América (lon < -30)
+        if max_lon < -30:
+            view_xlim = (-125, -30)
+            view_ylim = (-55, 50)
+        # Si están en Europa / Medio Oriente
+        elif min_lon > -20 and max_lon < 60:
+            view_xlim = (-15, 55)
+            view_ylim = (20, 65)
+        # Si están en Asia / Pacífico
+        elif min_lon > 50:
+            view_xlim = (45, 145)
+            view_ylim = (0, 65)
+        else:
+            view_xlim = (-140, 140)
+            view_ylim = (-55, 75)
+
+        lons = np.linspace(view_xlim[0], view_xlim[1], 16)
+        lats = np.linspace(view_ylim[0], view_ylim[1], 8)
+        gx, gy = np.meshgrid(lons, lats)
+        ax.scatter(gx, gy, s=1.5, color="#38bdf8", alpha=0.15, zorder=1)
+
+        # 2. Polígonos de continentes terrestres
         continents = [
             # América del Norte
             [(-130, 55), (-120, 65), (-80, 65), (-60, 45), (-80, 25), (-100, 20), (-120, 35)],
+            # América Central y México
+            [(-115, 32), (-100, 25), (-90, 18), (-85, 12), (-78, 8), (-84, 10), (-95, 16), (-105, 22)],
             # América del Sur
-            [(-75, 10), (-40, -5), (-35, -20), (-60, -50), (-75, -40), (-80, -10)],
+            [(-78, 12), (-60, 8), (-35, -5), (-35, -20), (-60, -50), (-75, -45), (-80, -5)],
             # Europa
             [(-10, 40), (0, 60), (30, 65), (40, 45), (10, 38)],
             # África
@@ -399,8 +423,8 @@ class BroadcastChartGenerator:
         for poly in continents:
             xs = [p[0] for p in poly] + [poly[0][0]]
             ys = [p[1] for p in poly] + [poly[0][1]]
-            ax.fill(xs, ys, color="#1e293b", alpha=0.6, zorder=2)
-            ax.plot(xs, ys, color="#475569", lw=0.8, alpha=0.7, zorder=3)
+            ax.fill(xs, ys, color="#1e293b", alpha=0.85, zorder=2)
+            ax.plot(xs, ys, color="#38bdf8", lw=1.0, alpha=0.45, zorder=3)
 
         # 3. Líneas de conexión diplomática o comercial si hay 2 o más nodos
         if len(geo_nodes) >= 2:
@@ -409,27 +433,28 @@ class BroadcastChartGenerator:
             for i in range(len(geo_nodes) - 1):
                 x1, y1 = node_xs[i], node_ys[i]
                 x2, y2 = node_xs[i + 1], node_ys[i + 1]
-                ax.plot([x1, x2], [y1, y2], color="#38bdf8", lw=1.2, ls="--", alpha=0.85, zorder=4)
+                ax.plot([x1, x2], [y1, y2], color="#38bdf8", lw=1.5, ls="--", alpha=0.9, zorder=4)
 
         # 4. Pines y etiquetas de los países localizados
         for lon, lat, code in geo_nodes:
-            # Halo exterior difuso
-            ax.scatter([lon], [lat], color="#38bdf8", s=65, alpha=0.35, zorder=5)
+            # Radar pulse rings (anillos concéntricos luminosos)
+            ax.scatter([lon], [lat], color="#38bdf8", s=140, alpha=0.25, zorder=5)
+            ax.scatter([lon], [lat], color="#38bdf8", s=60, alpha=0.5, zorder=5)
             # Centro blanco brillante
-            ax.scatter([lon], [lat], color="#ffffff", edgecolors="#0284c7", lw=1.5, s=26, zorder=6)
-            # Etiqueta con micro-caja
-            y_offset = 6 if lat >= 0 else -10
+            ax.scatter([lon], [lat], color="#ffffff", edgecolors="#0284c7", lw=1.8, s=32, zorder=6)
+            # Etiqueta con badge
+            y_offset = 7 if lat >= -30 else -12
             ax.text(
                 lon, lat + y_offset, code,
-                color="#ffffff", fontsize=7.5, fontweight="bold",
+                color="#ffffff", fontsize=8.5, fontweight="bold",
                 ha="center", va="center",
                 fontfamily="sans-serif",
-                bbox=dict(boxstyle="round,pad=0.18", facecolor="#090d16", edgecolor="#38bdf8", alpha=0.85, lw=0.6),
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="#0f172a", edgecolor="#38bdf8", alpha=0.95, lw=1.0),
                 zorder=7,
             )
 
-        ax.set_xlim(-170, 170)
-        ax.set_ylim(-60, 80)
+        ax.set_xlim(view_xlim)
+        ax.set_ylim(view_ylim)
         ax.axis("off")
 
         buf = io.BytesIO()
