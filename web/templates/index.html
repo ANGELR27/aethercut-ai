@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=10">
+    <link rel="stylesheet" href="/static/css/style.css?v=16">
     <script src="https://cdn.jsdelivr.net/npm/motion@11.11.17/dist/motion.js"></script>
 </head>
 <body>
@@ -251,15 +251,25 @@
                     <span class="bento-subcard-title">Voz Neural &amp; Locutor</span>
                     
                     <select id="streamerVoice" class="select-input">
-                        <option value="es-MX-JorgeNeural" selected>🎙️ Jorge (Conversacional &amp; Natural)</option>
+                        <option value="es-ES-AlvaroNeural" selected>🎙️ Álvaro (Tech &amp; Divulgación Científica)</option>
+                        <option value="es-MX-JorgeNeural">🎙️ Jorge (Conversacional &amp; Natural)</option>
                         <option value="es-CO-GonzaloNeural">🎙️ Gonzalo (Neutro &amp; Calmo)</option>
                         <option value="es-US-AlonsoNeural">🎙️ Alonso (Broadcast Internacional)</option>
-                        <option value="es-ES-AlvaroNeural">🎙️ Álvaro (Tech Divulgación)</option>
                         <option value="es-MX-DaliaNeural">🎙️ Dalia (Femenina Dinámica)</option>
                     </select>
 
-                    <span class="bento-subcard-title" style="margin-top:6px;">Tema para KAI</span>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+                        <span class="bento-subcard-title" style="margin:0;">Tema para KAI</span>
+                        <button type="button" id="btnToggleQueue" style="background:transparent; border:none; color:var(--accent-ivory); font-size:11px; cursor:pointer; text-decoration:underline;">
+                            + Modo Cola de Temas
+                        </button>
+                    </div>
                     <textarea id="streamerTopic" rows="2" class="text-input" placeholder="Ej: Avances y desafíos de la IA Cuántica en 2026..."></textarea>
+                    <div id="queueInputWrap" style="display:none; margin-top:6px;">
+                        <span style="font-size:10px; color:var(--text-muted); display:block; margin-bottom:2px;">Temas en cola (un tema por línea):</span>
+                        <textarea id="streamerQueueTopics" rows="3" class="text-input" style="font-size:11px;" placeholder="Tema 2: El Telescopio James Webb&#10;Tema 3: Chips de Computación Óptica"></textarea>
+                        <span id="queueBadgeInfo" style="font-size:10px; color:#38bdf8; display:none; margin-top:2px;"></span>
+                    </div>
                 </div>
             </div>
 
@@ -342,7 +352,7 @@
                 </div>
                 <div class="readout-col">
                     <span>Voz Activa</span>
-                    <strong>Jorge Neural</strong>
+                    <strong id="readoutVoiceName">Álvaro Neural</strong>
                 </div>
             </div>
 
@@ -476,6 +486,110 @@
         </aside>
     </div>
 
+    <!-- PANTALLA DEDICADA DE TELEMETRÍA Y CONTROL DE EMISIÓN EN TIEMPO REAL (MISSION CONTROL) -->
+    <section class="bento-main-card telemetry-mission-control" id="liveTelemetryCard" hidden style="margin-top: 14px; padding: 24px;">
+        <header class="bento-card-header" style="flex-wrap: wrap; gap: 12px; align-items: flex-start;">
+            <div class="bento-header-left">
+                <div class="app-badge-icon live-pulse-badge" aria-hidden="true">📡</div>
+                <div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="live-status-pill" id="telemetryLiveBadge">● EN VIVO</span>
+                        <h3 id="telemetryTopicTitle" style="font-size:20px; font-weight:800; margin:0; color:#fff;">KAI Studio Mission Control</h3>
+                    </div>
+                    <p id="telemetrySubTitle" style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">
+                        Monitoreo en tiempo real: investigación web, generación de clips, tarjetas Bento y renderizado
+                    </p>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <button type="button" id="telemetryMinimizeBtn" class="subcard-pill-btn" style="padding:8px 14px; font-size:12px; cursor:pointer; background:rgba(255,255,255,0.08); color:var(--text-secondary);" title="Volver a la mesa de configuración">
+                    ↙ Minimizar a Segundo Plano
+                </button>
+                <button type="button" id="telemetryCancelBtn" class="subcard-pill-btn" style="padding:8px 14px; font-size:12px; cursor:pointer; background:rgba(239,68,68,0.18); color:#f87171; border:1px solid rgba(239,68,68,0.3);">
+                    ✕ Cancelar Proceso
+                </button>
+            </div>
+        </header>
+
+        <!-- BARRA PRINCIPAL DE PROGRESO CON FASE Y TIEMPO -->
+        <div class="telemetry-progress-banner" style="margin-top:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span class="telemetry-step-pill" id="telemetryCurrentStep">Investigación</span>
+                    <strong id="telemetryCurrentMsg" style="font-size:13px; color:#fff;">Iniciando motor de transmisión...</strong>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <span style="font-size:12px; color:var(--text-muted);" id="telemetryTimeElapsed">⏱ 00:00</span>
+                    <span class="telemetry-pct-tag" id="telemetryPctTag">0%</span>
+                </div>
+            </div>
+            <div class="telemetry-bar-track">
+                <div class="telemetry-bar-fill" id="telemetryBarFill" style="width: 0%;"></div>
+            </div>
+        </div>
+
+        <!-- GRID DE 2 COLUMNAS: TERMINAL DE EVENTOS EN VIVO + MONITOR VISUAL & TABLERO DE ESCENAS -->
+        <div class="telemetry-dual-grid" style="display:grid; grid-template-columns: 1fr 380px; gap: 16px; margin-top: 18px;">
+            
+            <!-- COLUMNA 1: TERMINAL DE EVENTOS EN TIEMPO REAL -->
+            <div class="telemetry-terminal-box">
+                <div class="terminal-header">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="terminal-dot red"></span>
+                        <span class="terminal-dot yellow"></span>
+                        <span class="terminal-dot green"></span>
+                        <span class="terminal-title">TERMINAL DE ACCIONES EN VIVO (EVENT STREAM)</span>
+                    </div>
+                    <span class="terminal-count" id="telemetryEventCount">0 eventos</span>
+                </div>
+                <div class="terminal-body" id="telemetryConsoleFeed">
+                    <div class="terminal-empty">Esperando el primer evento de la transmisión...</div>
+                </div>
+            </div>
+
+            <!-- COLUMNA 2: MONITOR VISUAL ACTIVO + TABLERO DE ESCENAS -->
+            <div class="telemetry-side-panel">
+                
+                <!-- MONITOR VISUAL EN VIVO (PREVIEW ACTIVO DE LA ESCENA EN CURSO) -->
+                <div class="live-visual-stage" id="telemetryLiveStage">
+                    <div class="stage-badge-rec" style="position:absolute; top:8px; left:8px; z-index:2;"><i></i> MONITOR DE ESCENA</div>
+                    <img id="telemetryStageImg" class="stage-visual-asset" src="/static/images/app_bg.jpg" alt="Visualización activa">
+                    <div class="stage-visual-caption" id="telemetryStageCaption">
+                        <strong id="telemetryStageSceneTitle">Escena en preparación</strong>
+                        <span id="telemetryStageSceneMeta">Buscando clips y generando composiciones...</span>
+                    </div>
+                </div>
+
+                <div class="side-panel-header" style="margin-top:14px;">
+                    <span style="font-size:12px; font-weight:700; color:#fff;">🎬 Secuencia de Escenas</span>
+                    <span style="font-size:11px; color:var(--text-muted);" id="telemetrySceneRatio">0 / 0</span>
+                </div>
+                <div class="telemetry-scenes-list" id="telemetryScenesList">
+                    <div class="scene-item-placeholder">
+                        <div style="font-size:12px; color:var(--text-muted);">Las escenas se poblarán al iniciar la dirección de IA.</div>
+                    </div>
+                </div>
+
+                <!-- MINI TARJETA DE RECURSOS ACTIVOS -->
+                <div class="telemetry-metrics-mini" style="margin-top:12px;">
+                    <div class="metric-mini-row">
+                        <span>Motor de Video:</span>
+                        <strong style="color:#38bdf8;">FFmpeg Multi-Thread</strong>
+                    </div>
+                    <div class="metric-mini-row">
+                        <span>Lip-Sync KAI:</span>
+                        <strong style="color:#22c55e;">Sincronizado</strong>
+                    </div>
+                    <div class="metric-mini-row">
+                        <span>Clips Dinámicos:</span>
+                        <strong style="color:#fbbf24;">HD H.264 Direct</strong>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
     <!-- APARTADO EXCLUSIVO: PRODUCCIÓN MASTER & ESTUDIO DE MATERIALES -->
     <section class="bento-main-card" id="resultsSection" hidden style="margin-top: 14px; padding: 22px;">
         <header class="bento-card-header" style="flex-wrap: wrap; gap: 12px; align-items: flex-start;">
@@ -573,6 +687,60 @@
             <div id="resFilesList" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
         </div>
 
+        <!-- PORTADA YOUTUBE HD & REEL SHORT VERTICAL -->
+        <div style="margin-top:18px; display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+            <!-- CARD 1: PORTADA YOUTUBE HD (THUMBNAIL MAKER) -->
+            <div id="resThumbnailCard" style="display:none; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; font-weight:700; color:#fff; display:flex; align-items:center; gap:6px;">
+                        🎨 Portada YouTube 1280x720 HD
+                    </span>
+                    <a id="btnDownloadThumbnail" href="#" download="portada_youtube.jpg" class="subcard-pill-btn active" style="font-size:11px; padding:4px 10px; text-decoration:none;">
+                        📥 Descargar JPG
+                    </a>
+                </div>
+                <div style="width:100%; aspect-ratio:16/9; border-radius:8px; overflow:hidden; background:#0b0f19; border:1px solid rgba(255,255,255,0.06);">
+                    <img id="resThumbnailImg" src="" alt="Portada YouTube" style="width:100%; height:100%; object-fit:cover;">
+                </div>
+            </div>
+
+            <!-- CARD 2: AUTO-SHORT VERTICAL 9:16 -->
+            <div id="resShortCard" style="display:none; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; font-weight:700; color:#fff; display:flex; align-items:center; gap:6px;">
+                        📱 Short Vertical 9:16 (TikTok / Reels)
+                    </span>
+                    <a id="btnDownloadShort" href="#" download="kai_short_vertical.mp4" class="subcard-pill-btn active" style="font-size:11px; padding:4px 10px; text-decoration:none;">
+                        📥 Descargar Short
+                    </a>
+                </div>
+                <div style="display:flex; justify-content:center; background:#0b0f19; border-radius:8px; padding:8px; border:1px solid rgba(255,255,255,0.06);">
+                    <video id="resShortVideo" controls playsinline style="max-height:220px; border-radius:6px; aspect-ratio:9/16;"></video>
+                </div>
+            </div>
+        </div>
+
+        <!-- DIÁLOGO / BOTÓN DE EXPORTACIÓN DIRECTA WEBHOOK (MAKE, NOTION, DISCORD) -->
+        <div id="webhookBox" style="margin-top:14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:10px 14px; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:16px;">🚀</span>
+                <div>
+                    <strong style="font-size:12px; color:#fff; display:block;">Publicación y Webhook Directo</strong>
+                    <span style="font-size:11px; color:var(--text-muted);">Envía video, portada y metadatos a Discord, Make, Zapier o Notion</span>
+                </div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input type="url" id="webhookInputUrl" class="text-input" placeholder="https://webhook.site/..." style="font-size:11px; padding:6px 10px; width:220px;">
+                <button type="button" id="btnSendWebhook" class="subcard-pill-btn active" style="font-size:11px; padding:6px 14px; cursor:pointer;">
+                    Enviar
+                </button>
+                <button type="button" id="btnCopyMeta" class="subcard-pill-btn" style="font-size:11px; padding:6px 10px; cursor:pointer;" title="Copiar ficha técnica al portapapeles">
+                    📋 Copiar Ficha
+                </button>
+            </div>
+            <span id="webhookStatusMsg" style="width:100%; font-size:11px; display:none;"></span>
+        </div>
+
         <div id="shortsList" style="display:flex; gap:8px; margin-top:12px;" hidden></div>
         <!-- Elementos de soporte -->
         <div id="shortContainer" style="display:none;" aria-hidden="true">
@@ -651,6 +819,26 @@
 
 </main>
 
-<script src="/static/js/app.js?v=28"></script>
+<!-- MODAL VENTANA FLOTANTE DE REPRODUCCIÓN (PROYECTOS & MASTER PREVIEWS) -->
+<div id="videoPlayerModal" class="video-modal-backdrop" hidden>
+    <div class="video-modal-dialog">
+        <header class="video-modal-header">
+            <div class="video-modal-title-wrap">
+                <span class="video-modal-badge">🎬 REPRODUCTOR DE PROYECTO</span>
+                <h3 id="modalVideoTitle" class="video-modal-title">Título del Video</h3>
+                <p id="modalVideoSub" class="video-modal-sub">Metadatos del video</p>
+            </div>
+            <div class="video-modal-actions">
+                <a href="#" id="modalDownloadBtn" class="yt-open-pill-btn" download title="Descargar Video .MP4">📥 Descargar .MP4</a>
+                <button type="button" id="modalCloseBtn" class="video-modal-close-btn" title="Cerrar reproductor">✕</button>
+            </div>
+        </header>
+        <div class="video-modal-stage">
+            <video id="modalVideoElement" controls playsinline></video>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/app.js?v=37"></script>
 </body>
 </html>

@@ -31,12 +31,12 @@ from core.llm import safe_log
 
 
 EMOTION_VOICE_MODULATION: Dict[str, Tuple[str, str]] = {
-    "excited": ("+6%", "+3Hz"),
-    "surprised": ("+4%", "+4Hz"),
-    "serious": ("-4%", "-2Hz"),
-    "skeptical": ("-3%", "-1Hz"),
+    "excited": ("+1%", "+2Hz"),
+    "surprised": ("+0%", "+2Hz"),
+    "serious": ("-2%", "-1Hz"),
+    "skeptical": ("-2%", "-1Hz"),
     "confident": ("+0%", "+0Hz"),
-    "humor": ("+5%", "+2Hz"),
+    "humor": ("+1%", "+1Hz"),
 }
 
 
@@ -78,19 +78,39 @@ class SceneEngine:
         scene_dir.mkdir(parents=True, exist_ok=True)
         scene_out = scene_dir / f"scene_{scene.scene_id}.mp4"
 
+        # 0. Cache inteligente de escenas (Reanudar sin rehacer lo que ya está listo)
+        thumb_path = scene_dir / "scene_thumb.jpg"
+        if scene_out.exists() and scene_out.stat().st_size > 50000:
+            if not thumb_path.exists():
+                try:
+                    import subprocess
+                    subprocess.run([
+                        "ffmpeg", "-y", "-ss", "0.5", "-i", str(scene_out),
+                        "-vframes", "1", "-q:v", "3", str(thumb_path)
+                    ], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+            safe_log(f"[SceneEngine] Reusando escena {scene.scene_id} ({scene.name}) ya renderizada.")
+            if status_cb:
+                status_cb(f"Escena {scene.scene_id} restaurada desde caché.")
+            return scene_out
+
         if status_cb:
             status_cb(f"Dirigiendo Escena {scene.scene_id}: {scene.name} ({scene.type})")
 
-        # 1. Síntesis de voz neural con modulación emocional
+        # 1. Síntesis de voz neural con modulación emocional y pronunciación fluida
         speech_text = scene.speech.strip()
         if not speech_text:
             speech_text = "Dato mata relato, analicemos este punto a fondo."
+
+        from utils.speech_normalizer import normalize_speech_for_tts
+        tts_speech_text = normalize_speech_for_tts(speech_text)
 
         rate_mod, pitch_mod = EMOTION_VOICE_MODULATION.get(scene.emotion, ("+0%", "+0Hz"))
         audio_path = scene_dir / "voice.mp3"
 
         import edge_tts
-        communicate = edge_tts.Communicate(speech_text, self.voice, rate=rate_mod, pitch=pitch_mod)
+        communicate = edge_tts.Communicate(tts_speech_text, self.voice, rate=rate_mod, pitch=pitch_mod)
         sentence_boundaries = []
         with open(audio_path, "wb") as f_audio:
             async for chunk in communicate.stream():
@@ -101,12 +121,24 @@ class SceneEngine:
                     d_sec = chunk["duration"] / 10_000_000
                     sentence_boundaries.append((s_sec, s_sec + d_sec, chunk["text"].strip()))
 
-        # Medir duración exacta del audio de la escena
+        # Medir duración inicial y aplicar silenceremove inteligente para eliminar pausas muertas y silencios largos
+        trimmed_audio_path = scene_dir / "voice_trimmed.mp3"
+        try:
+            trim_cmd = [
+                "ffmpeg", "-y", "-i", str(audio_path),
+                "-af", "silenceremove=stop_periods=-1:stop_duration=0.22:stop_threshold=-32dB:start_periods=1:start_duration=0.01:start_threshold=-32dB",
+                str(trimmed_audio_path),
+            ]
+            res_trim = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=15)
+            if res_trim.returncode == 0 and trimmed_audio_path.exists() and trimmed_audio_path.stat().st_size > 1000:
+                audio_path = trimmed_audio_path
+        except Exception as exc_trim:
+            safe_log(f"[SceneEngine] Fallback silenceremove: {exc_trim}")
+
+        # Medir duración exacta del audio real de la escena (sin silencios muertos)
         tts_duration = self._get_audio_duration(audio_path)
-        # Usar el máximo entre la duración del TTS y el target del director
-        # para garantizar que el video final respete la duración solicitada
-        target_scene_dur = max(3.5, scene.duration_est) if scene.duration_est > 0 else tts_duration
-        duration = max(tts_duration + 0.6, target_scene_dur)
+        # La escena se ajusta de forma milimétrica al audio hablado para evitar silencios y pausas vacías
+        duration = max(3.0, round(tts_duration + 0.15, 2))
         dur_str = f"{duration:.2f}"
 
         # 2. Descargar o seleccionar B-Roll temático para la escena
@@ -121,7 +153,18 @@ class SceneEngine:
                 broll_img = Path("assets/streamer_studio_room.jpg")
 
         if not broll_img:
-            broll_img = await self._get_scene_visual(scene.visual_query, scene_dir)
+            # Priorizar video en movimiento para todas las escenas con B-Roll, reacción, noticias o contexto
+            is_video_reaction = (scene.type != "avatar_cam") or ("video" in (scene.visual_query or "").lower())
+            broll_img = await self._get_scene_visual(scene.visual_query, scene_dir, is_video_scene=is_video_reaction)
+
+        # 2b. Descargar segundo clip o ángulo complementario si está especificado en la escena
+        broll_img2 = None
+        vq2 = getattr(scene, "visual_query2", "") or (scene.visual_queries[1] if len(getattr(scene, "visual_queries", [])) > 1 else "")
+        if vq2 and vq2.strip() and vq2.strip().lower() != (scene.visual_query or "").strip().lower():
+            try:
+                broll_img2 = await self._get_scene_visual(vq2, scene_dir, is_video_scene=True)
+            except Exception as _e:
+                safe_log(f"[SceneEngine] Fallback en segundo clip: {_e}")
 
         # Si no se pudo obtener B-Roll o falló la descarga, NUNCA dejar la pantalla en negro:
         # Usar el fondo de estudio ambiental desenfocado en alta definición
@@ -166,6 +209,12 @@ class SceneEngine:
             card_img_path = scene_dir / f"card_{scene.scene_id}.png"
             self.card_renderer.render(card_obj, card_img_path)
 
+        # 3b. Preparar chips / pastillas referenciales dinámicas (países, marcas, entidades)
+        chips_img_path = None
+        if getattr(scene, "chips", None) and scene.chips:
+            out_chip_path = scene_dir / f"chips_{scene.scene_id}.png"
+            chips_img_path = self._render_chips_overlay(scene.chips, out_chip_path)
+
         # 4. Generar subtítulos para la escena
         srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
 
@@ -174,24 +223,48 @@ class SceneEngine:
         filter_parts: List[str] = []
         num_in = 0
 
-        # Fondo
+        # Fondo con soporte de 1 o 2 videos secuenciales en la misma escena
+        has_two_clips = bool(broll_img2 and broll_img2.exists())
+        mid_cut_sec = round(duration * 0.5, 2) if has_two_clips else 0.0
+
         if broll_img and broll_img.exists():
             if broll_img.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
                 inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(broll_img)])
             else:
                 inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(broll_img)])
             filter_parts.append(
-                f"[0:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[v_bg]"
+                f"[0:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[v_bg1]"
             )
+            cur_v = "v_bg1"
         else:
             inputs.extend(["-f", "lavfi", "-i", f"color=c=0x0a0a0c:s={self.W}x{self.H}:d={dur_str}:r=25"])
-            filter_parts.append("[0:v]format=yuva420p[v_bg]")
+            filter_parts.append("[0:v]format=yuva420p[v_bg1]")
+            cur_v = "v_bg1"
         num_in += 1
-        cur_v = "v_bg"
 
-        # Aplicar velo oscuro sutil según layout
-        dim_alpha = "0.45" if scene.type == "card_focus" else "0.20"
-        filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@{dim_alpha}:t=fill[v_dim]")
+        if has_two_clips:
+            # Segundo clip complementario que entra en la segunda mitad de la escena
+            if broll_img2.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(broll_img2)])
+            else:
+                inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(broll_img2)])
+            broll2_idx = num_in
+            num_in += 1
+            filter_parts.append(
+                f"[{broll2_idx}:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[v_bg2];"
+                f"[{cur_v}][v_bg2]overlay=0:0:enable='gte(t,{mid_cut_sec})'[v_bg_combined]"
+            )
+            cur_v = "v_bg_combined"
+
+        # Desenfoque temporal dinámico: si hay tarjeta, solo desenfocar durante su aparición (máx 5.0s)
+        # para que después el video de fondo se vea 100% nítido en todo su esplendor
+        card_duration = min(5.0, duration - 0.8) if (card_img_path and card_img_path.exists()) else 0.0
+
+        if card_duration > 0:
+            # Fondo nítido + capa desenfocada activa solo durante los 5s de la tarjeta
+            filter_parts.append(f"[{cur_v}]split[v_crisp][v_to_blur];[v_to_blur]boxblur=5:2,drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.45:t=fill[v_blurred];[v_crisp][v_blurred]overlay=0:0:enable='between(t,0.4,{0.4 + card_duration:.2f})'[v_dim]")
+        else:
+            filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.15:t=fill[v_dim]")
         cur_v = "v_dim"
 
         # Avatar según layout de cámara
@@ -221,14 +294,15 @@ class SceneEngine:
                 )
             cur_v = "v_av"
 
-        # Overlay adicional según tipo de escena o si tiene tarjeta HUD
+        # Overlay adicional según tipo de escena o si tiene tarjeta HUD (máximo 5 segundos de visibilidad)
         if card_img_path and card_img_path.exists():
             inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(card_img_path)])
             c_idx = num_in
             num_in += 1
-            card_x = 60 if not self.is_vertical else 40
-            card_y = 60 if not self.is_vertical else int(self.H * 0.55)
-            filter_parts.append(f"[{cur_v}][{c_idx}:v]overlay={card_x}:{card_y}:enable='between(t,0.5,{duration-0.4:.2f})'[v_card]")
+            card_x = 85 if not self.is_vertical else 30
+            card_y = 190 if not self.is_vertical else int(self.H * 0.40)
+            card_end = 0.5 + card_duration
+            filter_parts.append(f"[{cur_v}][{c_idx}:v]overlay={card_x}:{card_y}:enable='between(t,0.5,{card_end:.2f})'[v_card]")
             cur_v = "v_card"
 
         elif scene.type == "chat_debate" and chat_overlay_path and chat_overlay_path.exists():
@@ -239,6 +313,17 @@ class SceneEngine:
             cy = int(self.H - 330) if not self.is_vertical else int(self.H * 0.72)
             filter_parts.append(f"[{cur_v}][{ch_idx}:v]overlay={cx}:{cy}:enable='between(t,0.5,{duration-0.3:.2f})'[v_chat]")
             cur_v = "v_chat"
+
+        # Overlay de chips / pastillas referenciales dinámicas sincronizadas con la tarjeta (máximo 5s)
+        if chips_img_path and chips_img_path.exists():
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(chips_img_path)])
+            chp_idx = num_in
+            num_in += 1
+            chip_x = 85 if not self.is_vertical else 30
+            chip_y = (190 + 330 + 16) if (card_img_path and not self.is_vertical) else (190 if not self.is_vertical else int(self.H * 0.45))
+            chip_end = (0.5 + card_duration) if card_duration > 0 else (duration - 0.3)
+            filter_parts.append(f"[{cur_v}][{chp_idx}:v]overlay={chip_x}:{chip_y}:enable='between(t,0.6,{chip_end:.2f})'[v_chips]")
+            cur_v = "v_chips"
 
         # Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
         if srt_path and srt_path.exists():
@@ -295,7 +380,7 @@ class SceneEngine:
 
         cmd = [
             "ffmpeg", "-y",
-            "-threads", "2",
+            "-threads", "4",
             *inputs,
             "-filter_complex_script", str(filter_file),
             "-map", "[v_out]",
@@ -304,7 +389,7 @@ class SceneEngine:
             "-preset", "veryfast",
             "-crf", "18",
             "-pix_fmt", "yuv420p",
-            "-x264-params", "threads=3:rc-lookahead=10",
+            "-x264-params", "threads=4:rc-lookahead=10",
             "-c:a", "aac",
             "-b:a", "256k",
             "-t", dur_str,
@@ -331,6 +416,17 @@ class SceneEngine:
             err_msg = stderr.decode(errors="replace") if stderr else "No stderr"
             print(f"[SceneEngine] ERROR FFmpeg escena {scene.scene_id}:\n{err_msg}")
             raise RuntimeError(f"Fallo al renderizar la escena {scene.scene_id}: {err_msg[-300:]}")
+
+        # Extraer miniatura visual de alta definición para el monitor en vivo del frontend
+        thumb_path = scene_dir / "scene_thumb.jpg"
+        try:
+            import subprocess
+            subprocess.run([
+                "ffmpeg", "-y", "-ss", "0.5", "-i", str(scene_out),
+                "-vframes", "1", "-q:v", "3", str(thumb_path)
+            ], capture_output=True, timeout=5)
+        except Exception:
+            pass
 
         safe_log(f"[SceneEngine] Escena {scene.scene_id} ({scene.name}) lista: {duration:.1f}s")
         return scene_out
@@ -404,6 +500,21 @@ class SceneEngine:
         if not output_file.exists() or output_file.stat().st_size < 50000:
             raise RuntimeError("Error al concatenar las escenas de la transmisión.")
 
+        # Liberar inmediatamente archivos temporales pesados de las escenas (.mov intermedios)
+        # conservando el video master, thumbnails y metadata intactos
+        try:
+            for sc in scene_files:
+                sc_dir = sc.parent
+                for mov in sc_dir.glob("*.mov"):
+                    try: mov.unlink()
+                    except Exception: pass
+            # Limpiar avatar base intermedio del workdir si existe
+            for mov in self.workdir.glob("*.mov"):
+                try: mov.unlink()
+                except Exception: pass
+        except Exception as _e_clean:
+            safe_log(f"[SceneEngine] Limpieza post-render: {_e_clean}")
+
         safe_log(f"[SceneEngine] Transmisión completa masterizada con {total_scenes} escenas en: {output_file}")
         return output_file
 
@@ -417,7 +528,7 @@ class SceneEngine:
         except Exception:
             return 8.0
 
-    async def _get_scene_visual(self, query: str, scene_dir: Path) -> Optional[Path]:
+    async def _get_scene_visual(self, query: str, scene_dir: Path, is_video_scene: bool = False) -> Optional[Path]:
         """Obtiene un recurso visual de stock abierto para la escena."""
         try:
             from core.models import BRollCue
@@ -428,13 +539,163 @@ class SceneEngine:
                 concept=query or "technology abstract",
                 search_query_en=query or "technology abstract",
                 reasoning="Escena visual de fondo",
+                asset_type="video" if is_video_scene else "photo",
             )
             res = await self.orchestrator._resolve_single_cue(cue)
             if res.local_file_path and Path(res.local_file_path).exists():
                 return Path(res.local_file_path)
         except Exception as exc:
             safe_log(f"[SceneEngine] No se pudo descargar visual para '{query}': {exc}")
-        return None
+    def _render_chips_overlay(self, chips: List[str], out_path: Path) -> Optional[Path]:
+        """Renderiza una hilera horizontal de pastillas (chips) con banderas/iconos para referencias dinámicas."""
+        if not chips:
+            return None
+        import io
+        import urllib.request
+        from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+        scale = 2
+        pill_h = 36 * scale
+        pad_x = 16 * scale
+        gap = 12 * scale
+
+        COUNTRY_CODES = {
+            "estados unidos": "us", "ee.uu": "us", "eeuu": "us", "usa": "us", "us": "us",
+            "china": "cn", "cn": "cn",
+            "argentina": "ar", "ar": "ar",
+            "españa": "es", "espana": "es", "es": "es",
+            "colombia": "co", "co": "co",
+            "méxico": "mx", "mexico": "mx", "mx": "mx",
+            "chile": "cl", "cl": "cl",
+            "brasil": "br", "brazil": "br", "br": "br",
+            "alemania": "de", "germany": "de", "de": "de",
+            "reino unido": "gb", "uk": "gb", "inglaterra": "gb", "gb": "gb",
+            "francia": "fr", "fr": "fr",
+            "japón": "jp", "japon": "jp", "jp": "jp",
+            "italia": "it", "it": "it",
+            "canadá": "ca", "canada": "ca", "ca": "ca",
+            "rusia": "ru", "ru": "ru",
+            "australia": "au", "au": "au",
+            "perú": "pe", "peru": "pe", "pe": "pe",
+        }
+
+        flags_dir = Path("assets/flags_cache")
+        flags_dir.mkdir(parents=True, exist_ok=True)
+
+        def _get_flag_img(country_code: str, target_h: int) -> Optional[Image.Image]:
+            cache_file = flags_dir / f"{country_code}.png"
+            if not cache_file.exists():
+                try:
+                    url = f"https://flagcdn.com/w80/{country_code}.png"
+                    req = urllib.request.Request(url, headers={"User-Agent": "AetherCut-Studio/2.0"})
+                    with urllib.request.urlopen(req, timeout=4) as resp:
+                        cache_file.write_bytes(resp.read())
+                except Exception:
+                    pass
+            if cache_file.exists():
+                try:
+                    im = Image.open(cache_file).convert("RGBA")
+                    tw = int(im.width * (target_h / im.height))
+                    res = im.resize((tw, target_h), Image.LANCZOS)
+                    # Mascara redondeada sutil para la bandera
+                    fmask = Image.new("L", (tw, target_h), 0)
+                    ImageDraw.Draw(fmask).rounded_rectangle((0, 0, tw - 1, target_h - 1), radius=4 * scale, fill=255)
+                    flag_rounded = Image.new("RGBA", (tw, target_h), (0, 0, 0, 0))
+                    flag_rounded.paste(res, (0, 0), fmask)
+                    return flag_rounded
+                except Exception:
+                    pass
+            return None
+
+        f_font = None
+        for fn in ["segoeuib.ttf", "arialbd.ttf", "seguiemj.ttf"]:
+            p = Path("C:/Windows/Fonts") / fn
+            if p.exists():
+                try:
+                    f_font = ImageFont.truetype(str(p), 16 * scale)
+                    break
+                except Exception:
+                    pass
+        if not f_font:
+            f_font = ImageFont.load_default()
+
+        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+        pills_data = []
+        flag_h = int(18 * scale)
+
+        for c in chips[:6]:
+            raw = str(c).strip()
+            if not raw:
+                continue
+
+            # Detectar si hay bandera emoji o código de 2 letras
+            clean_name = raw
+            c_code = None
+
+            # 1. Buscar código al inicio (ej: 'us Estados Unidos', 'CN China')
+            m_code = re.match(r"^([A-Za-z]{2})\s+(.+)$", raw)
+            if m_code and m_code.group(1).lower() in COUNTRY_CODES:
+                c_code = COUNTRY_CODES[m_code.group(1).lower()]
+                clean_name = m_code.group(2).strip()
+            else:
+                # 2. Buscar por nombre de país en el texto
+                low_raw = raw.lower()
+                for k, code_val in COUNTRY_CODES.items():
+                    if k in low_raw:
+                        c_code = code_val
+                        break
+                # Limpiar posibles emojis rotos o caracteres basura
+                clean_name = re.sub(r"^[A-Za-z]{2}\s+", "", clean_name).strip()
+
+            flag_img = _get_flag_img(c_code, flag_h) if c_code else None
+            txt_w = int(probe.textlength(clean_name, font=f_font))
+            extra_w = (flag_img.width + int(8 * scale)) if flag_img else 0
+            w = int(txt_w + extra_w + (pad_x * 2))
+            pills_data.append((clean_name, flag_img, w))
+
+        if not pills_data:
+            return None
+
+        total_w = sum(w for _, _, w in pills_data) + (len(pills_data) - 1) * gap
+        margin = 16 * scale
+        W = total_w + (margin * 2)
+        H = pill_h + (margin * 2)
+
+        im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(im)
+
+        cur_x = margin
+        for name_txt, f_img, w in pills_data:
+            rect = (cur_x, margin, cur_x + w, margin + pill_h)
+            # Pastilla obsidian dark con borde suave
+            d.rounded_rectangle(rect, radius=pill_h // 2, fill=(18, 18, 22, 245), outline=(255, 255, 255, 60), width=1 * scale)
+            content_x = cur_x + pad_x
+            if f_img:
+                f_y = margin + ((pill_h - f_img.height) // 2)
+                im.paste(f_img, (content_x, f_y), f_img)
+                content_x += f_img.width + int(8 * scale)
+            d.text((content_x, margin + (pill_h // 2)), name_txt, font=f_font, fill=(255, 255, 255, 255), anchor="lm")
+            cur_x += w + gap
+
+        # Sombra suave difusa
+        shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        s_draw = ImageDraw.Draw(shadow)
+        cur_x = margin
+        for _, _, w in pills_data:
+            s_draw.rounded_rectangle((cur_x, margin + 4, cur_x + w, margin + pill_h + 4), radius=pill_h // 2, fill=(0, 0, 0, 160))
+            cur_x += w + gap
+        shadow = shadow.filter(ImageFilter.GaussianBlur(6 * scale))
+
+        comp = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        comp.paste(shadow, (0, 0), shadow)
+        comp.paste(im, (0, 0), im)
+
+        final_w = W // scale
+        final_h = H // scale
+        comp = comp.resize((final_w, final_h), Image.LANCZOS)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        comp.save(out_path, "PNG")
+        return out_path
 
     def _get_sfx_path(self, sfx_name: str) -> Optional[Path]:
         sfx_map = {

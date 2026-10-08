@@ -171,14 +171,39 @@ class StreamerPipeline:
         style_key = self.options.style.lower().strip()
         style_instructions = STYLE_PROMPTS.get(style_key, STYLE_PROMPTS["divulgacion"])
         
-        director = AIDirector(self.llm)
-        plan = await director.direct_broadcast(
-            topic=self.options.topic,
-            style=self.options.style,
-            evidence=evidence,
-            duration_target=self.options.duration_sec,
-            style_instructions=style_instructions,
-        )
+        plan_cache_path = self.workdir / "broadcast_plan.json"
+        if plan_cache_path.exists():
+            try:
+                cached_dict = json.loads(plan_cache_path.read_text(encoding="utf-8"))
+                plan = DirectorPlan.from_dict(cached_dict)
+                safe_log(f"[Streamer] Plan de emisión recuperado de disco: {len(plan.scenes)} escenas.")
+            except Exception as _e:
+                safe_log(f"[Streamer] No se pudo leer plan cacheado, regenerando: {_e}")
+                director = AIDirector(self.llm)
+                plan = await director.direct_broadcast(
+                    topic=self.options.topic,
+                    style=self.options.style,
+                    evidence=evidence,
+                    duration_target=self.options.duration_sec,
+                    style_instructions=style_instructions,
+                )
+        else:
+            director = AIDirector(self.llm)
+            plan = await director.direct_broadcast(
+                topic=self.options.topic,
+                style=self.options.style,
+                evidence=evidence,
+                duration_target=self.options.duration_sec,
+                style_instructions=style_instructions,
+            )
+
+        # Guardar plan en workdir y en project_store inmediatamente
+        try:
+            (self.workdir / "broadcast_plan.json").write_text(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+            if self.project_store:
+                self.project_store.save_plan(plan.to_dict())
+        except Exception as _e:
+            safe_log(f"[Streamer] Aviso al guardar plan: {_e}")
 
         if self.cancel_event.is_set():
             raise asyncio.CancelledError()
@@ -197,7 +222,22 @@ class StreamerPipeline:
             raise asyncio.CancelledError()
 
         # 4. Motor de Escenas: Modulación emocional, composición reactiva y masterización
-        self._state("render", 60.0, f"Scene Engine dirigiendo y grabando {len(plan.scenes)} escenas...")
+        scenes_preview_data = [
+            {
+                "scene_id": sc.scene_id,
+                "name": sc.name,
+                "type": sc.type,
+                "emotion": sc.emotion,
+                "camera": sc.camera,
+                "duration_est": round(sc.duration_est, 1),
+                "headline": sc.card.headline if sc.card else "",
+                "stat": sc.card.stat if sc.card else "",
+                "thumb_url": f"/storage/projects/{self.task_id}/work/scene_{sc.scene_id}/scene_thumb.jpg",
+                "card_url": f"/storage/projects/{self.task_id}/work/scene_{sc.scene_id}/card_{sc.scene_id}.png",
+            }
+            for sc in plan.scenes
+        ]
+        self._state("render", 60.0, f"Scene Engine dirigiendo y grabando {len(plan.scenes)} escenas...", live_scenes=scenes_preview_data)
         output_file = settings.OUTPUTS_DIR / f"{self.task_id}_master.mp4"
 
         scene_engine = SceneEngine(
@@ -209,7 +249,7 @@ class StreamerPipeline:
         )
 
         def scene_progress(pct: float, msg: str):
-            self._state("render", pct, msg)
+            self._state("render", pct, msg, live_scenes=scenes_preview_data)
 
         async with self.render_lock:
             await scene_engine.assemble_broadcast(
@@ -219,7 +259,99 @@ class StreamerPipeline:
                 progress_cb=scene_progress,
             )
 
-        # 5. Broadcast RTMP opcional si el usuario proporcionó URL / clave
+        # 5. Generar YouTube Cover Thumbnail (1280x720) y Short 9:16 Viral automáticamente
+        thumb_output = settings.OUTPUTS_DIR / f"{self.task_id}_thumbnail.jpg"
+        short_output = settings.OUTPUTS_DIR / f"{self.task_id}_short.mp4"
+        try:
+            # 5a. Crear YouTube Thumbnail de alta conversión
+            from PIL import Image, ImageDraw, ImageFont, ImageFilter
+            base_bg = None
+            for sc in plan.scenes:
+                sc_thumb = self.workdir / f"scene_{sc.scene_id}" / "scene_thumb.jpg"
+                if sc_thumb.exists():
+                    base_bg = sc_thumb
+                    break
+            
+            tb_im = Image.open(base_bg) if (base_bg and base_bg.exists()) else Image.open("assets/streamer_studio_room.jpg")
+            tb_im = tb_im.resize((1280, 720), Image.Resampling.LANCZOS)
+            tb_draw = ImageDraw.Draw(tb_im)
+            
+            # Velo oscuro con viñeta para contraste cinematográfico
+            overlay_grad = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
+            og_draw = ImageDraw.Draw(overlay_grad)
+            og_draw.rectangle([0, 0, 800, 720], fill=(5, 8, 14, 210))
+            tb_im.paste(overlay_grad, (0, 0), overlay_grad)
+            tb_draw = ImageDraw.Draw(tb_im)
+
+            # Titular épico en alto contraste
+            f_title = None
+            f_badge = None
+            for fn in ["segoeuib.ttf", "arialbd.ttf"]:
+                p = Path("C:/Windows/Fonts") / fn
+                if p.exists():
+                    try:
+                        f_title = ImageFont.truetype(str(p), 48)
+                        f_badge = ImageFont.truetype(str(p), 20)
+                        break
+                    except Exception:
+                        pass
+            if not f_title:
+                f_title = ImageFont.load_default()
+                f_badge = ImageFont.load_default()
+
+            # Pastilla superior
+            tb_draw.rounded_rectangle((50, 60, 240, 98), radius=8, fill=(239, 68, 68, 240))
+            tb_draw.text((70, 68), "🔴 BROADCAST", font=f_badge, fill=(255, 255, 255))
+
+            # Dividir título en 3 líneas
+            words = (plan.title or self.options.topic).split()
+            lines = []
+            curr = ""
+            for w in words:
+                cand = (curr + " " + w).strip()
+                if len(cand) <= 24:
+                    curr = cand
+                else:
+                    if curr: lines.append(curr)
+                    curr = w
+            if curr: lines.append(curr)
+
+            y_txt = 130
+            for idx_l, line_str in enumerate(lines[:3]):
+                col = (255, 255, 255) if idx_l == 0 else ((56, 189, 248) if idx_l == 1 else (251, 191, 36))
+                tb_draw.text((50, y_txt), line_str.upper(), font=f_title, fill=col)
+                y_txt += 62
+
+            # Badge de dato clave si existe
+            best_stat = next((sc.card.stat for sc in plan.scenes if sc.card and sc.card.stat), None)
+            if best_stat:
+                tb_draw.rounded_rectangle((50, 560, 380, 640), radius=14, fill=(15, 23, 42, 230), outline=(56, 189, 248), width=2)
+                tb_draw.text((70, 574), f"★ {best_stat}", font=f_title, fill=(56, 189, 248))
+
+            tb_im.save(thumb_output, "JPEG", quality=95)
+
+            # 5b. Generar Short 9:16 vertical re-encuadrado a partir de la escena 2 o 3 (12-25s)
+            candidate_scene = None
+            for sc in plan.scenes:
+                sc_f = self.workdir / f"scene_{sc.scene_id}" / f"scene_{sc.scene_id}.mp4"
+                if sc_f.exists() and sc.type in ("card_focus", "video_reaction"):
+                    candidate_scene = sc_f
+                    break
+            if not candidate_scene and plan.scenes:
+                candidate_scene = self.workdir / "scene_1" / "scene_1.mp4"
+
+            if candidate_scene and candidate_scene.exists():
+                import subprocess
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", str(candidate_scene),
+                    "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
+                    "-c:a", "aac", "-b:a", "192k", str(short_output)
+                ], capture_output=True, timeout=30)
+        except Exception as exc:
+            safe_log(f"[StreamerPipeline] Generación de thumbnail/short opcional: {exc}")
+
+        # 6. Broadcast RTMP opcional si el usuario proporcionó URL / clave
         if self.options.rtmp_url and str(self.options.rtmp_url).strip() not in ("None", "null", ""):
             rtmp_dest = str(self.options.rtmp_url).strip()
             self._state("render", 95.0, f"Emitiendo en vivo por RTMP a {rtmp_dest[:22]}...")
@@ -260,6 +392,8 @@ class StreamerPipeline:
             "brolls_count": len(plan.scenes),
             "silences_cut_count": 0,
             "time_saved_sec": 0.0,
+            "thumbnail_url": f"/media/{thumb_output.name}" if thumb_output.exists() else None,
+            "short_video_url": f"/media/{short_output.name}" if short_output.exists() else None,
         }
         self.project_store.set_status("done", result=result_payload, preview_file=str(output_file))
         self._state("done", 100.0, "¡Transmisión de KAI masterizada exitosamente!", result=result_payload)

@@ -34,7 +34,7 @@ def _get_font(names: list[str], size: int) -> ImageFont.FreeTypeFont:
 class AvatarRenderer:
     """Genera animaciones fluidas y orgánicas del avatar sincronizadas con la voz."""
 
-    def __init__(self, avatar_dir: Optional[Path] = None, badge_size: int = 340):
+    def __init__(self, avatar_dir: Optional[Path] = None, badge_size: int = 500):
         self.avatar_dir = avatar_dir or DEFAULT_AVATAR_DIR
         self.size = badge_size
 
@@ -92,13 +92,13 @@ class AvatarRenderer:
             if not rms_list:
                 return []
             max_rms = max(rms_list) + 1e-5
-            # Normalizar entre 0.0 y 1.0 con umbral de sensibilidad
-            norm = [min(1.0, r / (max_rms * 0.72)) for r in rms_list]
-            # Suavizado temporal de 2 fotogramas para transiciones fluidas de habla
+            # Normalizar con umbral dinámico para captar consonantes y vocales con precisión
+            norm = [min(1.0, (r / (max_rms * 0.55)) ** 1.1) for r in rms_list]
+            # Suavizado responsivo inmediato para que la boca se mueva exactamente en el fonema
             smoothed: List[float] = []
             for idx, val in enumerate(norm):
                 prev_val = smoothed[-1] if smoothed else val
-                smoothed.append(0.65 * val + 0.35 * prev_val)
+                smoothed.append(0.80 * val + 0.20 * prev_val)
             if len(smoothed) < total_frames:
                 smoothed.extend([0.0] * (total_frames - len(smoothed)))
             return smoothed[:total_frames]
@@ -151,12 +151,12 @@ class AvatarRenderer:
                     energy = envelope[i] if envelope else 0.15
                 elif envelope:
                     energy = envelope[i]
-                    if energy > 0.42:
-                        current_img = img_talk       # Boca abierta para fonemas con volumen
-                    elif energy > 0.12:
-                        current_img = img_half       # Boca semi-abierta (articulación sutil)
+                    if energy > 0.32:
+                        current_img = img_talk       # Fonemas vocálicos abiertos y enfáticos
+                    elif energy > 0.08:
+                        current_img = img_half       # Fonemas semi-abiertos y consonantes
                     else:
-                        current_img = img_idle       # Boca cerrada (pausa / escucha)
+                        current_img = img_idle       # Cierre labial exacto en pausas y silencios
                 else:
                     # Si no hay pista de audio, cadencia suave de habla sin aspavientos
                     cadence = (i // 3) % 4
@@ -186,6 +186,29 @@ class AvatarRenderer:
                 tag_h = 24
                 tx = (size - tag_w) // 2
                 ty = size - 34
+
+                # Visualizador de Ondas de Audio (Waveform Spectrum) reactivo a la voz de KAI
+                bars_count = 14
+                bar_w = 4
+                gap = 3
+                total_wf_w = (bars_count * bar_w) + ((bars_count - 1) * gap)
+                wf_start_x = (size - total_wf_w) // 2
+                wf_y_center = ty - 8
+
+                for b in range(bars_count):
+                    # Frecuencia espectral y dinámica por barra
+                    b_phase = math.sin((i / (fps * 0.4)) + (b * 0.75))
+                    b_factor = 0.35 + 0.65 * abs(b_phase)
+                    bar_h = max(3, int((14 * energy * b_factor) + (2 if energy > 0.05 else 0)))
+                    bx_pos = wf_start_x + b * (bar_w + gap)
+                    b_top = wf_y_center - (bar_h // 2)
+                    b_bot = wf_y_center + (bar_h // 2)
+                    
+                    # Gradiente dinámico de cian a violeta neón
+                    bar_alpha = int(120 + 135 * energy)
+                    b_color = (56, 189, 248, bar_alpha) if b < (bars_count // 2) else (129, 140, 248, bar_alpha)
+                    d.rounded_rectangle((bx_pos, b_top, bx_pos + bar_w, b_bot), radius=2, fill=b_color)
+
                 d.rounded_rectangle(
                     (tx, ty, tx + tag_w, ty + tag_h),
                     radius=12,

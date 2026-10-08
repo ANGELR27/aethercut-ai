@@ -239,7 +239,8 @@ class WebPhotoAssetProvider(AssetProvider):
         "dreamstime", "alamy", "shutterstock", "istockphoto", "istock",
         "gettyimages", "123rf", "adobestock", "depositphotos", "bigstockphoto", "canstockphoto",
         "freepik", "vectorstock", "stockphoto", "watermark", "pond5", "envato",
-        "storyblocks", "motionelements", "pixtastock", "agefotostock"
+        "storyblocks", "motionelements", "pixtastock", "agefotostock",
+        "ftcdn.net", "ftcdn", "stock.adobe", "adobe.com", "canva", "eyeem", "shutter"
     )
 
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
@@ -253,9 +254,9 @@ class WebPhotoAssetProvider(AssetProvider):
             try:
                 from ddgs import DDGS
                 with DDGS() as ddgs:
-                    # Priorizar imágenes Wallpaper o Large fotorrealistas
+                    # Priorizar imágenes Wallpaper o Large fotorrealistas sin marcas de agua
                     res = []
-                    search_term = f"{query} hd photography"
+                    search_term = f"{query} editorial documentary photograph -stock -watermark -shutterstock -adobestock"
                     try:
                         res = list(ddgs.images(search_term, size="Wallpaper", max_results=15))
                     except Exception:
@@ -266,7 +267,7 @@ class WebPhotoAssetProvider(AssetProvider):
                         except Exception:
                             pass
                     if not res:
-                        res = list(ddgs.images(query, size="Large", max_results=15))
+                        res = list(ddgs.images(f"{query} documentary -stock", size="Large", max_results=15))
                     if not res:
                         res = list(ddgs.images(query, max_results=15))
 
@@ -275,7 +276,10 @@ class WebPhotoAssetProvider(AssetProvider):
                     img_url = r.get("image") or ""
                     if not img_url.startswith("http"):
                         continue
-                    if any(bad_dom in img_url.lower() for bad_dom in self.WATERMARK_DOMAINS):
+                    img_lower = img_url.lower()
+                    page_lower = (r.get("url") or "").lower()
+                    title_lower = (r.get("title") or "").lower()
+                    if any(bad in img_lower or bad in page_lower or bad in title_lower for bad in self.WATERMARK_DOMAINS):
                         continue
                     w = int(r.get("width") or 0)
                     h = int(r.get("height") or 0)
@@ -310,8 +314,63 @@ class WebPhotoAssetProvider(AssetProvider):
         return None
 
 
+class YouTubeReactionAssetProvider(AssetProvider):
+    """
+    Proveedor autónomo de video-clips reales de YouTube y redes sociales para B-Rolls dinámicos y video-reacciones.
+    Utiliza búsqueda integrada de YouTube y yt-dlp con Node.js para descargar un fragmento corto (12s) en HD 720p sin claves de API.
+    """
+
+    async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
+        import asyncio
+        import yt_dlp
+
+        # Solo buscar clip de video si el asset requerido es explícitamente video
+        if (cue.asset_type or "").lower() != "video":
+            return None
+
+        query = cue.search_query_en or cue.concept
+        print(f"[YouTubeReactionProvider] Buscando clip de video para '{query}'...")
+
+        def _fetch_slice() -> Optional[Path]:
+            target_path = target_dir / f"{cue.cue_id}_yt.mp4"
+            target_path.unlink(missing_ok=True)
+
+            try:
+                # Extraer un fragmento dinámico de 14 segundos variando el inicio para cada escena (evita inicios estáticos)
+                start_slice = 8 + (abs(hash(query)) % 15)
+                end_slice = start_slice + 14
+                ydl_opts = {
+                    'format': 'bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+                    'outtmpl': str(target_path.with_suffix('')) + '.%(ext)s',
+                    'download_ranges': yt_dlp.utils.download_range_func(None, [(start_slice, end_slice)]),
+                    'force_keyframes_at_cuts': True,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'socket_timeout': 18,
+                }
+                search_query = f"ytsearch1:{query} 4k 1080p documentary video"
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([search_query])
+
+                matches = list(target_dir.glob(f"{cue.cue_id}_yt.*"))
+                if matches and matches[0].exists() and matches[0].stat().st_size > 50000:
+                    chosen = matches[0]
+                    if chosen.suffix.lower() != ".mp4":
+                        final_mp4 = target_path.with_suffix(".mp4")
+                        chosen.replace(final_mp4)
+                        chosen = final_mp4
+
+                    print(f"[YouTubeReactionProvider] Clip H.264 limpio obtenido: {chosen.name} ({chosen.stat().st_size // 1024} KB)")
+                    return chosen
+            except Exception as e:
+                print(f"[YouTubeReactionProvider] Falló descarga de clip para '{query}': {e}")
+            return None
+
+        return await asyncio.to_thread(_fetch_slice)
+
+
 class AssetProviderFactory:
-    """Fábrica que prioriza fotos reales web de alta resolución sin marcas de agua ni deformaciones."""
+    """Fábrica que prioriza fotos reales web de alta resolución sin marcas de agua ni deformaciones y clips de video para video-reacciones."""
 
     @staticmethod
     def get_providers():
@@ -320,6 +379,8 @@ class AssetProviderFactory:
             providers.append(PexelsAssetProvider())
         if settings.PIXABAY_API_KEY:
             providers.append(PixabayAssetProvider())
+        # Proveedor de video-clips para reacciones y B-Rolls dinámicos
+        providers.append(YouTubeReactionAssetProvider())
         # Priorizar fotos reales web de alta definición
         providers.append(WebPhotoAssetProvider())
         providers.append(OpenStockAssetProvider())

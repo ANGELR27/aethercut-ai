@@ -18,11 +18,11 @@ import edge_tts
 
 from core.models import InfoCard
 
-DEFAULT_VOICE = "es-MX-JorgeNeural"  # Voz hiper-natural, conversacional y expresiva para streamers
+DEFAULT_VOICE = "es-ES-AlvaroNeural"   # Voz preferida: Álvaro divulgación tecnológica y natural
+VOICE_MEXICO = "es-MX-JorgeNeural"     # Voz conversacional mexicana
 VOICE_LATINO = "es-US-AlonsoNeural"    # Voz neutra estilo locutor internacional
 VOICE_COLOMBIA = "es-CO-GonzaloNeural" # Voz neutra colombiana
 VOICE_FEMALE = "es-MX-DaliaNeural"     # Voz femenina cálida y amigable
-VOICE_SPAIN = "es-ES-AlvaroNeural"      # Voz estilo divulgación tecnológica España
 
 
 class AvatarNarrator:
@@ -159,8 +159,11 @@ REGLAS ESTRICTAS:
         chosen_voice = voice or self.voice
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
+        from utils.speech_normalizer import normalize_speech_for_tts
+        norm_text = normalize_speech_for_tts(text)
+
         # Dividir textos extensos en bloques naturales para evitar degradación a voz robótica/monótona
-        raw_paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+        raw_paragraphs = [p.strip() for p in norm_text.split("\n") if p.strip()]
         paragraphs = []
         for p in raw_paragraphs:
             words = p.split()
@@ -178,7 +181,7 @@ REGLAS ESTRICTAS:
                 paragraphs.append(p)
 
         if len(paragraphs) <= 1:
-            communicate = edge_tts.Communicate(text, chosen_voice, rate="+1%")
+            communicate = edge_tts.Communicate(text, chosen_voice, rate="+0%")
             await communicate.save(str(out_path))
         else:
             chunks_dir = out_path.parent / f"chunks_{out_path.stem}"
@@ -186,8 +189,8 @@ REGLAS ESTRICTAS:
             chunk_files = []
             for idx, p in enumerate(paragraphs):
                 cp = chunks_dir / f"p_{idx:03d}.mp3"
-                rate_mod = "+4%" if idx == 0 else ("+0%" if idx % 2 == 0 else "+2%")
-                pitch_mod = "+2Hz" if idx % 3 == 0 else ("-2Hz" if idx % 2 == 0 else "+0Hz")
+                rate_mod = "+1%" if idx == 0 else ("-1%" if idx % 2 == 0 else "+0%")
+                pitch_mod = "+1Hz" if idx % 3 == 0 else ("-1Hz" if idx % 2 == 0 else "+0Hz")
                 comm = edge_tts.Communicate(p, chosen_voice, rate=rate_mod, pitch=pitch_mod)
                 await comm.save(str(cp))
                 chunk_files.append(cp)
@@ -204,6 +207,20 @@ REGLAS ESTRICTAS:
                 stderr=asyncio.subprocess.PIPE
             )
             await proc.communicate()
+
+        # Normalizar y recortar silencios muertos innecesarios del audio final
+        trimmed_out = out_path.parent / f"{out_path.stem}_trimmed.mp3"
+        try:
+            trim_cmd = [
+                "ffmpeg", "-y", "-i", str(out_path),
+                "-af", "silenceremove=stop_periods=-1:stop_duration=0.22:stop_threshold=-32dB:start_periods=1:start_duration=0.01:start_threshold=-32dB",
+                str(trimmed_out),
+            ]
+            res = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=15)
+            if res.returncode == 0 and trimmed_out.exists() and trimmed_out.stat().st_size > 1000:
+                trimmed_out.replace(out_path)
+        except Exception:
+            pass
 
         duration = self.get_audio_duration(out_path)
         return out_path, duration

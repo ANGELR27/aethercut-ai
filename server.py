@@ -56,6 +56,7 @@ class NoCacheStaticFiles(StaticFiles):
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/media", StaticFiles(directory=str(settings.OUTPUTS_DIR)), name="media")
 app.mount("/storage", StaticFiles(directory=str(settings.STORAGE_DIR)), name="storage")
+app.mount("/assets", StaticFiles(directory=str(Path(__file__).resolve().parent / "assets")), name="assets")
 
 tasks_progress: Dict[str, Dict[str, Any]] = {}
 task_cancel_events: Dict[str, threading.Event] = {}
@@ -148,6 +149,8 @@ def update_task_state(task_id: str, step: str, progress: float, message: str, **
                         "result": state.get("result"),
                         "file_name": state.get("file_name"),
                         "cancel_supported": state.get("cancel_supported", True),
+                        "live_scenes": state.get("live_scenes"),
+                        "events": state.get("events"),
                     }
                     p_store.write(doc)
             except Exception:
@@ -440,7 +443,7 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
 
 @app.post("/api/projects/{task_id}/resume")
 async def resume_project(task_id: str):
-    """Reanuda una carga conservada sin volver a transferir el archivo desde el navegador."""
+    """Reanuda un proyecto interrumpido (Streamer o Co-Piloto) sin perder escenas ya grabadas."""
     if task_id in task_jobs:
         raise HTTPException(status_code=409, detail="Este proyecto ya está procesándose.")
     store = ProjectStore(task_id)
@@ -448,16 +451,42 @@ async def resume_project(task_id: str):
         document = store.read()
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+
+    raw_options = document.get("options") or {}
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Si es una transmisión de KAI Streamer
+    if raw_options.get("mode") == "streamer" or (document.get("original_name") or "").startswith("KAI Stream"):
+        topic = raw_options.get("topic") or (document.get("result") or {}).get("topic") or document.get("original_name", "").replace("KAI Stream: ", "")
+        options = StreamerOptions(
+            topic=topic,
+            style=raw_options.get("style", "divulgacion"),
+            duration_sec=int(raw_options.get("duration_sec", 45)),
+            aspect_ratio=raw_options.get("aspect_ratio", "16:9"),
+            card_theme=raw_options.get("card_theme", "dark"),
+            voice=raw_options.get("voice", DEFAULT_VOICE),
+            rtmp_url=raw_options.get("rtmp_url"),
+        )
+        tasks_progress[task_id] = {
+            "step": "render", "progress": 50.0, "message": f"Reanudando transmisión de «{topic}»...",
+            "completed": False, "error": None, "result": None, "cancel_supported": True,
+            "file_name": document.get("original_name", f"KAI Stream {task_id}"),
+            "created_at": document.get("created_at", now), "updated_at": now, "step_started_at": now,
+            "events": [{"step": "render", "progress": 50.0, "message": "Reanudando transmisión desde escenas guardadas...", "at": now}],
+        }
+        task_cancel_events[task_id] = threading.Event()
+        task_jobs[task_id] = asyncio.create_task(run_streamer_task(task_id, options))
+        return {"task_id": task_id, "message": f"Transmisión «{topic}» reanudada con éxito."}
+
+    # Si es video co-piloto
     source = Path(document.get("source_file") or "")
     if not source.exists():
         raise HTTPException(status_code=410, detail="No se encontró el video original para reanudar este proyecto.")
-    raw_options = document.get("options") or {}
     options = PipelineOptions(
         silence_threshold=max(0.8, min(3.0, float(raw_options.get("silence_threshold", 1.5)))),
         broll=bool(raw_options.get("broll", True)), cards=bool(raw_options.get("cards", True)),
         captions=bool(raw_options.get("captions", False)), shorts=bool(raw_options.get("shorts", True)),
     )
-    now = datetime.now(timezone.utc).isoformat()
     tasks_progress[task_id] = {
         "step": "queued", "progress": 5.0, "message": "Reanudando la carga conservada.",
         "completed": False, "error": None, "result": None, "cancel_supported": True,
@@ -498,15 +527,43 @@ async def list_projects():
     for manifest in settings.PROJECTS_DIR.glob("*/project.json"):
         try:
             document = json.loads(manifest.read_text(encoding="utf-8"))
+            pid = document.get("id")
+            result = document.get("result") or {}
+            
+            # Detectar thumbnail si existe
+            thumbnail_url = None
+            thumb_path = settings.OUTPUTS_DIR / f"{pid}_thumbnail.jpg"
+            if thumb_path.exists():
+                thumbnail_url = f"/media/{pid}_thumbnail.jpg"
+            else:
+                # Comprobar b-roll o escena de trabajo si existe en storage/projects
+                work_thumb = settings.PROJECTS_DIR / pid / "work" / "streamer_card_0.png"
+                if work_thumb.exists():
+                    thumbnail_url = f"/storage/projects/{pid}/work/streamer_card_0.png"
+                else:
+                    broll = next((settings.PROJECTS_DIR / pid / "work" / "assets").glob("*.jpg"), None) if (settings.PROJECTS_DIR / pid / "work" / "assets").exists() else None
+                    if broll:
+                        thumbnail_url = f"/storage/projects/{pid}/work/assets/{broll.name}"
+
+            duration = result.get("duration") or 0.0
+            topic = result.get("topic") or (document.get("options") or {}).get("topic") or ""
+
             projects.append({
-                "id": document.get("id"), "name": document.get("original_name", "Video sin nombre"),
-                "status": document.get("status", "unknown"), "updated_at": document.get("updated_at"),
-                "has_plan": bool(document.get("plan")), "has_result": bool(document.get("result")),
+                "id": pid,
+                "name": document.get("original_name") or result.get("title") or "Video sin nombre",
+                "status": document.get("status", "unknown"),
+                "updated_at": document.get("updated_at"),
+                "has_plan": bool(document.get("plan")),
+                "has_result": bool(document.get("result")),
+                "duration": duration,
+                "topic": topic,
+                "thumbnail_url": thumbnail_url,
+                "master_video_url": result.get("master_video_url") or result.get("media_url")
             })
         except (OSError, json.JSONDecodeError):
             continue
     projects.sort(key=lambda project: project.get("updated_at") or "", reverse=True)
-    return {"projects": projects[:20]}
+    return {"projects": projects[:50]}
 
 
 @app.delete("/api/projects/{task_id}")
@@ -758,6 +815,55 @@ async def get_project_materials(task_id: str):
     return materials
 
 
+@app.post("/api/projects/{task_id}/webhook")
+async def dispatch_project_webhook(task_id: str, payload: Dict[str, Any] = Body(...)):
+    """Despacha la información completa de la transmisión a un Webhook (Make, Zapier, Discord, Notion)."""
+    import urllib.request
+    webhook_url = str(payload.get("webhook_url", "")).strip()
+    if not webhook_url or not webhook_url.startswith("http"):
+        raise HTTPException(status_code=400, detail="URL de webhook inválida. Debe comenzar con http o https.")
+
+    store = ProjectStore(task_id)
+    try:
+        document = store.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+
+    res = document.get("result") or {}
+    title = res.get("title") or document.get("original_name") or f"KAI Broadcast {task_id}"
+    topic = res.get("topic") or document.get("options", {}).get("topic", "")
+    
+    thumb_path = settings.OUTPUTS_DIR / f"{task_id}_thumbnail.jpg"
+    short_path = settings.OUTPUTS_DIR / f"{task_id}_short.mp4"
+    master_path = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+
+    export_data = {
+        "event": "broadcast_completed",
+        "task_id": task_id,
+        "title": title,
+        "topic": topic,
+        "duration_sec": res.get("duration", 0),
+        "scenes_count": res.get("scenes_count", len(res.get("scenes", []))),
+        "master_video_url": f"/media/{master_path.name}" if master_path.exists() else res.get("master_video_url"),
+        "thumbnail_url": f"/media/{thumb_path.name}" if thumb_path.exists() else None,
+        "short_video_url": f"/media/{short_path.name}" if short_path.exists() else None,
+        "scenes": res.get("scenes", []),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        req = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(export_data).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "AetherCut-Studio/2.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            status_code = resp.getcode()
+            return {"status": "ok", "http_status": status_code, "message": "Datos enviados exitosamente al Webhook."}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Error despachando webhook: {exc}")
+
+
 @app.put("/api/projects/{task_id}/timeline")
 async def update_project_timeline(task_id: str, payload: Dict[str, Any] = Body(...)):
     """Guarda ajustes editoriales sin perder la investigación ni los assets."""
@@ -928,40 +1034,125 @@ async def get_task_progress(task_id: str):
 
 @app.get("/api/trending-topics")
 async def get_trending_topics():
-    """Devuelve temas y noticias en tendencia reales extraídos de la web o fuentes dinámicas."""
+    """Devuelve temas y noticias en tendencia reales extraídos de la web (ciencia, polémicas, descubrimientos, virales)."""
+    import random
+    
+    # Categorías variadas y potentes para mantener contenido fresco en cada consulta
+    CATEGORIES = [
+        ("descubrimientos", ["descubrimiento cientifico reciente", "arqueologia hallazgo historia", "espacio astronomia universo"]),
+        ("polemicas", ["polemica debate viral redes", "polemica tecnologia inteligencia artificial", "noticias controversia actual"]),
+        ("noticias", ["noticias del mundo actualidad", "ultimas noticias internacionales", "ciencia tecnologia futuro"]),
+        ("virales", ["tendencias virales hoy", "video viral impacto redes", "curiosidades del mundo ciencia"]),
+    ]
+    
     try:
         from ddgs import DDGS
-        topics = []
-        def _fetch_news():
+        topics: List[Dict[str, str]] = []
+        seen_titles = set()
+        
+        # Seleccionar consultas aleatorias de diferentes categorías en cada refresco
+        selected_queries = []
+        for cat_name, queries in CATEGORIES:
+            selected_queries.append((cat_name, random.choice(queries)))
+        random.shuffle(selected_queries)
+
+        def _fetch_multi_news():
+            results = []
             with DDGS() as ddgs:
-                return list(ddgs.news("tecnologia ciencia descubrimientos", max_results=10))
-        news = await asyncio.to_thread(_fetch_news)
-        for n in news:
+                for cat, q in selected_queries:
+                    try:
+                        for item in ddgs.news(q, max_results=3):
+                            results.append((cat, item))
+                    except Exception:
+                        continue
+            return results
+
+        news_items = await asyncio.to_thread(_fetch_multi_news)
+        
+        cat_emojis = {
+            "descubrimientos": "🔬",
+            "polemicas": "🔥",
+            "noticias": "🌍",
+            "virales": "⚡",
+        }
+
+        for cat, n in news_items:
             t = (n.get("title") or "").strip()
             if t and len(t) > 12:
-                # Limpiar sufijos de fuentes y caracteres corruptos
-                clean = re.sub(r"\s*-\s*[A-Za-z0-9\.\s]+$", "", t).strip()
-                clean = clean.replace("", "").strip()
-                if clean and len(clean) > 10 and clean not in topics:
-                    topics.append(clean)
-            if len(topics) >= 7:
+                # Limpiar sufijos de fuentes (ej: "- El País", "| BBC News")
+                clean = re.sub(r"\s*[-|–]\s*[A-Za-z0-9\.\sáéíóúÁÉÍÓÚ]+$", "", t).strip()
+                clean = re.sub(r"^[A-Za-z0-9\.\s]+:\s*", "", clean).strip()
+                if clean and len(clean) > 10 and clean.lower() not in seen_titles:
+                    seen_titles.add(clean.lower())
+                    topics.append({
+                        "title": clean,
+                        "category": cat,
+                        "emoji": cat_emojis.get(cat, "✨")
+                    })
+            if len(topics) >= 8:
                 break
+
         if topics:
             return {"topics": topics}
     except Exception as exc:
         safe_log(f"[Trending] Fallback en noticias: {exc}")
 
-    # Fallback dinámico si no hay conexión a internet externa temporalmente
+    # Fallback diverso y categorizado por si no hay conexión de red externa
+    FALLBACK_TOPICS = [
+        {"title": "Misión Europa Clipper y Océanos en el Sistema Solar", "category": "descubrimientos", "emoji": "🚀"},
+        {"title": "Debate Ético y Regulación Global sobre la IA Autónoma", "category": "polemicas", "emoji": "🔥"},
+        {"title": "Nuevo Hallazgo Arqueológico Desafía la Historia de la Humanidad", "category": "descubrimientos", "emoji": "🏺"},
+        {"title": "Baterías Cuánticas y la Revolución de la Energía Limpia", "category": "noticias", "emoji": "⚡"},
+        {"title": "El Misterio de las Señales Cósmicas Rápidas Detectadas en el Espacio", "category": "descubrimientos", "emoji": "🔭"},
+        {"title": "Polémica Viral: La Transformación del Mercado Laboral con Robótica", "category": "polemicas", "emoji": "🤖"},
+        {"title": "Terapias Genéticas CRISPR Curan Enfermedades Hereditarias", "category": "noticias", "emoji": "🧬"},
+        {"title": "Diez Curiosidades Ocultas de la Naturaleza que Desafían la Ciencia", "category": "virales", "emoji": "🌍"},
+    ]
+    random.shuffle(FALLBACK_TOPICS)
+    return {"topics": FALLBACK_TOPICS}
+
+
+@app.post("/api/cleanup")
+async def cleanup_storage_endpoint():
+    """Limpia de forma segura los archivos temporales intermedios de render (.mov pesados, etc.) sin borrar videos master."""
+    import os
+    freed_bytes = 0
+    deleted_files = 0
+    try:
+        # 1. Limpiar .mov intermedios pesados en carpetas work de proyectos
+        for p in settings.PROJECTS_DIR.glob("*"):
+            w = p / "work"
+            if w.exists():
+                for root, dirs, files in os.walk(w):
+                    for f in files:
+                        if f.endswith(".mov") or (f.endswith(".png") and f.startswith("f_")):
+                            fp = os.path.join(root, f)
+                            try:
+                                sz = os.path.getsize(fp)
+                                os.remove(fp)
+                                freed_bytes += sz
+                                deleted_files += 1
+                            except Exception:
+                                pass
+        # 2. Limpiar archivos temporales en raíz del proyecto
+        for f in Path(".").glob("temp_*.mp4"):
+            try:
+                sz = f.stat().st_size
+                f.unlink()
+                freed_bytes += sz
+                deleted_files += 1
+            except Exception:
+                pass
+    except Exception as exc:
+        safe_log(f"[Cleanup] Error parcial: {exc}")
+
+    freed_mb = round(freed_bytes / (1024 * 1024), 2)
+    freed_gb = round(freed_bytes / (1024 * 1024 * 1024), 2)
     return {
-        "topics": [
-            "Avances en Computación Cuántica y Chips Fotónicos",
-            "Misión Europa Clipper y Océanos en el Sistema Solar",
-            "Modelos de IA de Razonamiento Profundo en 2026",
-            "Fusión Nuclear: Récords de Confinamiento Magnético",
-            "Exploración Espacial del Telescopio James Webb",
-            "Baterías de Estado Sólido para Vehículos Eléctricos",
-            "Medicina Genómica y Terapias CRISPR Personalizadas"
-        ]
+        "status": "ok",
+        "freed_mb": freed_mb,
+        "freed_gb": freed_gb,
+        "deleted_files": deleted_files,
     }
 
 

@@ -150,11 +150,11 @@ class InfoCardRenderer:
         """
         scale = 2  # Super-sampling para máxima nitidez
 
-        # Fuentes calibradas
-        f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], 11 * scale)
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], 19 * scale)
-        f_body = _font(["segoeui.ttf", "arial.ttf"], 14 * scale)
-        f_src = _font(["segoeuib.ttf", "segoeui.ttf"], 11 * scale)
+        # Fuentes calibradas de mayor escala y nitidez para Full HD
+        f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], 12 * scale)
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], 22 * scale)
+        f_body = _font(["segoeui.ttf", "arial.ttf"], 16 * scale)
+        f_src = _font(["segoeuib.ttf", "segoeui.ttf"], 12 * scale)
 
         # Paleta según tema
         if self.theme == "dark":
@@ -184,17 +184,17 @@ class InfoCardRenderer:
         has_photo = bool(image_path and Path(image_path).exists())
 
         # Dimensiones de alto impacto visual y legibilidad óptima en Full HD
-        card_w = 620 if not has_photo else 720
+        card_w = 680 if not has_photo else 760
         if self.portrait:
             card_w = min(card_w, int(self.frame_w * 0.90))
 
-        pad_x = 22
-        pad_y = 20
+        pad_x = 24
+        pad_y = 22
         radius = 18
 
         # Layout horizontal si hay foto (Bento split)
-        photo_w = 150 if has_photo else 0
-        photo_gap = 18 if has_photo else 0
+        photo_w = 160 if has_photo else 0
+        photo_gap = 20 if has_photo else 0
 
         text_avail_w = card_w - (pad_x * 2) - photo_w - photo_gap
 
@@ -202,9 +202,9 @@ class InfoCardRenderer:
         title_lines = self._wrap(probe, headline, f_title, text_avail_w * scale, max_lines=2)
         body_lines = self._wrap(probe, body, f_body, text_avail_w * scale, max_lines=4)
 
-        title_lh = int(24 * scale)
-        body_lh = int(19 * scale)
-        badge_h = int(22 * scale)
+        title_lh = int(28 * scale)
+        body_lh = int(22 * scale)
+        badge_h = int(24 * scale)
 
         content_h_px = (
             badge_h
@@ -342,7 +342,235 @@ class InfoCardRenderer:
         )
         out_img = Image.alpha_composite(out_img, border_img)
 
-        target_out = out_path or Path("card_output.png")
+    def _render_stat_hero_card(
+        self,
+        headline: str,
+        stat_value: str,
+        body: str,
+        badge_text: str = "DATO CLAVE",
+        badge_tone: str = "amber",
+        image_path: Optional[str] = None,
+        source_domain: str = "Registro oficial",
+        out_path: Optional[Path] = None,
+    ) -> Path:
+        """
+        Renderiza una tarjeta Bento HUD de alto impacto visual para datos y estadísticas,
+        con Cifra Gigante (Hero Stat), gráfico infográfico renderizado con Matplotlib,
+        diseño Obsidian Glassmorphism y tipografía de estudio broadcast.
+        """
+        import re
+        scale = 2  # Super-sampling para máxima nitidez
+
+        # Fuentes calibradas de gran escala para legibilidad en Full HD
+        f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], 12 * scale)
+        f_stat = _font(["segoeuib.ttf", "arialbd.ttf"], 34 * scale)   # Cifra masiva de alto impacto
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], 20 * scale)  # Titular nítido
+        f_body = _font(["segoeui.ttf", "arial.ttf"], 14 * scale)      # Síntesis
+        f_src = _font(["segoeuib.ttf", "segoeui.ttf"], 11 * scale)    # Pie
+
+        # Colores Obsidian Glass / Neon
+        bg_card_top = (16, 16, 18, 252)
+        bg_card_bot = (8, 8, 10, 254)
+        border_top = (255, 255, 255, 75)
+        stat_color = (251, 191, 36, 255) if badge_tone == "amber" else (52, 211, 153, 255)
+        title_color = (255, 255, 255, 255)
+        body_color = (226, 232, 240, 255)
+        src_color = (148, 163, 184, 230)
+        shadow_color = (0, 0, 0, 190)
+
+        bcfg = BADGE_THEMES.get(badge_tone, BADGE_THEMES["white"])[self.theme]
+        badge_bg = bcfg["bg"]
+        badge_border = bcfg["border"]
+        badge_txt_col = bcfg["text"]
+        pip_col = bcfg["pip"]
+
+        # 1. Renderizar gráfico infográfico profesional con Matplotlib
+        chart_w_logical = 195
+        chart_h_logical = 160
+        chart_img: Optional[Image.Image] = None
+        try:
+            from core.chart_generator import BroadcastChartGenerator
+            chart_img = BroadcastChartGenerator.render_chart_image(
+                stat_value=stat_value,
+                headline=headline,
+                width_px=chart_w_logical * scale,
+                height_px=chart_h_logical * scale,
+                dpi=150
+            )
+        except Exception as exc:
+            print(f"[CardRenderer] Info: Matplotlib chart no disponible para esta métrica: {exc}")
+
+        has_chart = chart_img is not None
+        has_photo = bool(image_path and Path(image_path).exists()) and not has_chart
+
+        # Proporción Bento áurea calibrada para video (~2.1:1 en Full HD 1920x1080)
+        card_w = 690
+        if self.portrait:
+            card_w = min(card_w, int(self.frame_w * 0.92))
+
+        pad_x = 28
+        pad_y = 26
+        radius = 22
+
+        visual_w = chart_w_logical if has_chart else (150 if has_photo else 0)
+        visual_gap = 24 if (has_chart or has_photo) else 0
+
+        text_avail_w = card_w - (pad_x * 2) - visual_w - visual_gap
+
+        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+        # Resumen limpio: extraer solo la parte informativa sin redundancias
+        clean_body = body
+        if clean_body.startswith(f"Cifra confirmada: {stat_value}."):
+            clean_body = clean_body.replace(f"Cifra confirmada: {stat_value}.", "").strip()
+        elif clean_body.startswith("Cifra confirmada:"):
+            clean_body = re.sub(r"^Cifra confirmada:.*?\.\s*", "", clean_body).strip()
+
+        title_lines = self._wrap(probe, headline, f_title, text_avail_w * scale, max_lines=2)
+        body_lines = self._wrap(probe, clean_body or body, f_body, text_avail_w * scale, max_lines=3)
+
+        badge_h = int(24 * scale)
+        stat_h = int(40 * scale)
+        title_lh = int(25 * scale)
+        body_lh = int(19 * scale)
+        src_lh = int(15 * scale)
+
+        # Altura calculada para textos con espaciado respirable
+        text_content_h_px = (
+            badge_h
+            + int(12 * scale)
+            + stat_h
+            + int(8 * scale)
+            + (len(title_lines) * title_lh)
+            + (int(6 * scale) if body_lines else 0)
+            + (len(body_lines) * body_lh)
+            + int(12 * scale)
+            + src_lh
+        )
+        text_content_h = text_content_h_px // scale
+
+        if has_chart or has_photo:
+            visual_h = chart_h_logical if has_chart else 150
+            card_h = max(text_content_h + (pad_y * 2), visual_h + (pad_y * 2) + 16)
+        else:
+            card_h = text_content_h + (pad_y * 2)
+
+        W = card_w * scale
+        H = card_h * scale
+        R = radius * scale
+
+        # Fondo con gradiente Obsidian Glass
+        card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        c_draw = ImageDraw.Draw(card)
+        for y in range(H):
+            t = y / max(1, H - 1)
+            r = int(bg_card_top[0] * (1 - t) + bg_card_bot[0] * t)
+            g = int(bg_card_top[1] * (1 - t) + bg_card_bot[1] * t)
+            b = int(bg_card_top[2] * (1 - t) + bg_card_bot[2] * t)
+            a = int(bg_card_top[3] * (1 - t) + bg_card_bot[3] * t)
+            c_draw.line([(0, y), (W, y)], fill=(r, g, b, a))
+
+        # Máscara redondeada
+        round_mask = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(round_mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=R, fill=255)
+        card_masked = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        card_masked.paste(card, (0, 0), round_mask)
+        d = ImageDraw.Draw(card_masked)
+
+        # Insertar gráfico o foto a la izquierda si aplica
+        text_start_x = (pad_x + visual_w + visual_gap) * scale if (has_chart or has_photo) else pad_x * scale
+        if has_chart and chart_img is not None:
+            cw = visual_w * scale
+            ch = chart_h_logical * scale
+            cx_pos = pad_x * scale
+            cy_pos = int((H - ch) / 2)
+            resized_chart = chart_img.resize((cw, ch), Image.LANCZOS)
+            card_masked.paste(resized_chart, (cx_pos, cy_pos), resized_chart)
+        elif has_photo and image_path:
+            pw = visual_w * scale
+            ph = (card_h - (pad_y * 2)) * scale
+            px_pos = pad_x * scale
+            py_pos = pad_y * scale
+            pr = 14 * scale
+            try:
+                raw = Image.open(image_path).convert("RGB")
+                ratio = max(pw / raw.width, ph / raw.height)
+                resized = raw.resize((int(raw.width * ratio) + 1, int(raw.height * ratio) + 1), Image.LANCZOS)
+                left = (resized.width - pw) // 2
+                top = (resized.height - ph) // 2
+                cropped = resized.crop((left, top, left + pw, top + ph)).convert("RGBA")
+                pmask = Image.new("L", (pw, ph), 0)
+                ImageDraw.Draw(pmask).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=pr, fill=255)
+                card_masked.paste(cropped, (px_pos, py_pos), pmask)
+                d.rounded_rectangle((px_pos, py_pos, px_pos + pw - 1, py_pos + ph - 1), radius=pr, outline=(255, 255, 255, 50), width=1 * scale)
+            except Exception as exc:
+                print(f"[CardRenderer] Error insertando foto en stat card: {exc}")
+
+        # Textos
+        cur_y = pad_y * scale
+
+        # Micro-badge
+        b_text = badge_text.upper()
+        tw = d.textlength(b_text, font=f_badge)
+        b_w = int(tw + (26 * scale))
+        b_rect = (text_start_x, cur_y, text_start_x + b_w, cur_y + badge_h)
+        d.rounded_rectangle(b_rect, radius=badge_h // 2, fill=badge_bg, outline=badge_border, width=1 * scale)
+        dot_r = 3 * scale
+        dot_cx = text_start_x + (9 * scale)
+        dot_cy = cur_y + (badge_h // 2)
+        d.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=pip_col)
+        d.text((text_start_x + (18 * scale), dot_cy), b_text, font=f_badge, fill=badge_txt_col, anchor="lm")
+        cur_y += badge_h + int(10 * scale)
+
+        # Cifra Gigante (Hero Stat)
+        d.text((text_start_x, cur_y), stat_value, font=f_stat, fill=stat_color)
+        cur_y += stat_h + int(4 * scale)
+
+        # Titular Bold
+        for line in title_lines:
+            d.text((text_start_x, cur_y), line, font=f_title, fill=title_color)
+            cur_y += title_lh
+        cur_y += int(6 * scale)
+
+        # Explicación / Resumen
+        for line in body_lines:
+            d.text((text_start_x, cur_y), line, font=f_body, fill=body_color)
+            cur_y += body_lh
+        cur_y += int(8 * scale)
+
+        # Fuente
+        src_text = f"Fuente: {source_domain}  |  Datos Verificados"
+        d.text((text_start_x, cur_y), src_text, font=f_src, fill=src_color)
+
+        # Downscale final con Lanczos
+        card_final = card_masked.resize((card_w, card_h), Image.LANCZOS)
+
+        # Sombra ambiental difusa
+        margin = 26
+        shadow = Image.new("RGBA", (card_w + 2 * margin, card_h + 2 * margin), (0, 0, 0, 0))
+        s_draw = ImageDraw.Draw(shadow)
+        s_draw.rounded_rectangle(
+            (margin, margin + 8, margin + card_w, margin + card_h + 8),
+            radius=radius,
+            fill=shadow_color,
+        )
+        shadow = shadow.filter(ImageFilter.GaussianBlur(14))
+
+        out_img = Image.new("RGBA", (card_w + 2 * margin, card_h + 2 * margin), (0, 0, 0, 0))
+        out_img.paste(shadow, (0, 0), shadow)
+        out_img.paste(card_final, (margin, margin), card_final)
+
+        # Borde de cristal con luz superior
+        border_img = Image.new("RGBA", (card_w + 2 * margin, card_h + 2 * margin), (0, 0, 0, 0))
+        b_draw = ImageDraw.Draw(border_img)
+        b_draw.rounded_rectangle(
+            (margin, margin, margin + card_w - 1, margin + card_h - 1),
+            radius=radius,
+            outline=border_top,
+            width=1,
+        )
+        out_img = Image.alpha_composite(out_img, border_img)
+
+        target_out = out_path or Path("stat_card_output.png")
         target_out.parent.mkdir(parents=True, exist_ok=True)
         out_img.save(target_out, "PNG")
         return target_out
@@ -383,14 +611,17 @@ class InfoCardRenderer:
                 out_path=out_path,
             ))
 
-        # 3. Estadística / Cifra
-        if card.stat_value:
+        # 3. Estadística / Cifra / Gráfico de alto impacto
+        if card.stat_value or card.kind in ("cifra", "estadistica", "comparativa"):
             headline = card.headline
-            body = f"Cifra confirmada: {card.stat_value}. {card.body or card.claim}"
-            return str(self._render_pinterest_glass_card(
+            stat_val = card.stat_value or "DATO CLAVE"
+            body = card.body or card.claim
+            b_label = f"DATO CLAVE: {stat_val[:18]}" if len(stat_val) <= 18 else "ESTADÍSTICA OFICIAL"
+            return str(self._render_stat_hero_card(
                 headline=headline,
+                stat_value=stat_val,
                 body=body,
-                badge_text=f"DATO CLAVE: {card.stat_value[:18]}",
+                badge_text=b_label,
                 badge_tone="amber",
                 image_path=card.image_path,
                 source_domain=domain,

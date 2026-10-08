@@ -322,13 +322,75 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentProjectFilter = "all";
     let currentProjectSearch = "";
 
+    function closeVideoModal() {
+        const modal = $("videoPlayerModal");
+        const video = $("modalVideoElement");
+        if (video) {
+            video.pause();
+            video.removeAttribute("src");
+            video.load();
+        }
+        if (modal) {
+            modal.hidden = true;
+        }
+    }
+
+    function openVideoModal(project) {
+        const modal = $("videoPlayerModal");
+        const video = $("modalVideoElement");
+        const title = $("modalVideoTitle");
+        const sub = $("modalVideoSub");
+        const dlBtn = $("modalDownloadBtn");
+        if (!modal || !video) return;
+
+        const videoSrc = project.master_video_url || `/api/projects/${encodeURIComponent(project.id)}/preview`;
+        video.src = videoSrc;
+        video.load();
+
+        if (title) title.textContent = project.name || "Producción KAI";
+        if (sub) {
+            const topic = project.topic ? `Tema: ${project.topic}` : "";
+            const dur = project.duration ? ` · Duración: ${formatDurationSecs(project.duration)}` : "";
+            const dt = project.updated_at ? ` · ${new Date(project.updated_at).toLocaleDateString([], { month: "short", day: "numeric" })}` : "";
+            sub.textContent = `${topic}${dur}${dt}` || "Video Broadcast Master KAI";
+        }
+
+        if (dlBtn) {
+            dlBtn.href = videoSrc;
+            dlBtn.download = `${(project.name || "video_kai").replace(/[^a-zA-Z0-9_\-]/g, "_")}.mp4`;
+        }
+
+        modal.hidden = false;
+        video.play().catch(() => {});
+    }
+
+    // Modal listeners
+    $("modalCloseBtn")?.addEventListener("click", closeVideoModal);
+    $("videoPlayerModal")?.addEventListener("click", (e) => {
+        if (e.target.id === "videoPlayerModal") {
+            closeVideoModal();
+        }
+    });
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && $("videoPlayerModal") && !$("videoPlayerModal").hidden) {
+            closeVideoModal();
+        }
+    });
+
+    function formatDurationSecs(secs) {
+        if (!secs || isNaN(secs)) return "00:00";
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    }
+
     function renderProjectsGrid() {
         const list = $("savedProjectsList");
         if (!list) return;
         list.replaceChildren();
 
         let filtered = allLoadedProjects.filter(p => {
-            const matchesSearch = !currentProjectSearch || (p.name || "").toLowerCase().includes(currentProjectSearch.toLowerCase());
+            const matchesSearch = !currentProjectSearch || (p.name || "").toLowerCase().includes(currentProjectSearch.toLowerCase()) || (p.topic || "").toLowerCase().includes(currentProjectSearch.toLowerCase());
             const st = (p.status || "").toLowerCase();
             let matchesFilter = true;
             if (currentProjectFilter === "done") matchesFilter = (st === "done" || p.has_result);
@@ -338,57 +400,203 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (!filtered.length) {
             const empty = document.createElement("div");
-            empty.style.cssText = "grid-column: 1 / -1; color:var(--text-muted); font-size:13px; text-align:center; padding:36px; background:rgba(255,255,255,0.02); border-radius:14px; border:1px dashed rgba(255,255,255,0.08);";
-            empty.textContent = currentProjectSearch ? "No se encontraron proyectos con ese criterio." : "No hay proyectos guardados en esta categoría.";
+            empty.style.cssText = "grid-column: 1 / -1; color:var(--text-muted); font-size:13px; text-align:center; padding:48px 24px; background:rgba(255,255,255,0.02); border-radius:16px; border:1px dashed rgba(255,255,255,0.08);";
+            empty.innerHTML = `
+                <div style="font-size:32px; margin-bottom:10px; opacity:0.6;">📺</div>
+                <strong style="color:#e2e8f0; font-size:15px; display:block; margin-bottom:4px;">No se encontraron videos</strong>
+                <span>${currentProjectSearch ? "Intenta con otro término de búsqueda o cambia el filtro." : "Aún no hay producciones registradas en esta vista."}</span>
+            `;
             list.append(empty);
             return;
         }
 
         filtered.forEach((project) => {
-            const card = document.createElement("div");
-            card.className = "saved-project-card";
+            const card = document.createElement("article");
+            card.className = "yt-video-card";
 
-            const header = document.createElement("div");
-            header.className = "saved-project-card-header";
+            // 1. Contenedor de Miniatura 16:9
+            const thumbWrap = document.createElement("div");
+            thumbWrap.className = "yt-card-thumb-wrap";
 
-            const left = document.createElement("div");
-            left.style.cssText = "display:flex; align-items:flex-start; gap:10px;";
-            const iconBadge = document.createElement("div");
-            iconBadge.className = "project-icon-badge";
-            iconBadge.textContent = project.has_result ? "🎬" : "📝";
+            if (project.thumbnail_url) {
+                const img = document.createElement("img");
+                img.className = "yt-card-thumb-img";
+                img.src = project.thumbnail_url;
+                img.alt = project.name || "Video thumbnail";
+                img.loading = "lazy";
+                img.onerror = () => {
+                    img.style.display = "none";
+                    if (thumbFallback) thumbFallback.style.display = "flex";
+                };
+                thumbWrap.append(img);
+            }
+
+            const thumbFallback = document.createElement("div");
+            thumbFallback.className = "yt-card-thumb-fallback";
+            thumbFallback.style.display = project.thumbnail_url ? "none" : "flex";
+            thumbFallback.innerHTML = `
+                <span class="fallback-icon">🎬</span>
+                <span>${project.has_result ? "Video Broadcast" : "Producción KAI"}</span>
+            `;
+            thumbWrap.append(thumbFallback);
+
+            // Badge de Duración
+            const durBadge = document.createElement("span");
+            durBadge.className = "yt-card-duration-badge";
+            durBadge.textContent = project.duration ? formatDurationSecs(project.duration) : "05:00";
+            thumbWrap.append(durBadge);
+
+            // Play Overlay en Hover
+            const playOverlay = document.createElement("div");
+            playOverlay.className = "yt-card-play-overlay";
+            playOverlay.innerHTML = `<div class="yt-card-play-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg></div>`;
+            thumbWrap.append(playOverlay);
+
+            // 2. Cuerpo de metadatos (Estilo canal de YouTube)
+            const body = document.createElement("div");
+            body.className = "yt-card-body";
+
+            const infoRow = document.createElement("div");
+            infoRow.className = "yt-card-info-row";
+
+            // Avatar del creador KAI
+            const avatar = document.createElement("div");
+            avatar.className = "yt-card-channel-avatar";
+            avatar.title = "KAI Video Creator";
+            const avImg = document.createElement("img");
+            avImg.src = "/assets/avatars/kai/idle.jpg";
+            avImg.alt = "KAI";
+            avatar.append(avImg);
+
+            // Textos y Título
+            const texts = document.createElement("div");
+            texts.className = "yt-card-texts";
 
             const title = document.createElement("h4");
-            title.className = "saved-project-card-title";
+            title.className = "yt-card-title";
             title.textContent = project.name || "Transmisión sin título";
-            left.append(iconBadge, title);
+            title.title = project.name || "";
+
+            const channelName = document.createElement("div");
+            channelName.className = "yt-card-channel-name";
+            channelName.innerHTML = `<span>KAI Studio</span> <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>`;
+
+            const metaLine = document.createElement("div");
+            metaLine.className = "yt-card-meta-line";
+            
+            const dt = project.updated_at ? new Date(project.updated_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Reciente";
+            const dateSpan = document.createElement("span");
+            dateSpan.textContent = dt;
+
+            const dot = document.createElement("span");
+            dot.className = "yt-card-meta-dot";
 
             const st = (project.status || "done").toLowerCase();
             const statusBadge = document.createElement("span");
             statusBadge.className = `saved-project-badge ${st === "done" ? "badge-done" : st === "error" ? "badge-error" : "badge-render"}`;
+            statusBadge.style.fontSize = "10px";
+            statusBadge.style.padding = "1px 6px";
             statusBadge.textContent = st === "done" ? "Listo" : st === "error" ? "Error" : "En curso";
-            header.append(left, statusBadge);
 
-            const metaRow = document.createElement("div");
-            metaRow.className = "saved-project-meta-row";
-            const dt = project.updated_at ? new Date(project.updated_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-            const metaText = document.createElement("span");
-            metaText.textContent = dt ? `Actualizado ${dt}` : "Reciente";
+            metaLine.append(dateSpan, dot, statusBadge);
+            texts.append(title, channelName, metaLine);
+            infoRow.append(avatar, texts);
+            body.append(infoRow);
 
-            const actions = document.createElement("div");
-            actions.className = "saved-project-actions";
+            // 3. Barra inferior de acciones (Publicar en YouTube / Abrir / Eliminar)
+            const footer = document.createElement("div");
+            footer.className = "yt-card-footer";
 
-            const openBtn = document.createElement("button");
-            openBtn.type = "button";
-            openBtn.className = "project-open-btn";
-            openBtn.innerHTML = `<span>Abrir</span> <span>→</span>`;
-            openBtn.addEventListener("click", (e) => {
+            const actionLeft = document.createElement("div");
+            actionLeft.className = "yt-action-left";
+
+            // Botón Publicar en YouTube
+            const ytPublishBtn = document.createElement("button");
+            ytPublishBtn.type = "button";
+            ytPublishBtn.className = "yt-publish-btn";
+            ytPublishBtn.title = "Subir y publicar directamente en YouTube Studio";
+            ytPublishBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                </svg>
+                <span>Publicar</span>
+            `;
+            ytPublishBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
-                openProject(project.id).catch((error) => console.error("Error abriendo proyecto:", error));
+                // Copia el título al portapapeles y abre YouTube Studio Upload
+                if (navigator.clipboard && project.name) {
+                    navigator.clipboard.writeText(project.name).catch(() => {});
+                }
+                // Si hay video master, descargar o notificar
+                if (project.master_video_url) {
+                    window.open(`https://studio.youtube.com/channel/UC/videos/upload?d=pt`, "_blank");
+                } else {
+                    window.open(`https://studio.youtube.com/channel/UC/videos/upload?d=pt`, "_blank");
+                }
             });
 
+            // Botón Reanudar (Si el proyecto no está completado y se puede recuperar)
+            const isFinished = (st === "done" || project.has_result);
+            if (!isFinished) {
+                const resumeBtn = document.createElement("button");
+                resumeBtn.type = "button";
+                resumeBtn.className = "yt-open-pill-btn";
+                resumeBtn.style.background = "rgba(245, 158, 11, 0.18)";
+                resumeBtn.style.borderColor = "rgba(245, 158, 11, 0.4)";
+                resumeBtn.style.color = "#fbbf24";
+                resumeBtn.title = "Reanudar este proyecto desde las escenas ya guardadas";
+                resumeBtn.innerHTML = `<span>Reanudar</span> <span style="font-size:10px;">⚡</span>`;
+                resumeBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    resumeBtn.disabled = true;
+                    resumeBtn.textContent = "Reanudando...";
+                    try {
+                        const res = await fetch(`/api/projects/${encodeURIComponent(project.id)}/resume`, { method: "POST" });
+                        if (res.ok) {
+                            openProject(project.id).catch(() => {});
+                        } else {
+                            const err = await res.json();
+                            alert(err.detail || "No se pudo reanudar.");
+                            resumeBtn.disabled = false;
+                            resumeBtn.innerHTML = `<span>Reanudar</span> <span>⚡</span>`;
+                        }
+                    } catch (err) {
+                        alert("Error de conexión al reanudar.");
+                        resumeBtn.disabled = false;
+                    }
+                });
+                actionLeft.append(resumeBtn);
+            }
+
+            // Botón Ver Video en Ventana Flotante
+            const openBtn = document.createElement("button");
+            openBtn.type = "button";
+            openBtn.className = "yt-open-pill-btn";
+            openBtn.title = "Reproducir este video en una ventana flotante";
+            openBtn.innerHTML = `<span>Ver</span> <span style="font-size:11px;">▶</span>`;
+            openBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openVideoModal(project);
+            });
+
+            // Botón Abrir en Estudio (Editar)
+            const editStudioBtn = document.createElement("button");
+            editStudioBtn.type = "button";
+            editStudioBtn.className = "yt-card-del-btn";
+            editStudioBtn.style.color = "#94a3b8";
+            editStudioBtn.title = "Cargar en mesa de edición y controles";
+            editStudioBtn.innerHTML = `⚙️`;
+            editStudioBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openProject(project.id).catch((error) => console.error("Error abriendo en estudio:", error));
+            });
+
+            actionLeft.append(ytPublishBtn, openBtn, editStudioBtn);
+
+            // Botón Eliminar
             const delBtn = document.createElement("button");
             delBtn.type = "button";
-            delBtn.className = "del-project-btn";
+            delBtn.className = "yt-card-del-btn";
             delBtn.title = "Eliminar proyecto";
             delBtn.innerHTML = `✕`;
             delBtn.addEventListener("click", async (e) => {
@@ -404,13 +612,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             });
 
-            actions.append(openBtn, delBtn);
-            metaRow.append(metaText, actions);
+            footer.append(actionLeft, delBtn);
+            body.append(footer);
 
-            card.append(header, metaRow);
+            card.append(thumbWrap, body);
             card.addEventListener("click", () => {
-                openProject(project.id).catch((error) => console.error("Error abriendo proyecto:", error));
+                openVideoModal(project);
             });
+
             list.append(card);
         });
     }
@@ -502,6 +711,8 @@ document.addEventListener("DOMContentLoaded", () => {
             feed.appendChild(emptyFeed);
             emptyFeed.hidden = false;
             $("activityCount").textContent = "0 eventos";
+            const consoleFeed = $("telemetryConsoleFeed");
+            if (consoleFeed) consoleFeed.innerHTML = '<div class="terminal-empty">Esperando el primer evento de la transmisión...</div>';
             return;
         }
         emptyFeed.hidden = true;
@@ -528,6 +739,137 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         $("activityCount").textContent = `${list.length} ${list.length === 1 ? "evento" : "eventos"}`;
         feed.scrollTop = feed.scrollHeight;
+
+        // ALIMENTAR EL TERMINAL DEDICADO DE MISSION CONTROL
+        const consoleFeed = $("telemetryConsoleFeed");
+        const eventCountTag = $("telemetryEventCount");
+        if (eventCountTag) eventCountTag.textContent = `${list.length} eventos`;
+        if (consoleFeed) {
+            consoleFeed.replaceChildren();
+            list.forEach((event, idx) => {
+                const entry = document.createElement("div");
+                entry.className = "terminal-log-entry" + (idx === list.length - 1 ? " entry-highlight" : "");
+                
+                const stepIcons = {
+                    research: "🔍",
+                    script: "📝",
+                    voice: "🎙️",
+                    avatar: "🎭",
+                    render: "⚙️",
+                    broll: "🎬",
+                    done: "✅",
+                    error: "❌",
+                    cancelled: "⏹️",
+                };
+                const icon = stepIcons[event.step] || "⚡";
+
+                const timeSpan = document.createElement("span");
+                timeSpan.className = "terminal-log-time";
+                timeSpan.textContent = `[${eventTime(event.at)}]`;
+
+                const iconSpan = document.createElement("span");
+                iconSpan.className = "terminal-log-icon";
+                iconSpan.textContent = icon;
+
+                const textSpan = document.createElement("span");
+                textSpan.className = "terminal-log-text";
+                textSpan.textContent = event.message || "Procesando...";
+
+                entry.append(timeSpan, iconSpan, textSpan);
+                consoleFeed.appendChild(entry);
+            });
+            consoleFeed.scrollTop = consoleFeed.scrollHeight;
+        }
+
+        // EXTRAER Y ACTUALIZAR TABLERO VISUAL DE ESCENAS Y MONITOR EN VIVO
+        const scenesListEl = $("telemetryScenesList");
+        const sceneRatioEl = $("telemetrySceneRatio");
+        const stageImg = $("telemetryStageImg");
+        const stageSceneTitle = $("telemetryStageSceneTitle");
+        const stageSceneMeta = $("telemetryStageSceneMeta");
+
+        if (scenesListEl) {
+            const rawLiveScenes = (currentState && Array.isArray(currentState.live_scenes)) ? currentState.live_scenes : [];
+            const sceneMatches = [];
+            list.forEach((ev) => {
+                const m = (ev.message || "").match(/Grabando Escena (\d+)\/(\d+):\s*([^(]+)\s*\(([^)]+)\)/i);
+                if (m) {
+                    sceneMatches.push({
+                        idx: parseInt(m[1], 10),
+                        total: parseInt(m[2], 10),
+                        name: m[3].trim(),
+                        type: m[4].trim(),
+                    });
+                }
+            });
+
+            const totalScenes = rawLiveScenes.length || (sceneMatches.length ? sceneMatches[0].total : 0);
+            const currentSceneIdx = sceneMatches.length ? sceneMatches[sceneMatches.length - 1].idx : 1;
+
+            if (totalScenes > 0) {
+                if (sceneRatioEl) sceneRatioEl.textContent = `${currentSceneIdx} / ${totalScenes}`;
+
+                // Actualizar monitor central de escena
+                const activeSceneData = rawLiveScenes[currentSceneIdx - 1] || sceneMatches.find((sc) => sc.idx === currentSceneIdx);
+                if (activeSceneData) {
+                    if (stageSceneTitle) stageSceneTitle.textContent = `Escena ${currentSceneIdx}: ${activeSceneData.name || "En render"}`;
+                    if (stageSceneMeta) stageSceneMeta.textContent = `Encuadre: ${activeSceneData.camera || "PIP"} · ${activeSceneData.type || "Modular"}` + (activeSceneData.headline ? ` · «${activeSceneData.headline}»` : "");
+                    if (stageImg && activeSceneData.thumb_url) {
+                        stageImg.src = activeSceneData.thumb_url;
+                    }
+                }
+
+                scenesListEl.replaceChildren();
+                for (let sNum = 1; sNum <= totalScenes; sNum++) {
+                    const match = rawLiveScenes[sNum - 1] || sceneMatches.find((sc) => sc.idx === sNum);
+                    const isDone = sNum < currentSceneIdx;
+                    const isRendering = sNum === currentSceneIdx;
+
+                    const item = document.createElement("div");
+                    item.className = "telemetry-scene-item" + (isRendering ? " is-rendering" : isDone ? " is-done" : "");
+
+                    // Miniatura gráfica: priorizar match.thumb_url, o reconstruir desde el ID de la tarea actual
+                    const activeTaskId = currentTaskId || (currentState && currentState.id) || new URLSearchParams(window.location.search).get("project") || new URLSearchParams(window.location.search).get("task") || "";
+                    const computedThumbUrl = (match && match.thumb_url) ? match.thumb_url : (activeTaskId ? `/storage/projects/${activeTaskId}/work/scene_${sNum}/scene_thumb.jpg` : "/static/images/app_bg.jpg");
+
+                    const thumbWrap = document.createElement("div");
+                    thumbWrap.className = "telemetry-scene-thumb-wrap";
+                    const tImg = document.createElement("img");
+                    tImg.alt = `Escena ${sNum}`;
+                    tImg.src = computedThumbUrl;
+                    tImg.onerror = () => { tImg.src = "/static/images/app_bg.jpg"; };
+                    thumbWrap.appendChild(tImg);
+
+                    const meta = document.createElement("div");
+                    meta.className = "telemetry-scene-meta";
+
+                    const nameEl = document.createElement("div");
+                    nameEl.className = "telemetry-scene-name";
+                    nameEl.textContent = `Escena ${sNum}: ` + (match ? match.name : `Escena ${sNum}`);
+
+                    const typeEl = document.createElement("div");
+                    typeEl.className = "telemetry-scene-type";
+                    typeEl.textContent = match ? (match.type || "Modular") : "Modular";
+
+                    meta.append(nameEl, typeEl);
+
+                    const statusPill = document.createElement("span");
+                    statusPill.className = "telemetry-scene-status " + (isDone ? "done" : isRendering ? "active" : "queued");
+                    statusPill.textContent = isDone ? "✓ Lista" : isRendering ? "● Render" : "En cola";
+
+                    item.append(thumbWrap, meta, statusPill);
+                    
+                    // Clic para inspeccionar miniatura en el monitor
+                    item.addEventListener("click", () => {
+                        if (stageImg) stageImg.src = computedThumbUrl;
+                        if (stageSceneTitle) stageSceneTitle.textContent = `Escena ${sNum}: ` + (match ? match.name : `Escena ${sNum}`);
+                        if (stageSceneMeta) stageSceneMeta.textContent = (match && match.type) ? `Tipo: ${match.type}` : "Modular";
+                    });
+
+                    scenesListEl.appendChild(item);
+                }
+            }
+        }
     }
 
     function refreshClocks() {
@@ -696,6 +1038,48 @@ document.addEventListener("DOMContentLoaded", () => {
             cancelBtn.disabled = cancelling;
             cancelBtn.textContent = cancelling ? "Cancelando…" : "Cancelar edición";
         }
+
+        // CONTROL VISUAL DE LA PANTALLA DEDICADA DE TELEMETRÍA (MISSION CONTROL)
+        const telemetryCard = $("liveTelemetryCard");
+        const streamerPane = $("streamerTabPane");
+        if (telemetryCard) {
+            if (active) {
+                telemetryCard.hidden = false;
+                if (streamerPane && !window._userMinimizedTelemetry) {
+                    streamerPane.hidden = true;
+                }
+                const topicEl = $("telemetryTopicTitle");
+                if (topicEl && state.file_name) {
+                    topicEl.textContent = state.file_name;
+                }
+                const stepEl = $("telemetryCurrentStep");
+                if (stepEl) {
+                    stepEl.textContent = stageLabels[step] || step.toUpperCase();
+                }
+                const msgEl = $("telemetryCurrentMsg");
+                if (msgEl) {
+                    msgEl.textContent = state.message || "Procesando en vivo...";
+                }
+                const pctTag = $("telemetryPctTag");
+                if (pctTag) {
+                    pctTag.textContent = `${Math.round(percent)}%`;
+                }
+                const barFill = $("telemetryBarFill");
+                if (barFill) {
+                    barFill.style.width = `${percent}%`;
+                }
+                const timeEl = $("telemetryTimeElapsed");
+                if (timeEl && $("totalElapsed")) {
+                    timeEl.textContent = `⏱ ${$("totalElapsed").textContent}`;
+                }
+            } else {
+                telemetryCard.hidden = true;
+                if (streamerPane) {
+                    streamerPane.hidden = false;
+                }
+            }
+        }
+
         refreshClocks();
     }
 
@@ -1051,6 +1435,112 @@ document.addEventListener("DOMContentLoaded", () => {
             }).catch(() => {});
         }
 
+        // 10. Vista previa y descargas de Portada HD y Short Vertical 9:16
+        const thumbCard = $("resThumbnailCard");
+        const thumbImg = $("resThumbnailImg");
+        const thumbBtn = $("btnDownloadThumbnail");
+        const thumbUrl = result.thumbnail_url || (taskId ? `/media/${taskId}_thumbnail.jpg` : null);
+        if (thumbCard && thumbUrl) {
+            thumbCard.style.display = "flex";
+            if (thumbImg) thumbImg.src = thumbUrl;
+            if (thumbBtn) {
+                thumbBtn.href = thumbUrl;
+                thumbBtn.setAttribute("download", `${cleanTitle}_Portada_HD.jpg`);
+            }
+        }
+
+        const shortCard = $("resShortCard");
+        const shortVideo = $("resShortVideo");
+        const shortBtn = $("btnDownloadShort");
+        const shortUrl = result.short_video_url || (taskId ? `/media/${taskId}_short.mp4` : null);
+        if (shortCard && shortUrl) {
+            shortCard.style.display = "flex";
+            if (shortVideo) {
+                shortVideo.src = shortUrl;
+                shortVideo.load();
+            }
+            if (shortBtn) {
+                shortBtn.href = shortUrl;
+                shortBtn.setAttribute("download", `${cleanTitle}_Short_9_16.mp4`);
+            }
+        }
+
+        // 11. Conectar botón de Webhook y Copiar Ficha Técnica
+        const btnSendWebhook = $("btnSendWebhook");
+        if (btnSendWebhook && taskId) {
+            btnSendWebhook.onclick = async () => {
+                const whUrl = ($("webhookInputUrl")?.value || "").trim();
+                const statusMsg = $("webhookStatusMsg");
+                if (!whUrl) {
+                    alert("Por favor ingresa la URL del Webhook (Make, Discord, Zapier, etc.)");
+                    return;
+                }
+                btnSendWebhook.disabled = true;
+                btnSendWebhook.textContent = "Enviando…";
+                if (statusMsg) {
+                    statusMsg.style.display = "block";
+                    statusMsg.style.color = "#38bdf8";
+                    statusMsg.textContent = "Despachando datos al webhook...";
+                }
+                try {
+                    const r = await fetch(`/api/projects/${taskId}/webhook`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ webhook_url: whUrl })
+                    });
+                    const d = await r.json();
+                    if (!r.ok) throw new Error(d.detail || "Error despachando webhook");
+                    if (statusMsg) {
+                        statusMsg.style.color = "#22c55e";
+                        statusMsg.textContent = "✅ ¡Datos y videos enviados con éxito al Webhook!";
+                    }
+                } catch (err) {
+                    if (statusMsg) {
+                        statusMsg.style.color = "#ef4444";
+                        statusMsg.textContent = `❌ ${err.message}`;
+                    }
+                } finally {
+                    btnSendWebhook.disabled = false;
+                    btnSendWebhook.textContent = "Enviar";
+                }
+            };
+        }
+
+        const btnCopyMeta = $("btnCopyMeta");
+        if (btnCopyMeta) {
+            btnCopyMeta.onclick = () => {
+                const metaText = `🎬 Título: ${result.title || "KAI Broadcast"}\n` +
+                    `📌 Tema: ${result.topic || ""}\n` +
+                    `⏱️ Duración: ${fmtDuration(result.duration || 0)}\n` +
+                    `📹 Video Master: ${window.location.origin}${downloadEndpoint}\n` +
+                    (thumbUrl ? `🖼️ Portada HD: ${window.location.origin}${thumbUrl}\n` : "") +
+                    (shortUrl ? `📱 Short Vertical: ${window.location.origin}${shortUrl}\n` : "");
+                navigator.clipboard.writeText(metaText).then(() => {
+                    alert("📋 ¡Ficha técnica copiada al portapapeles!");
+                }).catch(() => {
+                    prompt("Copia la ficha técnica:", metaText);
+                });
+            };
+        }
+
+        // 12. Comprobar Cola de Transmisiones (Broadcast Queue)
+        if (window.__aetherQueue && window.__aetherQueue.length > 0) {
+            const nextTopic = window.__aetherQueue.shift();
+            updateQueueBadge();
+            const queueDelay = 3000;
+            console.log(`[Queue] Próximo tema en ${queueDelay/1000}s: ${nextTopic}`);
+            setTimeout(() => {
+                const streamerTopic = $("streamerTopic");
+                if (streamerTopic) streamerTopic.value = nextTopic;
+                const streamerForm = $("streamerForm");
+                if (streamerForm) {
+                    console.log("[Queue] Despachando siguiente tema automáticamente...");
+                    const submitEvent = new Event("submit", { cancelable: true });
+                    streamerForm.dispatchEvent(submitEvent);
+                }
+            }, queueDelay);
+        }
+
         // Métricas de corte y tarjetas
         if ($("statCuts")) $("statCuts").textContent = result.silences_cut_count ?? 0;
         if ($("statBRolls")) $("statBRolls").textContent = result.brolls_count ?? 0;
@@ -1302,6 +1792,7 @@ document.addEventListener("DOMContentLoaded", () => {
         [dockStreamer, dockCopilot, dockStudio, dockProjects].forEach(d => d && d.classList.remove("active"));
         if (studioSec) studioSec.hidden = true;
         if (projectsCard) projectsCard.hidden = true;
+        if (results && mode !== "streamer") results.hidden = true;
 
         const bentoPane = $("streamerTabPane");
         const trendingRow = $("trendingChipsRow");
@@ -1315,6 +1806,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (bentoSub) bentoSub.textContent = "Configuración de emisión y vista previa en tiempo real";
             if (trendingRow) trendingRow.hidden = false;
             if (bentoPane) bentoPane.hidden = false;
+            if (results && didShowResults) results.hidden = false;
             if (previewBox) {
                 previewBox.hidden = false;
                 previewBox.style.display = "block";
@@ -1363,6 +1855,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (heroSubtitle) heroSubtitle.textContent = "Historial completo de producciones transmitidas y videos editados";
             if (trendingRow) trendingRow.hidden = true;
             if (bentoPane) bentoPane.hidden = true;
+            if (previewBox) previewBox.hidden = true;
+            if (results) results.hidden = true;
             if (projectsCard) projectsCard.hidden = false;
             loadSavedProjects();
         }
@@ -1418,39 +1912,44 @@ document.addEventListener("DOMContentLoaded", () => {
             // Conservar etiqueta inicial y botón de refresh
             row.innerHTML = `<span style="font-size:11px; font-weight:700; color:var(--text-muted); display:inline-flex; align-items:center; gap:4px; margin-right:4px;">🔥 Tendencias Web:</span>`;
             
-            const emojis = ["⚛️", "🚀", "🧠", "⚡", "🔭", "🔋", "🧬", "🌐"];
-            topics.slice(0, 6).forEach((top, i) => {
+            const fallbackEmojis = ["⚛️", "🚀", "🧠", "⚡", "🔭", "🔋", "🧬", "🌐"];
+            topics.slice(0, 7).forEach((item, i) => {
+                const titleText = (typeof item === "object" && item.title) ? item.title : String(item);
+                const emoji = (typeof item === "object" && item.emoji) ? item.emoji : fallbackEmojis[i % fallbackEmojis.length];
+                
                 const btn = document.createElement("button");
                 btn.type = "button";
                 btn.className = "filter-chip chip-trend-btn";
-                btn.dataset.topic = top;
-                const emoji = emojis[i % emojis.length];
-                // Título abreviado para el chip
-                const shortLabel = top.length > 25 ? (top.slice(0, 23) + "…") : top;
+                btn.dataset.topic = titleText;
+                
+                // Título abreviado estético para el chip
+                const shortLabel = titleText.length > 28 ? (titleText.slice(0, 26) + "…") : titleText;
                 btn.textContent = `${emoji} ${shortLabel}`;
-                btn.title = top;
+                btn.title = titleText;
                 btn.addEventListener("click", () => {
                     document.querySelectorAll("#trendingChipsRow .filter-chip").forEach(c => c.classList.remove("active"));
                     btn.classList.add("active");
                     const input = $("streamerTopic");
                     if (input) {
-                        input.value = top;
+                        input.value = titleText;
                         input.focus();
-                        if ($("readoutTopicShort")) $("readoutTopicShort").textContent = top.slice(0, 18) + "…";
+                        if ($("readoutTopicShort")) $("readoutTopicShort").textContent = titleText.slice(0, 18) + "…";
                     }
                 });
                 row.appendChild(btn);
             });
 
-            // Botón de recargar tendencias
+            // Botón de recargar tendencias con feedback visual
             const refreshBtn = document.createElement("button");
             refreshBtn.type = "button";
             refreshBtn.className = "filter-chip filter-chip-add";
-            refreshBtn.title = "Actualizar tendencias web";
+            refreshBtn.title = "Actualizar tendencias web con nuevos temas, noticias y descubrimientos";
             refreshBtn.textContent = "↻";
-            refreshBtn.addEventListener("click", (e) => {
+            refreshBtn.addEventListener("click", async (e) => {
                 e.preventDefault();
-                loadTrendingTopics();
+                refreshBtn.style.transform = "rotate(360deg)";
+                refreshBtn.style.transition = "transform 0.4s ease";
+                await loadTrendingTopics();
             });
             row.appendChild(refreshBtn);
         } catch (err) {
@@ -1466,6 +1965,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const val = e.target.value.trim();
         if ($("readoutTopicShort")) {
             $("readoutTopicShort").textContent = val ? (val.slice(0, 16) + "…") : "Tema Libre";
+        }
+    });
+
+    // Sincronizar selector de voz con readout
+    $("streamerVoice")?.addEventListener("change", (e) => {
+        const sel = e.target;
+        const text = sel.options[sel.selectedIndex]?.text || "Álvaro Neural";
+        const cleanName = text.replace(/^[🎙️\s]+/, "").split("(")[0].trim() + " Neural";
+        if ($("readoutVoiceName")) {
+            $("readoutVoiceName").textContent = cleanName;
         }
     });
 
@@ -1523,10 +2032,51 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Envío del formulario de KAI Streamer
-    const streamerForm = $("streamerForm");
-    const startStreamerBtn = $("startStreamerBtn");
-    const startStreamerBtnText = $("startStreamerBtnText");
+    // Control de la vista dedicada de telemetría (Mission Control)
+    window._userMinimizedTelemetry = false;
+    const telemetryMinimizeBtn = $("telemetryMinimizeBtn");
+    if (telemetryMinimizeBtn) {
+        telemetryMinimizeBtn.addEventListener("click", () => {
+            window._userMinimizedTelemetry = !window._userMinimizedTelemetry;
+            const streamerPane = $("streamerTabPane");
+            if (streamerPane) streamerPane.hidden = !window._userMinimizedTelemetry ? true : false;
+            telemetryMinimizeBtn.textContent = window._userMinimizedTelemetry 
+                ? "↗ Expandir Mission Control" 
+                : "↙ Minimizar a Segundo Plano";
+        });
+    }
+
+    const telemetryCancelBtn = $("telemetryCancelBtn");
+    if (telemetryCancelBtn) {
+        telemetryCancelBtn.addEventListener("click", () => {
+            const cancelBtn = $("cancelTaskBtn");
+            if (cancelBtn) cancelBtn.click();
+        });
+    }
+
+    // Manejo de Cola de Emisiones (Queue)
+    window.__aetherQueue = window.__aetherQueue || [];
+    function updateQueueBadge() {
+        const badge = $("queueBadgeInfo");
+        if (!badge) return;
+        const count = (window.__aetherQueue || []).length;
+        if (count > 0) {
+            badge.style.display = "block";
+            badge.textContent = `📋 ${count} tema(s) restante(s) en la cola automática.`;
+        } else {
+            badge.style.display = "none";
+        }
+    }
+
+    const btnToggleQueue = $("btnToggleQueue");
+    const queueInputWrap = $("queueInputWrap");
+    if (btnToggleQueue && queueInputWrap) {
+        btnToggleQueue.addEventListener("click", () => {
+            const isHidden = queueInputWrap.style.display === "none";
+            queueInputWrap.style.display = isHidden ? "block" : "none";
+            btnToggleQueue.textContent = isHidden ? "— Ocultar Cola" : "+ Modo Cola de Temas";
+        });
+    }
 
     if (streamerForm) {
         streamerForm.addEventListener("submit", async (event) => {
@@ -1561,6 +2111,19 @@ document.addEventListener("DOMContentLoaded", () => {
             if ($("donutProgressArc")) $("donutProgressArc").style.strokeDashoffset = 90;
             if ($("donutLabelText")) $("donutLabelText").textContent = "Investigando";
 
+            // Leer temas adicionales en cola si existen y no están ya cargados
+            if (!window.__aetherQueue || window.__aetherQueue.length === 0) {
+                const rawQueue = ($("streamerQueueTopics")?.value || "").trim();
+                if (rawQueue) {
+                    window.__aetherQueue = rawQueue
+                        .split("\n")
+                        .map(t => t.trim())
+                        .filter(t => t.length > 2);
+                    if ($("streamerQueueTopics")) $("streamerQueueTopics").value = "";
+                }
+            }
+            updateQueueBadge();
+
             // Obtener RTMP si está configurado para transmisión directa
             const platform = $("streamerLivePlatform")?.value || "none";
             let rtmpUrl = null;
@@ -1584,7 +2147,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 duration_sec: parseInt($("streamerDuration")?.value || "300", 10),
                 aspect_ratio: $("streamerFormat")?.value || "16:9",
                 card_theme: $("streamerCardTheme")?.value || "dark",
-                voice: $("streamerVoice")?.value || "es-MX-JorgeNeural",
+                voice: $("streamerVoice")?.value || "es-ES-AlvaroNeural",
                 rtmp_url: rtmpUrl,
             };
 

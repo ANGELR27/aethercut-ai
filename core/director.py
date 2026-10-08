@@ -38,7 +38,10 @@ class DirectorScene:
     camera: str  # hero_center, pip_corner, split_screen
     speech: str
     visual_query: str = ""
+    visual_queries: List[str] = field(default_factory=list)  # Soporte para múltiples videos/ángulos por escena
+    visual_query2: str = ""                                  # Segundo video de apoyo (reacción / comparativa)
     card: Optional[SceneCard] = None
+    chips: List[str] = field(default_factory=list)
     sfx: str = "whoosh"  # whoosh, chime, impact, alert, none
     duration_est: float = 10.0
 
@@ -51,6 +54,51 @@ class DirectorBroadcastPlan:
     scenes: List[DirectorScene] = field(default_factory=list)
     chat_comments: List[Dict[str, str]] = field(default_factory=list)
     total_est_duration: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DirectorBroadcastPlan":
+        scenes_data = data.get("scenes", [])
+        scenes: List[DirectorScene] = []
+        for s in scenes_data:
+            c = s.get("card")
+            card_obj = SceneCard(**c) if c else None
+            # Reconstruir lista de visual_queries si solo viene visual_query
+            vqs = s.get("visual_queries") or []
+            vq = s.get("visual_query") or ""
+            vq2 = s.get("visual_query2") or ""
+            if not vqs:
+                if vq:
+                    vqs.append(vq)
+                if vq2:
+                    vqs.append(vq2)
+            scenes.append(
+                DirectorScene(
+                    scene_id=s.get("scene_id", 1),
+                    name=s.get("name", "Escena"),
+                    type=s.get("type", "avatar_cam"),
+                    emotion=s.get("emotion", "excited"),
+                    camera=s.get("camera", "pip_corner"),
+                    speech=s.get("speech", ""),
+                    visual_query=vq,
+                    visual_queries=vqs,
+                    visual_query2=vq2,
+                    card=card_obj,
+                    chips=s.get("chips", []),
+                    sfx=s.get("sfx", "whoosh"),
+                    duration_est=float(s.get("duration_est", s.get("duration_est_sec", 10.0))),
+                )
+            )
+        return cls(
+            title=data.get("title", ""),
+            topic=data.get("topic", ""),
+            style=data.get("style", ""),
+            scenes=scenes,
+            chat_comments=data.get("chat_comments", []),
+            total_est_duration=float(data.get("total_est_duration", 0.0)),
+        )
 
 
 DIRECTOR_SYSTEM_PROMPT = """Eres el DIRECTOR DE TELEVISIÓN Y STREAMING con Inteligencia Artificial de KAI.
@@ -77,6 +125,14 @@ REGLAS DE GANCHO Y ENTRADA (PROHIBIDO SALUDOS CLICHÉ):
 - COMIENZA SIEMPRE con un GANCHO DIRECTO E IMPACTANTE: una pregunta provocadora, una afirmación contundente, una paradoja fascinante o un dato duro que sacuda al espectador desde el segundo 0.
 - Ejemplo de inicio excelente: "¿Sabías que tu perro percibe el mundo en 300 millones de receptores olfativos mientras tú apenas alcanzas 6 millones? Lo que la ciencia acaba de descubrir sobre los sentidos caninos desafía todo lo que creíamos saber..."
 
+REGLAS DE FLUIDEZ Y PROSODIA HUMANA (SÍNTESIS ULTRA-NATURAL, TEMPO MEDIO Y SIN PAUSAS MECÁNICAS):
+- Redacta con cadencia de conversación real, fluida, apasionada y a un TEMPO MEDIO NATURAL (ni apresurado ni robótico).
+- ESTRICTAMENTE PROHIBIDO colocar comas tras palabras o frases de inicio como 'Es que,', 'Y es que,', 'Pero,', 'Porque,', 'Así que,', 'O sea,'. Escribe 'Es que la verdad...', 'Pero qué significa...', 'Porque si lo analizamos...' de corrido para que el locutor no se quede congelado o tartamudo al empezar a hablar.
+- ESTRICTAMENTE PROHIBIDO el abuso de comas innecesarias dentro de las frases. Las comas en síntesis neural generan pausas bruscas de respiración; úsalas ÚNICAMENTE para separar ideas lógicas largas al final de una oración completa.
+- PROHIBIDO partir las frases en trozos microscópicos con puntos seguidos cada 3 palabras. Escribe párrafos con oraciones ricas, bien hilvanadas y fluidas.
+- Los números, años y cifras deben integrarse con total naturalidad (ej: 'en mil novecientos noventa y tres', 'casi un ochenta por ciento').
+- Mantén un tono inteligente, seguro y cercano como un divulgador de élite en YouTube hablando con soltura a su audiencia.
+
 REGLAS PARA DATOS, ESTADÍSTICAS Y COMPARATIVAS (TARJETAS BENTO HUD):
 - SIEMPRE que se mencione una cifra, porcentaje, estadística, comparativa (ej: perro vs humano, velocidad, capacidad, año récord), o hecho verificable, la escena DEBE ser de tipo "card_focus" O incluir obligatoriamente el objeto "card".
 - El objeto "card" debe tener:
@@ -86,24 +142,26 @@ REGLAS PARA DATOS, ESTADÍSTICAS Y COMPARATIVAS (TARJETAS BENTO HUD):
   * "badge": "ESTADÍSTICA", "DATO CLAVE", "COMPARATIVA" o "CONFIRMADO".
 - De esta manera el espectador ve el avatar hablando pero al mismo tiempo tiene al lado la tarjeta gráfica animada mostrando los números reales y la comparativa en pantalla.
 
-REGLAS DE TONO Y ESTILO (NATURALIDAD PURA):
-- PROHIBIDO mencionar o insinuar que eres una "inteligencia artificial", un "modelo de lenguaje" o un "algoritmo".
-- PROHIBIDO hacer auto-promociones extrañas, cuñas publicitarias o inventar marcas comerciales.
-- Habla como un streamer, analista y divulgador humano riguroso y apasionado. El cierre debe ser un balance reflexivo del tema, invitando a debatir con argumentos sanos.
+REGLAS PARA EDICIÓN AVANZADA Y REFERENCIAS VISUALES ("chips"):
+- SIEMPRE que en la narración se enumeren, comparen o mencionen países (ej: Estados Unidos, China, Argentina, España), marcas o entidades, agrega en la escena el array "chips" con los nombres limpios oficiales (ej: ["Estados Unidos", "China", "Argentina"]).
+- NO agregues emojis rotos ni códigos de dos letras como texto crudo; escribe el nombre completo del país o institución ("Estados Unidos", "China", "Argentina", "NASA", "MIT"). El motor gráfico descargará e integrará automáticamente la bandera oficial de alta resolución y aplicará la animación secuencial en el momento en que se mencionen.
 
-REGLAS DE SELECCIÓN VISUAL (B-ROLL & IMÁGENES REALES DE ALTA CALIDAD):
-- El campo "visual_query" para cada escena DEBE ser en inglés y describir una ESCENA REALISTA, FOTOGRÁFICA O DOCUMENTAL concreta relacionada DIRECTAMENTE con el contenido exacto que se está debatiendo en esa escena (ej: "dog smelling grass close up 4k high resolution", "artificial intelligence data center gpu servers 4k", "electric car lithium battery manufacturing plant").
-- PROHIBIDO buscar capturas de pantalla de interfaces de software, Notion, dashboards SaaS o páginas web genéricas a menos que se trate específicamente de un software puntual. Si se habla de ciencia, innovación o naturaleza, busca el laboratorio, el animal, el espacio o la fábrica en acción fotográfica documental.
-- EXCLUSIÓN TOTAL DE MARCAS DE AGUA Y SELLOS: La búsqueda visual debe apuntar a material fotográfico libre y editorial en alta resolución (usar sufijos como "editorial photograph hd", "documentary realistic 4k", "nature close up"). NUNCA busques marcas de stock comercial con marca de agua (Shutterstock, Alamy, iStock).
-- NUNCA pongas términos genéricos como "technology abstract", "futuristic concept", "cool wallpaper". Sé hiper-específico al hecho, ser vivo, dispositivo o contexto del que se habla.
+REGLAS DE SELECCIÓN VISUAL (MÁXIMA RELEVANCIA Y MULTI-VIDEO POR ESCENA):
+- EXACTA COINCIDENCIA TEMÁTICA: Lo que se muestre en pantalla DEBE coincidir al 100% con lo que KAI está narrando en ese instante exacto. Si el guión habla de velocirraptores con plumas, el video DEBE ser de velocirraptores con plumas; si habla de la mordida del T-Rex, el video DEBE mostrar el tiranosaurio rex o biomecánica fósil; si habla de escamas de cocodrilo, debe mostrar piel fósil o reptiles reales.
+- CAPACIDAD DE 2 VIDEOS POR ESCENA: Para enriquecer el montaje y evitar fondos repetidos, cada escena puede y debe aportar:
+  * "visual_query": El clip de video protagonista para la primera mitad de la escena (en inglés, hiper-específico, 4k/hd, ej: 'velociraptor feathered paleoart documentary animation 4k video').
+  * "visual_query2": Un segundo clip de video o ángulo complementario para alternar a mitad de la escena (ej: 'fossil amber feather paleontology laboratory close up video').
+- PREDOMINIO ABSOLUTO DE VIDEO: Más del 70% de las escenas deben usar clips de video dinámicos en movimiento.
+- PROHIBIDO repetir el mismo visual_query entre escenas. Cada toma debe ser fresca y diferente.
+- EXCLUSIÓN TOTAL DE MARCAS DE AGUA Y SELLOS: NUNCA busques marcas de stock comercial con sellos (Shutterstock, Alamy, iStock, Adobe Stock).
 ==============================================================================
 
 TIPOS DE ESCENA DISPONIBLES:
 1. "avatar_cam": KAI en plano principal hablando directamente al espectador. Ideal para el gancho inicial (Hook directo) y la conclusión final reflexiva.
-2. "video_reaction": B-Roll fotográfico o de video en pantalla completa mientras KAI aparece en recuadro PIP en la esquina reaccionando en vivo ("¡Fíjense en este detalle exacto...!"). En video_reaction, KAI debe reaccionar a un HECHO O VIDEO REAL DEL TEMA, no a interfaces de software.
-3. "card_focus": Tarjeta Bento HUD de alto impacto visual en pantalla mostrando la estadística, comparativa o dato clave junto a KAI explicando los números. ¡OBLIGATORIA para cualquier estadística o comparación!
+2. "video_reaction": Clip de video dinámico a pantalla completa con KAI en recuadro PIP en la esquina reaccionando en vivo ("¡Miren esta toma!", "¡Fíjense en este detalle!").
+3. "card_focus": Tarjeta Bento HUD con gráfico infográfico (Matplotlib) y KAI en PIP. ¡OBLIGATORIA para estadísticas y comparativas!
 4. "chat_debate": KAI interactúa con preguntas y dilemas de la audiencia, contrastando posturas.
-5. "breaking_news": Titular o primicia urgente con tono dinámico y datos inmediatos.
+5. "breaking_news": Titular o primicia urgente con tono dinámico y clip de video en movimiento.
 
 EMOCIONES DE KAI POR ESCENA:
 - "excited": Entusiasta, dinámico, revelaciones fascinantes.
@@ -126,8 +184,9 @@ RESPONDE EXCLUSIVAMENTE EN FORMATO JSON VÁLIDO:
       "type": "avatar_cam",
       "emotion": "excited",
       "camera": "hero_center",
-      "speech": "[MÍNIMO {words_per_scene} PALABRAS] ¿Alguna vez te has preguntado cómo percibe el mundo un animal frente a nosotros? Los números son demoledores... [CONTINUAR DESARROLLANDO EXTENSAMENTE el gancho con contexto, datos y tensión argumental sin saludos cliché]",
-      "visual_query": "high quality cinematic documentary 4k",
+      "speech": "[MÍNIMO {words_per_scene} PALABRAS] ¿Alguna vez te has preguntado cómo percibe el mundo un animal frente a nosotros? Los números son demoledores y la evidencia científica cambia por completo nuestra perspectiva... [CONTINUAR DESARROLLANDO EXTENSAMENTE el gancho con oraciones fluidas, sin comas innecesarias ni saludos cliché]",
+      "visual_query": "high quality cinematic documentary 4k video",
+      "visual_query2": "nature wildlife cinematic motion footage hd",
       "sfx": "whoosh",
       "duration_est_sec": {seconds_per_scene}
     }},
@@ -142,8 +201,9 @@ RESPONDE EXCLUSIVAMENTE EN FORMATO JSON VÁLIDO:
         "body": "Receptores olfativos del perro comparados con los del ser humano según estudios biológicos.",
         "badge": "COMPARATIVA"
       }},
-      "speech": "[MÍNIMO {words_per_scene} PALABRAS] Miren los datos duros que tenemos en pantalla: trescientos millones frente a apenas seis millones... [DESARROLLAR EN EXTENSO analizando la cifra y su impacto]",
-      "visual_query": "dog biology scientific research laboratory 4k",
+      "speech": "[MÍNIMO {words_per_scene} PALABRAS] Miren los datos duros que tenemos en pantalla con trescientos millones frente a apenas seis millones de receptores... [DESARROLLAR EN EXTENSO analizando la cifra con ritmo continuo y fluido]",
+      "visual_query": "dog biology scientific research laboratory 4k video",
+      "visual_query2": "microscopic sensory receptors biology animation video",
       "sfx": "chime",
       "duration_est_sec": {seconds_per_scene}
     }}
@@ -241,7 +301,10 @@ class AIDirector:
                         camera=s.get("camera", "hero_center" if idx in (0, len(raw_scenes) - 1) else "pip_corner"),
                         speech=s.get("speech", "").strip(),
                         visual_query=s.get("visual_query", topic),
+                        visual_queries=[q for q in [s.get("visual_query"), s.get("visual_query2")] if q],
+                        visual_query2=s.get("visual_query2", ""),
                         card=card_obj,
+                        chips=s.get("chips", []),
                         sfx=s.get("sfx", "whoosh"),
                         duration_est=float(s.get("duration_est_sec", seconds_per_scene)),
                     )
