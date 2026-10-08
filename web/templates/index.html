@@ -224,6 +224,23 @@
                         <button type="button" class="subcard-pill-btn" data-sec="600">10 min</button>
                     </div>
 
+                    <!-- Tonalidad y Estilo pills (Directo, Humor, Sarcasmo, Relato, Ranking, etc.) -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                        <span class="bento-subcard-title" style="margin:0;">Tonalidad &amp; Estilo de Guión</span>
+                        <span style="font-size:10px; color:var(--text-muted);">(Combina varios con clic)</span>
+                    </div>
+                    <div class="subcard-pills-wrap" id="stylePillsWrap" style="flex-wrap:wrap; gap:4px; margin-top:4px;">
+                        <button type="button" class="subcard-pill-btn active" data-style="divulgacion">🔬 Divulgación</button>
+                        <button type="button" class="subcard-pill-btn" data-style="directo">⚡ Directo al Grano</button>
+                        <button type="button" class="subcard-pill-btn" data-style="humor">😂 Humor &amp; Chistoso</button>
+                        <button type="button" class="subcard-pill-btn" data-style="sarcastico">😏 Sarcástico &amp; Ácido</button>
+                        <button type="button" class="subcard-pill-btn" data-style="storytelling">📖 Storytelling / Relato</button>
+                        <button type="button" class="subcard-pill-btn" data-style="top_ranking">🏆 TOP &amp; Ranking</button>
+                        <button type="button" class="subcard-pill-btn" data-style="debate">⚖️ Debate / Crítico</button>
+                        <button type="button" class="subcard-pill-btn" data-style="noticias">📰 Noticias Urgentes</button>
+                        <button type="button" class="subcard-pill-btn" data-style="podcast">🎙️ Charla Pódcast</button>
+                    </div>
+
                     <!-- Selects nativos sincronizados ocultos -->
                     <select id="streamerFormat" hidden>
                         <option value="16:9" selected>16:9</option>
@@ -238,11 +255,17 @@
                     </select>
                     <select id="streamerStyle" hidden>
                         <option value="divulgacion" selected>divulgacion</option>
+                        <option value="directo">directo</option>
+                        <option value="humor">humor</option>
+                        <option value="sarcastico">sarcastico</option>
+                        <option value="storytelling">storytelling</option>
+                        <option value="top_ranking">top_ranking</option>
                         <option value="debate">debate</option>
                         <option value="analisis">analisis</option>
                         <option value="noticias">noticias</option>
                         <option value="podcast">podcast</option>
                         <option value="mitos">mitos</option>
+                        <option value="hibrido">hibrido</option>
                     </select>
                 </div>
 
@@ -824,12 +847,25 @@
                 <p id="modalVideoSub" class="video-modal-sub">Metadatos del video</p>
             </div>
             <div class="video-modal-actions">
+                <button type="button" id="modalExtractClipsBtn" class="yt-open-pill-btn" style="background: rgba(168, 85, 247, 0.2); border-color: rgba(168, 85, 247, 0.4); color: #c084fc; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;" title="Extraer automáticamente clips verticales 9:16 para Shorts / Reels">✂️ Extraer Clips</button>
                 <a href="#" id="modalDownloadBtn" class="yt-open-pill-btn" download title="Descargar Video .MP4">📥 Descargar .MP4</a>
                 <button type="button" id="modalCloseBtn" class="video-modal-close-btn" title="Cerrar reproductor">✕</button>
             </div>
         </header>
         <div class="video-modal-stage">
             <video id="modalVideoElement" controls playsinline></video>
+        </div>
+        <!-- SECCIÓN DE CLIPS VERTICALES (SHORTS & REELS) -->
+        <div id="modalClipsSection" style="padding: 14px 20px; border-top: 1px solid rgba(255, 255, 255, 0.08); background: rgba(15, 23, 42, 0.4);" hidden>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span style="font-size: 11px; font-weight: 700; color: #c084fc; letter-spacing: 0.05em; display: inline-flex; align-items: center; gap: 6px;">
+                    ✨ CLIPS &amp; SHORTS 9:16 LISTOS PARA VIRALIZAR
+                </span>
+                <span id="modalClipsLoadingText" style="font-size: 11px; color: var(--text-muted);" hidden>⏳ Procesando clips verticales...</span>
+            </div>
+            <div id="modalClipsGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">
+                <!-- Dinámico en app.js -->
+            </div>
         </div>
     </div>
 </div>

@@ -335,7 +335,73 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    let currentModalProjectId = null;
+
+    async function loadProjectClips(projectId) {
+        const grid = $("modalClipsGrid");
+        const sec = $("modalClipsSection");
+        if (!grid || !sec) return;
+        try {
+            const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/clips`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const clips = data.clips || [];
+            if (clips.length > 0) {
+                sec.hidden = false;
+                grid.innerHTML = clips.map((c, i) => `
+                    <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span style="font-size: 11px; font-weight: 700; color: #fff;">📱 Short #${i+1}</span>
+                            <span style="font-size: 10px; color: var(--text-muted);">${c.size_mb || 0} MB</span>
+                        </div>
+                        <span style="font-size: 11px; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${c.name}">${c.name}</span>
+                        <div style="display: flex; gap: 6px; margin-top: 4px;">
+                            <a href="${c.url}" target="_blank" class="yt-open-pill-btn" style="padding: 4px 8px; font-size: 10px; flex: 1; text-align: center; text-decoration: none;">▶ Ver 9:16</a>
+                            <a href="${c.url}" download="${c.filename}" class="yt-open-pill-btn" style="padding: 4px 8px; font-size: 10px; flex: 1; text-align: center; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); text-decoration: none;">📥 Descargar</a>
+                        </div>
+                    </div>
+                `).join("");
+            } else {
+                grid.innerHTML = "";
+                sec.hidden = true;
+            }
+        } catch (e) {
+            console.error("Error loading project clips:", e);
+        }
+    }
+
+    async function extractClipsHandler() {
+        if (!currentModalProjectId) return;
+        const btn = $("modalExtractClipsBtn");
+        const loading = $("modalClipsLoadingText");
+        const sec = $("modalClipsSection");
+        if (btn) btn.disabled = true;
+        if (loading) loading.hidden = false;
+        if (sec) sec.hidden = false;
+        showToast("✂️ Extrayendo y recortando clips 9:16 para Shorts/Reels...", "info");
+
+        try {
+            const resp = await fetch(`/api/projects/${encodeURIComponent(currentModalProjectId)}/extract-clips`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                showToast(`🎉 ¡${data.clips.length} clips verticales 9:16 listos!`, "success");
+                await loadProjectClips(currentModalProjectId);
+            } else {
+                showToast(data.detail || data.message || "No se pudieron extraer clips.", "error");
+            }
+        } catch (err) {
+            showToast("Error de conexión al extraer clips.", "error");
+        } finally {
+            if (btn) btn.disabled = false;
+            if (loading) loading.hidden = true;
+        }
+    }
+
     function openVideoModal(project) {
+        currentModalProjectId = project.id;
         const modal = $("videoPlayerModal");
         const video = $("modalVideoElement");
         const title = $("modalVideoTitle");
@@ -362,9 +428,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         modal.hidden = false;
         video.play().catch(() => {});
+        loadProjectClips(project.id);
     }
 
     // Modal listeners
+    $("modalExtractClipsBtn")?.addEventListener("click", extractClipsHandler);
     $("modalCloseBtn")?.addEventListener("click", closeVideoModal);
     $("videoPlayerModal")?.addEventListener("click", (e) => {
         if (e.target.id === "videoPlayerModal") {
@@ -1907,6 +1975,44 @@ document.addEventListener("DOMContentLoaded", () => {
             const min = Math.round(parseInt(sec, 10) / 60);
             if ($("readoutDuration")) $("readoutDuration").textContent = `${min} min`;
             if ($("heroDurationVal")) $("heroDurationVal").innerHTML = `${min}<sup>min</sup>`;
+        });
+    });
+
+    // Pills de Tonalidad & Estilo (soporte individual y multi-selección combinada)
+    document.querySelectorAll("#stylePillsWrap .subcard-pill-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                // Alternar en multiselección
+                btn.classList.toggle("active");
+            } else {
+                // Selección simple o toggle si ya está activo
+                const wasActive = btn.classList.contains("active");
+                const allActive = document.querySelectorAll("#stylePillsWrap .subcard-pill-btn.active");
+                if (allActive.length > 1) {
+                    document.querySelectorAll("#stylePillsWrap .subcard-pill-btn").forEach(b => b.classList.remove("active"));
+                    btn.classList.add("active");
+                } else {
+                    btn.classList.toggle("active");
+                }
+            }
+            // Asegurar que al menos uno esté seleccionado
+            const activeBtns = Array.from(document.querySelectorAll("#stylePillsWrap .subcard-pill-btn.active"));
+            if (activeBtns.length === 0) {
+                btn.classList.add("active");
+                activeBtns.push(btn);
+            }
+            const selectedStyles = activeBtns.map(b => b.dataset.style).filter(Boolean);
+            const combinedVal = selectedStyles.join(",");
+            const styleSelect = $("streamerStyle");
+            if (styleSelect) {
+                // Verificar si existe la opción exacta, si no, crear o actualizar opción híbrida
+                let opt = Array.from(styleSelect.options).find(o => o.value === combinedVal);
+                if (!opt) {
+                    opt = new Option(combinedVal, combinedVal, true, true);
+                    styleSelect.add(opt);
+                }
+                styleSelect.value = combinedVal;
+            }
         });
     });
 

@@ -63,8 +63,47 @@ STYLE_PROMPTS: Dict[str, str] = {
 
     "mitos": """ESTILO DE COMUNICACIÓN: MITOS AL DESCUBIERTO (DESMINTIENDO CREENCIAS POPULARES)
 - Tono: Frontal, desafiante y desmitificador.
-- Estructura: "¿Qué es lo que casi todo el mundo cree erróneamente?" vs "¿Qué dice la evidencia y la ciencia real?". Desarma falacias populares con datos incontestables."""
+- Estructura: "¿Qué es lo que casi todo el mundo cree erróneamente?" vs "¿Qué dice la evidencia y la ciencia real?". Desarma falacias populares con datos incontestables.""",
+
+    "directo": """ESTILO DE COMUNICACIÓN: DIRECTO, AL GRANO & SIN RODEOS
+- Tono: Contundente, directo al punto, enérgico y sin filtro ni rodeos innecesarios.
+- Estructura: Va directo a los hechos sin introducciones largas. Lenguaje franco, claro y certero que dice las cosas como son.""",
+
+    "humor": """ESTILO DE COMUNICACIÓN: HUMORÍSTICO, JUGUETÓN & ENTRETENIDO
+- Tono: Divertido, ocurrente, con comentarios cómicos, remates ingeniosos y comparaciones exageradas o chistosas.
+- Dinámica: Mantiene al público sonriendo y enganchado, intercalando bromas inteligentes sobre los personajes o situaciones sin perder el hilo.""",
+
+    "sarcastico": """ESTILO DE COMUNICACIÓN: SARCÁSTICO, IRÓNICO & ÁCIDO
+- Tono: Mordaz, con fina ironía, cinismo elegante y sarcasmo punzante ("Vaya sorpresa, quién se lo hubiera imaginado...").
+- Dinámica: Señala contradicciones obvias, hipocresías o absurdos con frases afiladas y ceja levantada.""",
+
+    "storytelling": """ESTILO DE COMUNICACIÓN: STORYTELLING & RELATOS INMERSIVOS
+- Tono: Cinematográfico, envolvente, con tensión narrativa y suspenso ("Todo comenzó un martes que parecía normal...").
+- Estructura: Planteamiento, giro dramático, clímax y resolución moral o impactante. Pinta escenas vívidas con palabras.""",
+
+    "top_ranking": """ESTILO DE COMUNICACIÓN: TOP & RANKING DINÁMICO
+- Tono: Competitivo, de cuenta regresiva emocionante (ej. Puesto 10 al Puesto 1).
+- Estructura: Cada posición tiene nombre claro, motivo del puesto, datos o cifras específicas que justifican su lugar, y sorpresa para el podio.""",
+
+    "hibrido": """ESTILO DE COMUNICACIÓN: COMBO MULTI-ESTILO (DIRECTO + HUMOR + SARCASMO + NARRATIVA)
+- Tono: Una mezcla explosiva y súper entretenida: arranca directo al grano, mete comentarios sarcásticos y cómicos, y relata los hechos con tensión inmersiva."""
 }
+
+def resolve_style_instructions(style_raw: str) -> str:
+    """Resuelve las instrucciones de estilo, permitiendo estilos individuales o combinaciones separadas por coma/signo más."""
+    if not style_raw:
+        return STYLE_PROMPTS["divulgacion"]
+    tokens = [t.strip().lower() for t in style_raw.replace("+", ",").replace("&", ",").split(",") if t.strip()]
+    matched = []
+    for tok in tokens:
+        for k, v in STYLE_PROMPTS.items():
+            if tok == k or tok in k:
+                if v not in matched:
+                    matched.append(v)
+                break
+    if not matched:
+        return STYLE_PROMPTS.get(style_raw.lower().strip(), STYLE_PROMPTS["divulgacion"])
+    return "\n\n---\n\n".join(matched)
 
 STREAMER_SCRIPT_PROMPT = """Eres KAI, el divulgador, analista e streamer con inteligencia artificial más carismático y riguroso.
 
@@ -168,8 +207,7 @@ class StreamerPipeline:
 
         # 2. Planificación con el Director de IA
         self._state("script", 25.0, "Director de IA planificando escenas, emociones y encuadres...")
-        style_key = self.options.style.lower().strip()
-        style_instructions = STYLE_PROMPTS.get(style_key, STYLE_PROMPTS["divulgacion"])
+        style_instructions = resolve_style_instructions(self.options.style)
         
         plan_cache_path = self.workdir / "broadcast_plan.json"
         if plan_cache_path.exists():
@@ -431,8 +469,7 @@ class StreamerPipeline:
 
     async def _generate_script(self, topic: str, style: str, evidence: str) -> Dict[str, Any]:
         """Genera el monólogo y elementos con Gemini adaptados al estilo y duración seleccionada."""
-        style_key = style.lower().strip()
-        style_instructions = STYLE_PROMPTS.get(style_key, STYLE_PROMPTS["divulgacion"])
+        style_instructions = resolve_style_instructions(style)
 
         dur_sec = max(30, self.options.duration_sec)
         words_target = max(130, int(dur_sec * 2.3))

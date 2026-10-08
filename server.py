@@ -657,6 +657,149 @@ async def download_project_master(task_id: str):
     )
 
 
+@app.get("/api/projects/{task_id}/clips")
+async def get_project_clips(task_id: str):
+    """Lista todos los clips / Shorts 9:16 generados para este proyecto."""
+    clips = []
+    pattern = f"short_{task_id}_*.mp4"
+    for p in sorted(settings.OUTPUTS_DIR.glob(pattern)):
+        try:
+            stat = p.stat()
+            clip_name = p.stem.replace(f"short_{task_id}_", "").replace("_", " ").title()
+            clips.append({
+                "filename": p.name,
+                "name": clip_name,
+                "url": f"/outputs/{p.name}",
+                "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                "created_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+            })
+        except OSError:
+            continue
+    return {"clips": clips}
+
+
+@app.post("/api/projects/{task_id}/extract-clips")
+async def extract_project_clips(task_id: str, background_tasks: BackgroundTasks):
+    """Extrae automáticamente 3 clips verticales (Shorts / Reels 9:16) con gancho de alto impacto."""
+    store = ProjectStore(task_id)
+    try:
+        document = store.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+
+    master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+    if not master_file.exists():
+        res = document.get("result") or {}
+        cand = Path(res.get("output_file") or "")
+        if cand.exists() and cand.is_file():
+            master_file = cand
+        else:
+            raise HTTPException(status_code=400, detail="El video master debe estar completado para extraer clips.")
+
+    # Obtener escenas y plan para identificar los mejores momentos
+    plan_path = store.work_dir / "broadcast_plan.json"
+    scenes = []
+    if plan_path.exists():
+        try:
+            plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+            scenes = plan_data.get("scenes", [])
+        except Exception:
+            pass
+
+    font_path = "C\\:/Windows/Fonts/segoeuib.ttf"
+    created_clips = []
+
+    # Probar duración del master con ffprobe
+    total_dur = 60.0
+    try:
+        p_res = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(master_file)],
+            capture_output=True, text=True, check=True
+        )
+        total_dur = float(p_res.stdout.strip())
+    except Exception:
+        pass
+
+    # Generar de 2 a 4 clips basados en las escenas del plan o en segmentos de 30-45s
+    clip_targets = []
+    if scenes and len(scenes) >= 2:
+        # Calcular timestamps acumulados de escenas
+        acc = 0.0
+        for i, sc in enumerate(scenes):
+            sc_dur = float(sc.get("duration_est") or 25.0)
+            sc_name = sc.get("name") or f"Clip {i+1}"
+            # Seleccionar escenas llamativas (no solo la intro genérica)
+            if acc + sc_dur <= total_dur + 2:
+                clip_targets.append({
+                    "start": acc,
+                    "duration": min(sc_dur, 45.0),
+                    "title": sc_name[:35]
+                })
+            acc += sc_dur
+        # Filtrar 3 de los mejores (ej. gancho, pico temático, conclusión)
+        if len(clip_targets) > 3:
+            clip_targets = [clip_targets[0], clip_targets[len(clip_targets)//2], clip_targets[-1]]
+    else:
+        # Segmentación por intervalos de 30s
+        chunk_len = min(35.0, max(20.0, total_dur / 3.0))
+        for idx in range(min(3, max(1, int(total_dur // chunk_len)))):
+            clip_targets.append({
+                "start": idx * chunk_len,
+                "duration": min(chunk_len, total_dur - (idx * chunk_len)),
+                "title": f"Momento Destacado {idx + 1}"
+            })
+
+    for idx, target in enumerate(clip_targets):
+        st = target["start"]
+        dur = target["duration"]
+        raw_name = target["title"]
+        clean_tag = re.sub(r"[^\w\s-]", "", raw_name, flags=re.UNICODE).strip()[:30] or f"Momento_{idx+1}"
+        safe_slug = re.sub(r"[^\w-]", "_", clean_tag)[:25].strip("_")
+        out_name = f"short_{task_id}_{idx+1}_{safe_slug}.mp4"
+        out_path = settings.OUTPUTS_DIR / out_name
+
+        if not out_path.exists():
+            clean_hdr = clean_tag.upper().replace("'", "").replace(":", "-")
+            # Filtro: escala al alto 1920 y recorta centrado a 1080:1920 + banner superior con el título del hook
+            fc = (
+                f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,"
+                f"drawtext=fontfile='{font_path}':text='🔥 {clean_hdr}':fontcolor=white:fontsize=36:x=(w-tw)/2:y=180:box=1:boxcolor=black@0.75:boxborderw=14,"
+                f"drawtext=fontfile='{font_path}':text='@AetherCut':fontcolor=white@0.4:fontsize=22:x=(w-tw)/2:y=245[v]"
+            )
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", f"{st:.2f}",
+                "-i", str(master_file),
+                "-t", f"{dur:.2f}",
+                "-filter_complex", fc,
+                "-map", "[v]", "-map", "0:a?",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                str(out_path)
+            ]
+            try:
+                subprocess.run(cmd, capture_output=True, check=True, timeout=120)
+            except Exception as e:
+                safe_log(f"[Clips] Error extrayendo clip {idx+1}: {e}")
+                continue
+
+        if out_path.exists():
+            created_clips.append({
+                "filename": out_name,
+                "name": clean_tag,
+                "url": f"/outputs/{out_name}",
+                "duration": round(dur, 1),
+                "size_mb": round(out_path.stat().st_size / (1024 * 1024), 2)
+            })
+
+    return {
+        "success": True,
+        "message": f"Se generaron {len(created_clips)} clips verticales optimizados (9:16).",
+        "clips": created_clips
+    }
+
+
 
 
 

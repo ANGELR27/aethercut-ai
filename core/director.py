@@ -168,6 +168,10 @@ REQUISITO CRÍTICO E INNEGOCIABLE DE DURACIÓN:
 - RITMO AUDIOVISUAL DINÁMICO: Ningún plano ni fondo debe permanecer estático por mucho tiempo. Cada escena debe cambiar de perspectiva: alternar entre el gancho directo del avatar, tomas de B-Roll documental reactivo en pantalla completa, tarjetas Bento con cifras duras y momentos de debate.
 - NUNCA escribas frases cortas de 1-2 líneas como speech. Cada speech debe ser un PÁRRAFO COMPLETO Y NUTRIDO.
 
+REGLAS DE FIDELIDAD TEMÁTICA, LISTAS Y RANKINGS (TOP 10, TOP 5, COMPARATIVAS):
+- FIDELIDAD TOTAL AL TEMA: Si el tema solicita un TOP (ej: "TOP 10 DE LOS PEORES PRESIDENTES EN LOS ÚLTIMOS 6 AÑOS EN AMÉRICA"), la transmisión DEBE ESTRUCTURARSE OBLIGATORIAMENTE COMO ESE TOP. Cada escena debe abordar y nombrar explícitamente a los individuos, mandatarios o puestos concretos (ej: Puesto 10: Pedro Castillo en Perú, Puesto 9: Alberto Fernández en Argentina, etc.) con sus nombres y apellidos reales, años de mandato, cargos y cifras exactas.
+- PROHIBIDO GENERALIZAR O DILUIR TEMAS EN ABSTRACCIONES: Está estrictamente prohibido hablar de "la inestabilidad regional" o "la crisis en general" sin mencionar con nombre y apellido a los personajes centrales del tema solicitado. El espectador entró a ver un TOP con nombres concretos; entregar un discurso genérico sin nombrar a los personajes arruina la producción.
+
 REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
 - Redacta cada escena como un guion audiovisual para locutor profesional: con cadencia rítmica, pausas de respiración y excelente ortografía en español.
 - CADA ORACIÓN debe tener longitud moderada (de 10 a 16 palabras) separada por comas y puntos. ESTRICTAMENTE PROHIBIDO redactar párrafos de 30 o 40 palabras seguidas sin comas intermedias.
