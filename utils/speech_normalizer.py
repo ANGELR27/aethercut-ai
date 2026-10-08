@@ -122,19 +122,39 @@ def refine_speech_cadence(text: str) -> str:
         (r"(\b\w+\b)\s+(generando\b)", r"\1, generando"),
         (r"(\b\w+\b)\s+(restando\b)", r"\1, restando"),
         (r"(\b\w+\b)\s+(poniendo en riesgo\b)", r"\1, poniendo en riesgo"),
+        (r"(\b\w+\b)\s+(a pesar de\b)", r"\1, a pesar de"),
+        (r"(\b\w+\b)\s+(mientras que\b)", r"\1, mientras que"),
     ]
 
-    # Pausa tras cláusulas subordinadas largas iniciadas por 'Cuando ...' o 'Si ...'
-    clean = re.sub(r"(Cuando\s+[\w\s]{18,38}?\b[A-Za-zÁ-ú]{4,})\s+(nos encontramos|vemos|chocamos|aparece|surge)", r"\1, \2", clean, flags=re.IGNORECASE)
+    # Pausa tras cláusulas subordinadas largas iniciadas por 'Cuando ...', 'Si ...', 'Al ...', 'Tras ...'
+    clean = re.sub(r"((?:Cuando|Si|Al|Tras)\s+[\w\s]{16,40}?\b[A-Za-zÁ-ú]{4,})\s+(nos encontramos|vemos|chocamos|aparece|surge|marca|deja)", r"\1, \2", clean, flags=re.IGNORECASE)
 
-    # Pausa tras 'en Colombia' o similares cuando van en medio de cláusula temporal
-    clean = re.sub(r"(\ben Colombia)\s+(nos encontramos|vemos|analizamos)", r"\1, \2", clean, flags=re.IGNORECASE)
+    # Pausa tras 'en Colombia' o países similares cuando van en medio de cláusula temporal
+    clean = re.sub(r"(\ben (?:Colombia|México|Argentina|España|Estados Unidos))\s+(nos encontramos|vemos|analizamos|chocamos)", r"\1, \2", clean, flags=re.IGNORECASE)
 
     for pat, rep in rules:
         clean = re.sub(pat, rep, clean, flags=re.IGNORECASE)
 
     # Si hay oraciones largas sin coma antes de 'y', agregar coma antes de la conjunción
-    clean = re.sub(r"([A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,})\s+y\s+([A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,})", r"\1, y \2", clean)
+    clean = re.sub(r"([A-Za-zÁ-ú]{3,}\s+[A-Za-zÁ-ú]{3,}\s+[A-Za-zÁ-ú]{3,})\s+y\s+([A-Za-zÁ-ú]{3,}\s+[A-Za-zÁ-ú]{3,})", r"\1, y \2", clean)
+
+    # Candado definitivo: ninguna secuencia de más de 16 palabras puede quedar sin pausa
+    # Si entre signos de puntuación (. , ; : ? !) hay más de 14 palabras, colocar coma en el conector o espacio natural central
+    def _enforce_max_segment_length(t: str, max_words: int = 14) -> str:
+        parts = re.split(r"([,.;:?!])", t)
+        out_parts = []
+        for i in range(0, len(parts), 2):
+            seg = parts[i]
+            punct = parts[i + 1] if i + 1 < len(parts) else ""
+            w_list = seg.split()
+            if len(w_list) > max_words:
+                # Partir en mitades de 8-12 palabras insertando coma
+                mid = len(w_list) // 2
+                seg = " ".join(w_list[:mid]) + ", " + " ".join(w_list[mid:])
+            out_parts.append(seg + punct)
+        return "".join(out_parts)
+
+    clean = _enforce_max_segment_length(clean, max_words=14)
 
     # Limpiar dobles comas accidentales
     clean = re.sub(r",\s*,+", ", ", clean)
