@@ -162,65 +162,10 @@ REGLAS ESTRICTAS:
         from utils.speech_normalizer import normalize_speech_for_tts
         norm_text = normalize_speech_for_tts(text)
 
-        # Dividir textos extensos en bloques naturales para evitar degradación a voz robótica/monótona
-        raw_paragraphs = [p.strip() for p in norm_text.split("\n") if p.strip()]
-        paragraphs = []
-        for p in raw_paragraphs:
-            words = p.split()
-            if len(words) > 45:
-                sentences = re.split(r"(?<=[.!?…])\s+", p)
-                current: List[str] = []
-                for s in sentences:
-                    current.append(s)
-                    if len(" ".join(current).split()) >= 28:
-                        paragraphs.append(" ".join(current))
-                        current = []
-                if current:
-                    paragraphs.append(" ".join(current))
-            else:
-                paragraphs.append(p)
-
-        if len(paragraphs) <= 1:
-            communicate = edge_tts.Communicate(text, chosen_voice, rate="+0%")
-            await communicate.save(str(out_path))
-        else:
-            chunks_dir = out_path.parent / f"chunks_{out_path.stem}"
-            chunks_dir.mkdir(parents=True, exist_ok=True)
-            chunk_files = []
-            for idx, p in enumerate(paragraphs):
-                cp = chunks_dir / f"p_{idx:03d}.mp3"
-                rate_mod = "+1%" if idx == 0 else ("-1%" if idx % 2 == 0 else "+0%")
-                pitch_mod = "+1Hz" if idx % 3 == 0 else ("-1Hz" if idx % 2 == 0 else "+0Hz")
-                comm = edge_tts.Communicate(p, chosen_voice, rate=rate_mod, pitch=pitch_mod)
-                await comm.save(str(cp))
-                chunk_files.append(cp)
-
-            concat_txt = chunks_dir / "concat.txt"
-            with open(concat_txt, "w", encoding="utf-8") as f:
-                for cf in chunk_files:
-                    f.write(f"file '{cf.resolve().as_posix()}'\n")
-
-            cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_txt), "-c", "copy", str(out_path)]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-
-        # Normalizar y recortar silencios muertos innecesarios del audio final
-        trimmed_out = out_path.parent / f"{out_path.stem}_trimmed.mp3"
-        try:
-            trim_cmd = [
-                "ffmpeg", "-y", "-i", str(out_path),
-                "-af", "silenceremove=stop_periods=-1:stop_duration=0.22:stop_threshold=-32dB:start_periods=1:start_duration=0.01:start_threshold=-32dB",
-                str(trimmed_out),
-            ]
-            res = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=15)
-            if res.returncode == 0 and trimmed_out.exists() and trimmed_out.stat().st_size > 1000:
-                trimmed_out.replace(out_path)
-        except Exception:
-            pass
+        # Síntesis directa de una sola pasada para máxima fluidez, prosodia y naturalidad humana
+        # (Sin fragmentación artificial, sin cortes intermedios ni alteraciones de pitch)
+        communicate = edge_tts.Communicate(norm_text or text, chosen_voice, rate="+0%")
+        await communicate.save(str(out_path))
 
         duration = self.get_audio_duration(out_path)
         return out_path, duration

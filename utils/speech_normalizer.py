@@ -61,59 +61,22 @@ def numero_a_palabras(n: int) -> str:
 
 def normalize_speech_for_tts(text: str) -> str:
     """
-    Normaliza el texto para síntesis neural ultra-fluida y natural:
-    1. Convierte números arábigos aislados en palabras continuas para evitar pausas
-       entre centenas y decenas (ej: '1965' -> 'mil novecientos sesenta y cinco').
-    2. Suaviza comas mecánicas o dobles signos de puntuación que producen silencios truncados.
-    3. Normaliza porcentajes, unidades y rangos ('20%' -> 'veinte por ciento').
+    Normalización limpia y respetuosa de la voz:
+    - Conserva 100% los acentos, tildes y signos naturales de puntuación del español.
+    - Únicamente limpia espacios dobles y asegura que los porcentajes (ej: 25%) se lean continuos.
+    - Cero cortes mecánicos ni fragmentaciones artificiales.
     """
     if not text:
         return ""
 
-    # Limpiar saltos de línea abruptos en mitad de oraciones
-    text = re.sub(r"\n+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    # Limpiar saltos de línea y espacios repetidos
+    text = re.sub(r"\r?\n+", " ", text)
+    text = re.sub(r"[ \t]+", " ", text).strip()
 
-    # Reemplazar porcentajes: 25% -> 25 por ciento
+    # Normalizar porcentaje para lectura fonética correcta
     text = re.sub(r"(\d+)\s*%", r"\1 por ciento", text)
 
-    # Reemplazar rangos: 10-15 -> 10 a 15
-    text = re.sub(r"(\d+)\s*-\s*(\d+)", r"\1 a \2", text)
-
-    # Función para convertir dígitos enteros en palabras
-    def _rep_num(match):
-        num_str = match.group(0)
-        try:
-            val = int(num_str)
-            if val <= 999_999_999:
-                return numero_a_palabras(val)
-        except Exception:
-            pass
-        return num_str
-
-    # Convertir números enteros aislados (años, cifras, conteos)
-    text = re.sub(r"\b\d+\b", _rep_num, text)
-
-    # Limpiar comas duplicadas o puntuaciones extrañas que cortan la respiración del TTS
-    text = re.sub(r"\s*,\s*,+", ",", text)
-    text = re.sub(r"\s*;\s*", ", ", text)
-    text = re.sub(r"\s*—\s*", " ", text)
-    text = re.sub(r"\s*-\s*", " ", text)
-    text = re.sub(r"\s*\.\s*\.+", ".", text)  # Eliminar puntos suspensivos que causan pausas muertas largas
-    text = re.sub(r"\s*:\s*", ", ", text)
-
-    # 1. Eliminar comas de muletilla y conectores iniciales ('Es que,', 'Y es que,', 'Pero,', 'Porque,', 'Así que,')
-    # que causan que el locutor se quede parado al arrancar la frase
-    text = re.sub(r"\b(es que|y es que|pero|porque|así que|por eso|o sea|la verdad|de hecho|en realidad|sin embargo|por tanto|por ende),\s*", r"\1 ", text, flags=re.IGNORECASE)
-
-    # 2. Eliminar comas disruptivas antes de conjunciones que producen pausas falsas o artificiales en TTS
-    text = re.sub(r",\s+(y|e|ni|o|u|que)\b", r" \1", text, flags=re.IGNORECASE)
-    # Eliminar comas mecánicas pegadas a palabras de enlace
-    text = re.sub(r",\s+(como|cuando|donde|porque|ya que|puesto que|pero|aunque|si)\b", r" \1", text, flags=re.IGNORECASE)
-
-    # 3. Evitar coma tras primera palabra de oración (evita pausas innecesarias en el gancho)
-    text = re.sub(r"^([A-ZÁÉÍÓÚa-záéíóú]+),\s+", r"\1 ", text)
-    # Reducir pausas de punto y coma o dobles puntos seguidos
-    text = re.sub(r"\s*([,.]){2,}\s*", r"\1 ", text)
+    # Eliminar dobles signos seguidos accidentales (ej: ,, o ..)
+    text = re.sub(r"([,.])\1+", r"\1", text)
 
     return text
