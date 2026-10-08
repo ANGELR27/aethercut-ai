@@ -1156,6 +1156,36 @@ async def cleanup_storage_endpoint():
     }
 
 
+@app.post("/api/tts-preview")
+async def tts_preview_endpoint(payload: Dict[str, Any] = Body(...)):
+    """Genera una muestra de voz en tiempo real para preescucha en la ventana flotante del Studio."""
+    import edge_tts
+    from utils.speech_normalizer import normalize_speech_for_tts
+
+    voice = str(payload.get("voice") or "es-MX-JorgeNeural").strip()
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        text = "¡Paren las rotativas un segundo! La realidad y los números tienen otros planes: los registros oficiales confirman que la cifra real es contundente. ¡Dato mata relato, mi gente!"
+
+    norm_text = normalize_speech_for_tts(text)
+
+    # Generar en memoria para respuesta de baja latencia
+    mp3_buffer = io.BytesIO()
+    communicate = edge_tts.Communicate(norm_text or text, voice, rate="+0%")
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            mp3_buffer.write(chunk["data"])
+
+    mp3_buffer.seek(0)
+    if mp3_buffer.getbuffer().nbytes == 0:
+        raise HTTPException(status_code=500, detail="No se pudo sintetizar el audio con esta voz.")
+
+    return StreamingResponse(mp3_buffer, media_type="audio/mpeg", headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Content-Disposition": f"inline; filename=preview_{voice}.mp3"
+    })
+
+
 if __name__ == "__main__":
     import uvicorn
     safe_log("[Server] AetherCut AI en http://127.0.0.1:8000")

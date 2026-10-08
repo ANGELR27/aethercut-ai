@@ -2373,6 +2373,133 @@ document.addEventListener("DOMContentLoaded", () => {
 
     loadSavedProjects();
 
+    // =========================================================================
+    // MODAL FLOTANTE DE AUDICIÓN DE VOCES & PRUEBA DE ORACIONES LARGAS
+    // =========================================================================
+    const btnOpenVoiceTester = $("btnOpenVoiceTester");
+    const voiceTesterModal = $("voiceTesterModal");
+    const voiceTesterCloseBtn = $("voiceTesterCloseBtn");
+    const modalVoiceSelect = $("modalVoiceSelect");
+    const modalVoiceText = $("modalVoiceText");
+    const btnSynthesizeVoiceTest = $("btnSynthesizeVoiceTest");
+    const voiceTesterStatus = $("voiceTesterStatus");
+    const voicePlayerContainer = $("voicePlayerContainer");
+    const modalVoiceAudioPlayer = $("modalVoiceAudioPlayer");
+    const btnApplyVoiceToStudio = $("btnApplyVoiceToStudio");
+    const streamerVoice = $("streamerVoice");
+
+    if (btnOpenVoiceTester && voiceTesterModal) {
+        btnOpenVoiceTester.addEventListener("click", () => {
+            // Sincronizar voz actual seleccionada en la UI
+            if (streamerVoice && modalVoiceSelect) {
+                modalVoiceSelect.value = streamerVoice.value;
+            }
+            voiceTesterModal.hidden = false;
+        });
+
+        const closeVoiceTester = () => {
+            voiceTesterModal.hidden = true;
+            if (modalVoiceAudioPlayer) {
+                modalVoiceAudioPlayer.pause();
+                modalVoiceAudioPlayer.src = "";
+            }
+            if (voicePlayerContainer) {
+                voicePlayerContainer.style.display = "none";
+            }
+            if (voiceTesterStatus) {
+                voiceTesterStatus.textContent = "Presiona «Escuchar Voz» para generar la prueba en directo.";
+                voiceTesterStatus.style.color = "#94a3b8";
+            }
+        };
+
+        if (voiceTesterCloseBtn) {
+            voiceTesterCloseBtn.addEventListener("click", closeVoiceTester);
+        }
+
+        voiceTesterModal.addEventListener("click", (e) => {
+            if (e.target === voiceTesterModal) closeVoiceTester();
+        });
+
+        // Botones de frases de muestra rápida
+        document.querySelectorAll(".sample-phrase-btn").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const phrase = btn.getAttribute("data-phrase");
+                if (phrase && modalVoiceText) {
+                    modalVoiceText.value = phrase;
+                }
+            });
+        });
+
+        // Sintetizar y reproducir audio en tiempo real
+        if (btnSynthesizeVoiceTest) {
+            btnSynthesizeVoiceTest.addEventListener("click", async () => {
+                const selectedVoice = modalVoiceSelect?.value || "es-MX-JorgeNeural";
+                const textToTest = modalVoiceText?.value?.trim() || "";
+
+                if (!textToTest) {
+                    if (voiceTesterStatus) {
+                        voiceTesterStatus.textContent = "Por favor escribe un texto para probar.";
+                        voiceTesterStatus.style.color = "#f87171";
+                    }
+                    return;
+                }
+
+                btnSynthesizeVoiceTest.disabled = true;
+                btnSynthesizeVoiceTest.innerHTML = "<span>⏳ Sintetizando audio...</span>";
+                if (voiceTesterStatus) {
+                    voiceTesterStatus.textContent = `Generando voz neuronal con ${selectedVoice}...`;
+                    voiceTesterStatus.style.color = "#38bdf8";
+                }
+
+                try {
+                    const response = await fetch("/api/tts-preview", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ voice: selectedVoice, text: textToTest }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Error en servidor (${response.status})`);
+                    }
+
+                    const audioBlob = await response.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+
+                    if (modalVoiceAudioPlayer && voicePlayerContainer) {
+                        modalVoiceAudioPlayer.src = audioUrl;
+                        voicePlayerContainer.style.display = "flex";
+                        modalVoiceAudioPlayer.play().catch(() => {});
+                    }
+
+                    if (voiceTesterStatus) {
+                        voiceTesterStatus.textContent = "✓ Audio generado con éxito. Escucha el ritmo y la dicción.";
+                        voiceTesterStatus.style.color = "#4ade80";
+                    }
+                } catch (err) {
+                    console.error("Error probando voz:", err);
+                    if (voiceTesterStatus) {
+                        voiceTesterStatus.textContent = `Error generando audio: ${err.message}`;
+                        voiceTesterStatus.style.color = "#f87171";
+                    }
+                } finally {
+                    btnSynthesizeVoiceTest.disabled = false;
+                    btnSynthesizeVoiceTest.innerHTML = "<span>▶ Escuchar Voz</span>";
+                }
+            });
+        }
+
+        // Botón "Usar esta voz en el Studio"
+        if (btnApplyVoiceToStudio) {
+            btnApplyVoiceToStudio.addEventListener("click", () => {
+                const chosen = modalVoiceSelect?.value;
+                if (chosen && streamerVoice) {
+                    streamerVoice.value = chosen;
+                }
+                closeVoiceTester();
+            });
+        }
+    }
+
     // Auto-abrir proyecto o tarea si está presente en la URL o en localStorage
     const initialUrl = new URL(window.location.href);
     const urlProjectId = initialUrl.searchParams.get("project");
