@@ -195,11 +195,20 @@ class SceneEngine:
             card_img_path = scene_dir / f"card_{scene.scene_id}.png"
             self.card_renderer.render(card_obj, card_img_path)
 
-        # 3b. Preparar chips / pastillas referenciales dinámicas (países, marcas, entidades)
+        # 3b. Preparar chips / pastillas referenciales dinámicas sincronizadas con el momento en que se mencionan
         chips_img_path = None
+        chip_start_time = 0.8
         if getattr(scene, "chips", None) and scene.chips:
             out_chip_path = scene_dir / f"chips_{scene.scene_id}.png"
             chips_img_path = self._render_chips_overlay(scene.chips, out_chip_path)
+            # Buscar si alguna oración contiene los términos de los chips para hacer el pop-up en el segundo exacto
+            if sentence_boundaries:
+                chip_keywords = [str(c).lower() for c in scene.chips]
+                for s_st, _s_en, s_txt in sentence_boundaries:
+                    low_txt = s_txt.lower()
+                    if any(kw in low_txt for kw in chip_keywords):
+                        chip_start_time = max(0.5, round(s_st, 2))
+                        break
 
         # 3c. Preparar Rótulo Broadcast Lower Third si no hay tarjeta Bento para contexto visual
         lower_third_img_path = None
@@ -344,19 +353,21 @@ class SceneEngine:
             filter_parts.append(f"[{cur_v}][{ch_idx}:v]overlay={cx}:{cy}:enable='between(t,0.5,{duration-0.3:.2f})'[v_chat]")
             cur_v = "v_chat"
 
-        # Overlay de chips / pastillas referenciales dinámicas sincronizadas con la tarjeta (máximo 5s)
+        # Overlay de chips / pastillas referenciales dinámicas sincronizadas con la locución (popup de 3.5s a 4.5s)
         if chips_img_path and chips_img_path.exists():
             inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(chips_img_path)])
             chp_idx = num_in
             num_in += 1
             chip_x = 85 if not self.is_vertical else 30
             chip_y = (190 + 330 + 16) if (card_img_path and not self.is_vertical) else (190 if not self.is_vertical else int(self.H * 0.45))
-            chip_end = (0.5 + card_duration) if card_duration > 0 else (duration - 0.3)
-            ch_fo = max(0.6, chip_end - 0.35)
+            # Duración del pop-up: 3.5 segundos o hasta el final de la escena
+            chip_dur = 3.5
+            chip_end = min(duration - 0.25, round(chip_start_time + chip_dur, 2))
+            ch_fo = max(chip_start_time + 0.3, chip_end - 0.35)
             filter_parts.append(
-                f"[{chp_idx}:v]format=rgba,fade=t=in:st=0.6:d=0.3:alpha=1,fade=t=out:st={ch_fo:.2f}:d=0.35:alpha=1[chips_animated]"
+                f"[{chp_idx}:v]format=rgba,fade=t=in:st={chip_start_time:.2f}:d=0.25:alpha=1,fade=t=out:st={ch_fo:.2f}:d=0.35:alpha=1[chips_animated]"
             )
-            filter_parts.append(f"[{cur_v}][chips_animated]overlay={chip_x}:{chip_y}:enable='between(t,0.6,{chip_end:.2f})'[v_chips]")
+            filter_parts.append(f"[{cur_v}][chips_animated]overlay={chip_x}:{chip_y}:enable='between(t,{chip_start_time:.2f},{chip_end:.2f})'[v_chips]")
             cur_v = "v_chips"
 
         # Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)

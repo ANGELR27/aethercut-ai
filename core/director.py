@@ -196,6 +196,7 @@ RESPONDE EXCLUSIVAMENTE EN FORMATO JSON VÁLIDO:
         "badge": "COMPARATIVA"
       }},
       "speech": "Miren los datos duros que tenemos en pantalla, con trescientos millones frente a apenas seis millones de receptores. La diferencia es monumental, y explica por qué su capacidad de rastreo supera todo lo imaginable.",
+      "chips": ["Canis lupus", "Homo sapiens"],
       "visual_query": "dog biology scientific research laboratory 4k video",
       "visual_query2": "microscopic sensory receptors biology animation video",
       "sfx": "chime",
