@@ -690,6 +690,101 @@ class InfoCardRenderer:
 
         return f"{path_mito}|{path_real}"
 
+    def render_broadcast_lower_third(
+        self,
+        headline: str,
+        subtitle: str = "",
+        tag: str = "EN VIVO",
+        out_path: Optional[Path] = None,
+    ) -> Path:
+        """
+        Rótulo de televisión broadcast (Lower Third) estilo documental contemporáneo:
+        - Franja de vidrio ahumado (Glassmorphism Obsidian / Slate)
+        - Badge lateral luminoso (ej: EN VIVO, ANÁLISIS GLOBAL, DATO CLAVE)
+        - Titular nítido de alto impacto + subtítulo explicativo o ubicación
+        - Sombra ambiental difusa y rim highlight superior
+        """
+        scale = 2
+        card_w = int(self.frame_w * (0.86 if self.portrait else 0.48))
+        card_h = 104 if not subtitle else 126
+
+        W = card_w * scale
+        H = card_h * scale
+        radius = 18 * scale
+
+        im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(im)
+
+        # Fondo Obsidian Glass
+        bg_col = (16, 17, 22, 235) if self.theme == "dark" else (248, 249, 250, 240)
+        border_col = (255, 255, 255, 55) if self.theme == "dark" else (200, 205, 215, 255)
+        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=radius, fill=bg_col, outline=border_col, width=1 * scale)
+
+        # Tipografías Segoe UI
+        f_tag = _font(["segoeuib.ttf", "arialbd.ttf"], 11 * scale)
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], 18 * scale)
+        f_sub = _font(["segoeui.ttf", "arial.ttf"], 13 * scale)
+
+        pad_x = 22 * scale
+        cur_y = 16 * scale
+
+        # 1. Tag / Badge superior
+        clean_tag = (tag or "ANÁLISIS").strip().upper()
+        tw = d.textlength(clean_tag, font=f_tag)
+        badge_w = int(tw + (24 * scale))
+        badge_h = 22 * scale
+        badge_bg = (30, 32, 40, 255) if self.theme == "dark" else (230, 234, 242, 255)
+        badge_border = (255, 255, 255, 60) if self.theme == "dark" else (190, 195, 205, 255)
+        d.rounded_rectangle((pad_x, cur_y, pad_x + badge_w, cur_y + badge_h), radius=badge_h // 2, fill=badge_bg, outline=badge_border, width=1 * scale)
+        
+        # Punto luminoso
+        dot_r = 3 * scale
+        dot_cx = pad_x + (8 * scale)
+        dot_cy = cur_y + (badge_h // 2)
+        d.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=(52, 211, 153, 255))
+        d.text((pad_x + (16 * scale), dot_cy), clean_tag, font=f_tag, fill=(255, 255, 255, 255) if self.theme == "dark" else (20, 20, 20, 255), anchor="lm")
+        cur_y += badge_h + (8 * scale)
+
+        # 2. Titular principal
+        title_txt = headline.strip()
+        if d.textlength(title_txt, font=f_title) > (W - pad_x * 2):
+            # Recortar con elipsis si excede
+            while title_txt and d.textlength(title_txt + "…", font=f_title) > (W - pad_x * 2):
+                title_txt = title_txt[:-1]
+            title_txt = title_txt.strip() + "…"
+        d.text((pad_x, cur_y), title_txt, font=f_title, fill=(255, 255, 255, 255) if self.theme == "dark" else (15, 17, 23, 255))
+        cur_y += int(24 * scale)
+
+        # 3. Subtítulo o ubicación si existe
+        if subtitle:
+            sub_txt = subtitle.strip()
+            if d.textlength(sub_txt, font=f_sub) > (W - pad_x * 2):
+                while sub_txt and d.textlength(sub_txt + "…", font=f_sub) > (W - pad_x * 2):
+                    sub_txt = sub_txt[:-1]
+                sub_txt = sub_txt.strip() + "…"
+            d.text((pad_x, cur_y), sub_txt, font=f_sub, fill=(180, 185, 195, 255) if self.theme == "dark" else (100, 105, 115, 255))
+
+        # Downscale con Lanczos
+        final_w = W // scale
+        final_h = H // scale
+        comp_card = im.resize((final_w, final_h), Image.LANCZOS)
+
+        # Sombra ambiental difusa
+        margin = 20
+        shadow = Image.new("RGBA", (final_w + 2 * margin, final_h + 2 * margin), (0, 0, 0, 0))
+        s_draw = ImageDraw.Draw(shadow)
+        s_draw.rounded_rectangle((margin, margin + 4, margin + final_w, margin + final_h + 4), radius=radius // scale, fill=(0, 0, 0, 160))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(10))
+
+        out_img = Image.new("RGBA", (final_w + 2 * margin, final_h + 2 * margin), (0, 0, 0, 0))
+        out_img.paste(shadow, (0, 0), shadow)
+        out_img.paste(comp_card, (margin, margin), comp_card)
+
+        target = out_path or Path("lower_third.png")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        out_img.save(target, "PNG")
+        return target
+
     def render_all(self, cards: List[InfoCard], workdir: Path) -> List[InfoCard]:
         for card in cards:
             if not card.enabled or card.verdict not in ("supported", "contradicted", "insufficient"):

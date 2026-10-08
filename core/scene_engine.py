@@ -201,6 +201,23 @@ class SceneEngine:
             out_chip_path = scene_dir / f"chips_{scene.scene_id}.png"
             chips_img_path = self._render_chips_overlay(scene.chips, out_chip_path)
 
+        # 3c. Preparar Rótulo Broadcast Lower Third si no hay tarjeta Bento para contexto visual
+        lower_third_img_path = None
+        if not card_img_path and scene.type in ("video_reaction", "breaking_news", "avatar_cam") and duration >= 4.0:
+            lt_tag = "NOTICIA EN VIVO" if scene.type == "breaking_news" else ("REACCIÓN EN VIVO" if scene.type == "video_reaction" else "EN VIVO")
+            lt_sub = (scene.speech[:75].rsplit(" ", 1)[0] + "…") if len(scene.speech) > 75 else scene.speech
+            out_lt_path = scene_dir / f"lower_third_{scene.scene_id}.png"
+            try:
+                lower_third_img_path = self.card_renderer.render_broadcast_lower_third(
+                    headline=scene.name,
+                    subtitle=lt_sub,
+                    tag=lt_tag,
+                    out_path=out_lt_path,
+                )
+            except Exception as exc_lt:
+                safe_log(f"[SceneEngine] Fallback lower third: {exc_lt}")
+                lower_third_img_path = None
+
         # 4. Generar subtítulos para la escena
         srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
 
@@ -280,16 +297,43 @@ class SceneEngine:
                 )
             cur_v = "v_av"
 
-        # Overlay adicional según tipo de escena o si tiene tarjeta HUD (máximo 5 segundos de visibilidad)
+        # Overlay adicional según tipo de escena o si tiene tarjeta HUD (máximo 5 segundos de visibilidad con slide suave)
         if card_img_path and card_img_path.exists():
             inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(card_img_path)])
             c_idx = num_in
             num_in += 1
-            card_x = 85 if not self.is_vertical else 30
-            card_y = 190 if not self.is_vertical else int(self.H * 0.40)
             card_end = 0.5 + card_duration
-            filter_parts.append(f"[{cur_v}][{c_idx}:v]overlay={card_x}:{card_y}:enable='between(t,0.5,{card_end:.2f})'[v_card]")
+            fo_start = max(0.0, card_end - 0.4)
+            # Motion Graphics: Fade in 0.35s + Fade out suave 0.35s
+            filter_parts.append(
+                f"[{c_idx}:v]format=rgba,fade=t=in:st=0.5:d=0.35:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
+            )
+            # Entrada con slide suave (deslizamiento ease-out de 30px hacia su posición)
+            slide_dist = 28
+            slide_calc = f"min(max((t-0.5)/0.4\\,0)\\,1)"
+            ease_x = f"85-{slide_dist}*(1-pow({slide_calc}\\,3))" if not self.is_vertical else f"30-{slide_dist}*(1-pow({slide_calc}\\,3))"
+            card_y = 190 if not self.is_vertical else int(self.H * 0.40)
+            filter_parts.append(f"[{cur_v}][card_animated]overlay=x='{ease_x}':y={card_y}:enable='between(t,0.5,{card_end:.2f})'[v_card]")
             cur_v = "v_card"
+
+        elif lower_third_img_path and lower_third_img_path.exists():
+            # Rótulo Broadcast Lower Third con entrada en el segundo 0.8 hasta el 4.8
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(lower_third_img_path)])
+            lt_idx = num_in
+            num_in += 1
+            lt_start = 0.8
+            lt_end = min(duration - 0.4, 4.8)
+            lt_fo = max(lt_start, lt_end - 0.4)
+            filter_parts.append(
+                f"[{lt_idx}:v]format=rgba,fade=t=in:st={lt_start}:d=0.35:alpha=1,fade=t=out:st={lt_fo:.2f}:d=0.35:alpha=1[lt_animated]"
+            )
+            lt_x = 60 if not self.is_vertical else 30
+            lt_y = int(self.H - 180) if not self.is_vertical else int(self.H * 0.70)
+            slide_dist = 26
+            slide_calc = f"min(max((t-{lt_start})/0.4\\,0)\\,1)"
+            ease_y = f"{lt_y}+{slide_dist}*(1-pow({slide_calc}\\,3))"
+            filter_parts.append(f"[{cur_v}][lt_animated]overlay=x={lt_x}:y='{ease_y}':enable='between(t,{lt_start},{lt_end:.2f})'[v_lt]")
+            cur_v = "v_lt"
 
         elif scene.type == "chat_debate" and chat_overlay_path and chat_overlay_path.exists():
             inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(chat_overlay_path)])
@@ -308,7 +352,11 @@ class SceneEngine:
             chip_x = 85 if not self.is_vertical else 30
             chip_y = (190 + 330 + 16) if (card_img_path and not self.is_vertical) else (190 if not self.is_vertical else int(self.H * 0.45))
             chip_end = (0.5 + card_duration) if card_duration > 0 else (duration - 0.3)
-            filter_parts.append(f"[{cur_v}][{chp_idx}:v]overlay={chip_x}:{chip_y}:enable='between(t,0.6,{chip_end:.2f})'[v_chips]")
+            ch_fo = max(0.6, chip_end - 0.35)
+            filter_parts.append(
+                f"[{chp_idx}:v]format=rgba,fade=t=in:st=0.6:d=0.3:alpha=1,fade=t=out:st={ch_fo:.2f}:d=0.35:alpha=1[chips_animated]"
+            )
+            filter_parts.append(f"[{cur_v}][chips_animated]overlay={chip_x}:{chip_y}:enable='between(t,0.6,{chip_end:.2f})'[v_chips]")
             cur_v = "v_chips"
 
         # Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
