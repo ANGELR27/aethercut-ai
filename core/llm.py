@@ -141,57 +141,128 @@ class LLMClient:
         deadline = time.monotonic() + self.REQUEST_DEADLINE_SEC
 
         models = self.models[:max_models] if max_models else self.models
-        for model in models:
-            for attempt in range(1, attempts_per_model + 1):
-                if cancel_event is not None and cancel_event.is_set():
-                    raise CancellationRequested()
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise RuntimeError(f"Gemini no respondió dentro del límite de {self.REQUEST_DEADLINE_SEC // 60} minutos.") from last_exc
-                try:
-                    report(f"Enviando solicitud a Gemini ({model}, intento {attempt}/{attempts_per_model}).")
-                    request_client = self._client_with_timeout(
-                        client, min(self.RESPONSE_TIMEOUT_MS, int(remaining * 1000)))
-                    response = request_client.models.generate_content(model=model, contents=contents, config=config)
-                    text = response.text
-                    if not text:
-                        raise ValueError("respuesta vacía")
-                    self.last_model_used = model
-                    return text
-                except Exception as exc:
-                    if isinstance(exc, CancellationRequested):
-                        raise
+
+        # Si se pasó un cliente específico (ej. upload multimodal vinculado a un proyecto concreto),
+        # probar únicamente con ese cliente en los modelos permitidos.
+        # Si NO se pasó cliente específico, rotar a través de las claves disponibles de Gemini.
+        clients_to_try = [client] if client is not None else [self.client_for_key(k) for k in self.ordered_api_keys()]
+
+        for active_client in clients_to_try:
+            for model in models:
+                for attempt in range(1, attempts_per_model + 1):
                     if cancel_event is not None and cancel_event.is_set():
-                        raise CancellationRequested() from exc
-                    last_exc = exc
-                    status = self._status_of(exc)
-                    safe_log(f"[LLM] {model} intento {attempt}/{attempts_per_model} falló ({status or 'error'}): {str(exc)[:110]}")
-                    if status in (404, 400):
-                        report(f"Gemini rechazó {model}; probando el siguiente modelo disponible.")
-                        break  # el modelo no existe o la petición es inválida para este modelo
-                    if status in (401, 403):
-                        if client is not None:
-                            raise GeminiAPIError(status, str(exc)) from exc
-                        report(f"La clave actual no fue aceptada por Gemini; probando otra clave.")
-                        continue # La llave actual falló, probar inmediatamente con la siguiente
-                    if status == 429:
-                        if client is not None:
-                            raise GeminiAPIError(status, str(exc)) from exc
-                        report("Este proyecto alcanzó su cuota temporal; probando el siguiente proyecto.")
-                        continue
-                    if client is not None and status in (500, 502, 503, 504):
-                        # Cuando Google devuelve 503 (alta demanda), el proyecto completo o su cuota está congestionado.
-                        # Rotar de inmediato a la siguiente clave/proyecto evita demoras innecesarias entre modelos.
-                        raise GeminiAPIError(status, str(exc)) from exc
-                    if client is not None and status is None:
-                        raise GeminiAPIError(503, str(exc)) from exc
-                    delay = min(2 * attempt, 4)
-                    report(f"Gemini devolvió un error temporal; reintento en {delay} s.")
-                    time.sleep(delay)
+                        raise CancellationRequested()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    try:
+                        report(f"Enviando solicitud a Gemini ({model}, intento {attempt}/{attempts_per_model}).")
+                        request_client = self._client_with_timeout(
+                            active_client, min(self.RESPONSE_TIMEOUT_MS, int(remaining * 1000)))
+                        response = request_client.models.generate_content(model=model, contents=contents, config=config)
+                        text = response.text
+                        if not text:
+                            raise ValueError("respuesta vacía")
+                        self.last_model_used = model
+                        return text
+                    except Exception as exc:
+                        if isinstance(exc, CancellationRequested):
+                            raise
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise CancellationRequested() from exc
+                        last_exc = exc
+                        status = self._status_of(exc)
+                        safe_log(f"[LLM] {model} intento {attempt}/{attempts_per_model} falló ({status or 'error'}): {str(exc)[:110]}")
+                        if status in (404, 400):
+                            report(f"Gemini rechazó {model}; probando el siguiente modelo disponible.")
+                            break  # el modelo no existe o la petición es inválida para este modelo
+                        if status in (401, 403, 429, 500, 502, 503, 504):
+                            # Rotar de inmediato a la siguiente clave/proyecto de Gemini
+                            break
+                        delay = min(2 * attempt, 3)
+                        time.sleep(delay)
+
+        # Si todas las claves/modelos de Gemini fallaron o se saturaron, recurrir a NVIDIA como respaldo
+        # (siempre que el prompt sea de texto)
+        if isinstance(contents, (str, list)) and getattr(settings, "NVIDIA_API_KEY", None):
+            # Extraer prompt textual
+            text_prompt = ""
+            if isinstance(contents, str):
+                text_prompt = contents
+            elif isinstance(contents, list):
+                text_parts = [c for c in contents if isinstance(c, str)]
+                if text_parts:
+                    text_prompt = "\n\n".join(text_parts)
+
+            if text_prompt:
+                report("Gemini saturado o con cuota agotada. Activando respaldo de alta velocidad NVIDIA...")
+                safe_log(f"[LLM] Fallback automático a API de NVIDIA...")
+                try:
+                    nv_res = self._generate_with_nvidia(text_prompt, json_mode=json_mode, report=report)
+                    if nv_res:
+                        return nv_res
+                except Exception as nv_exc:
+                    safe_log(f"[LLM] Error en fallback de NVIDIA: {nv_exc}")
+
         status = self._status_of(last_exc) if last_exc else None
         if status is not None:
             raise GeminiAPIError(status, str(last_exc)) from last_exc
-        raise RuntimeError(f"Ningún modelo de Gemini respondió. Último error: {last_exc}")
+        raise RuntimeError(f"Ningún proveedor de IA (Gemini ni NVIDIA) respondió. Último error: {last_exc}")
+
+    def _generate_with_nvidia(self, prompt: str, json_mode: bool = False, report: Optional[Callable[[str], None]] = None) -> str:
+        """Generador de respaldo usando NVIDIA AI Foundations (OpenAI compatible)."""
+        from openai import OpenAI
+        api_key = getattr(settings, "NVIDIA_API_KEY", "")
+        if not api_key:
+            raise ValueError("NVIDIA_API_KEY no configurada")
+
+        candidate_models = [
+            getattr(settings, "NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct"),
+            "meta/llama-3.2-90b-vision-instruct",
+            "meta/llama-3.2-11b-vision-instruct",
+        ]
+        # Quitar duplicados conservando orden
+        models = list(dict.fromkeys(candidate_models))
+
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=api_key,
+            timeout=45.0,
+        )
+
+        system_instruction = (
+            "Eres un asistente de producción y redacción audiovisual de élite. "
+            "Responde estrictamente con la información solicitada."
+        )
+        if json_mode:
+            system_instruction += " DEBES RESPONDER EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO. Sin explicaciones previas ni posteriores, sin bloques markdown innecesarios."
+
+        last_error = None
+        for m in models:
+            try:
+                if report:
+                    report(f"Generando con NVIDIA ({m})...")
+                safe_log(f"[LLM] Enviando petición a NVIDIA model={m}...")
+                response = client.chat.completions.create(
+                    model=m,
+                    messages=[
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=3000,
+                )
+                text = response.choices[0].message.content or ""
+                if text.strip():
+                    self.last_model_used = f"nvidia:{m}"
+                    safe_log(f"[LLM] Respuesta exitosa obtenida desde NVIDIA ({m}).")
+                    return text.strip()
+            except Exception as exc:
+                last_error = exc
+                safe_log(f"[LLM] NVIDIA model={m} falló: {exc}")
+                continue
+
+        raise RuntimeError(f"Ningún modelo de NVIDIA respondió: {last_error}")
 
 
 class GeminiAPIError(RuntimeError):
