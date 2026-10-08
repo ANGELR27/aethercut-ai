@@ -641,6 +641,7 @@ class SceneEngine:
             "-safe", "0",
             "-i", str(concat_list_file),
             "-c", "copy",
+            "-movflags", "+faststart",
             str(output_file),
         ]
 

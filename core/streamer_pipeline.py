@@ -789,6 +789,7 @@ class StreamerPipeline:
             "-crf", "20",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-movflags", "+faststart",
             "-t", dur_str,
             str(out_path)
         ]
