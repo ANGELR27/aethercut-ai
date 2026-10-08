@@ -176,7 +176,7 @@ RESPONDE EXCLUSIVAMENTE EN FORMATO JSON VÁLIDO:
       "type": "avatar_cam",
       "emotion": "excited",
       "camera": "hero_center",
-      "speech": "[MÍNIMO {words_per_scene} PALABRAS] ¿Alguna vez te has preguntado cómo percibe el mundo un animal frente a nosotros? Los números son demoledores y la evidencia científica cambia por completo nuestra perspectiva... [CONTINUAR DESARROLLANDO EXTENSAMENTE el gancho con oraciones fluidas, sin comas innecesarias ni saludos cliché]",
+      "speech": "¿Alguna vez te has preguntado cómo percibe el mundo un animal frente a nosotros? Los números son demoledores, y la evidencia científica más reciente cambia por completo nuestra perspectiva habitual.",
       "visual_query": "high quality cinematic documentary 4k video",
       "visual_query2": "nature wildlife cinematic motion footage hd",
       "sfx": "whoosh",
@@ -193,7 +193,7 @@ RESPONDE EXCLUSIVAMENTE EN FORMATO JSON VÁLIDO:
         "body": "Receptores olfativos del perro comparados con los del ser humano según estudios biológicos.",
         "badge": "COMPARATIVA"
       }},
-      "speech": "[MÍNIMO {words_per_scene} PALABRAS] Miren los datos duros que tenemos en pantalla con trescientos millones frente a apenas seis millones de receptores... [DESARROLLAR EN EXTENSO analizando la cifra con ritmo continuo y fluido]",
+      "speech": "Miren los datos duros que tenemos en pantalla, con trescientos millones frente a apenas seis millones de receptores. La diferencia es monumental, y explica por qué su capacidad de rastreo supera todo lo imaginable.",
       "visual_query": "dog biology scientific research laboratory 4k video",
       "visual_query2": "microscopic sensory receptors biology animation video",
       "sfx": "chime",
