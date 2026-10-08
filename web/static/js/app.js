@@ -602,13 +602,25 @@ document.addEventListener("DOMContentLoaded", () => {
             delBtn.addEventListener("click", async (e) => {
                 e.stopPropagation();
                 if (!confirm(`¿Eliminar proyecto «${project.name}»? Se liberará el espacio en disco.`)) return;
+                delBtn.disabled = true;
+                delBtn.textContent = "…";
                 try {
                     const res = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
                     if (res.ok) {
+                        allLoadedProjects = allLoadedProjects.filter(p => p.id !== project.id);
+                        renderProjectsGrid();
                         loadSavedProjects();
+                    } else {
+                        const errData = await res.json().catch(() => ({}));
+                        alert(errData.detail || "No se pudo eliminar el proyecto.");
+                        delBtn.disabled = false;
+                        delBtn.innerHTML = `✕`;
                     }
                 } catch (err) {
                     console.error("Error eliminando:", err);
+                    alert("Error de conexión al eliminar el proyecto.");
+                    delBtn.disabled = false;
+                    delBtn.innerHTML = `✕`;
                 }
             });
 
@@ -1110,8 +1122,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     cancelBtn.addEventListener("click", async () => {
-        if (!observedTaskId || cancelBtn.disabled) return;
-        const targetId = observedTaskId;
+        const targetId = observedTaskId || localStorage.getItem("currentTaskId") || new URL(window.location.href).searchParams.get("task");
+        if (!targetId || cancelBtn.disabled) return;
         cancelBtn.disabled = true;
         cancelBtn.textContent = "Cancelando…";
         try {
@@ -1139,9 +1151,9 @@ document.addEventListener("DOMContentLoaded", () => {
             url.searchParams.delete("task");
             window.history.replaceState({}, "", url);
             
-            if (eventSource) {
-                eventSource.close();
-                eventSource = null;
+            if (activeStream) {
+                activeStream.close();
+                activeStream = null;
             }
             observedTaskId = null;
         } catch (error) {
@@ -1959,6 +1971,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Inicializar tendencias al arrancar
     loadTrendingTopics();
+    $("refreshTrendingBtn")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        loadTrendingTopics();
+    });
 
     // Sincronizar topic input con readout en vivo
     $("streamerTopic")?.addEventListener("input", (e) => {

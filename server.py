@@ -1067,7 +1067,13 @@ async def get_trending_topics():
                         continue
             return results
 
-        news_items = await asyncio.to_thread(_fetch_multi_news)
+        async def _fetch_with_timeout():
+            return await asyncio.to_thread(_fetch_multi_news)
+
+        try:
+            news_items = await asyncio.wait_for(_fetch_with_timeout(), timeout=3.5)
+        except Exception:
+            news_items = []
         
         cat_emojis = {
             "descubrimientos": "🔬",
@@ -1092,24 +1098,47 @@ async def get_trending_topics():
             if len(topics) >= 8:
                 break
 
-        if topics:
+        if topics and len(topics) >= 4:
             return {"topics": topics}
     except Exception as exc:
         safe_log(f"[Trending] Fallback en noticias: {exc}")
 
-    # Fallback diverso y categorizado por si no hay conexión de red externa
-    FALLBACK_TOPICS = [
-        {"title": "Misión Europa Clipper y Océanos en el Sistema Solar", "category": "descubrimientos", "emoji": "🚀"},
-        {"title": "Debate Ético y Regulación Global sobre la IA Autónoma", "category": "polemicas", "emoji": "🔥"},
-        {"title": "Nuevo Hallazgo Arqueológico Desafía la Historia de la Humanidad", "category": "descubrimientos", "emoji": "🏺"},
-        {"title": "Baterías Cuánticas y la Revolución de la Energía Limpia", "category": "noticias", "emoji": "⚡"},
-        {"title": "El Misterio de las Señales Cósmicas Rápidas Detectadas en el Espacio", "category": "descubrimientos", "emoji": "🔭"},
-        {"title": "Polémica Viral: La Transformación del Mercado Laboral con Robótica", "category": "polemicas", "emoji": "🤖"},
-        {"title": "Terapias Genéticas CRISPR Curan Enfermedades Hereditarias", "category": "noticias", "emoji": "🧬"},
-        {"title": "Diez Curiosidades Ocultas de la Naturaleza que Desafían la Ciencia", "category": "virales", "emoji": "🌍"},
+    # Banco rico y rotativo de temas y noticias virales actualizadas
+    ROTATING_BANKS = [
+        [
+            {"title": "Misión Europa Clipper y Océanos en el Sistema Solar", "category": "descubrimientos", "emoji": "🚀"},
+            {"title": "Debate Ético y Regulación Global sobre la IA Autónoma", "category": "polemicas", "emoji": "🔥"},
+            {"title": "Nuevo Hallazgo Arqueológico Desafía la Historia de la Humanidad", "category": "descubrimientos", "emoji": "🏺"},
+            {"title": "Baterías Cuánticas y la Revolución de la Energía Limpia", "category": "noticias", "emoji": "⚡"},
+            {"title": "El Misterio de las Señales Cósmicas Rápidas Detectadas en el Espacio", "category": "descubrimientos", "emoji": "🔭"},
+            {"title": "Polémica Viral: La Transformación del Mercado Laboral con Robótica", "category": "polemicas", "emoji": "🤖"},
+            {"title": "Terapias Genéticas CRISPR Curan Enfermedades Hereditarias", "category": "noticias", "emoji": "🧬"},
+            {"title": "Diez Curiosidades Ocultas de la Naturaleza que Desafían la Ciencia", "category": "virales", "emoji": "🌍"},
+        ],
+        [
+            {"title": "Descubren Ciudad Subterránea Milenaria Oculta en la Selva", "category": "descubrimientos", "emoji": "🏛️"},
+            {"title": "Peligros y Oportunidades de la Computación Cuántica en Ciberseguridad", "category": "polemicas", "emoji": "💻"},
+            {"title": "La Verdad sobre el Telescopio Espacial James Webb y las Primeras Galaxias", "category": "descubrimientos", "emoji": "🌌"},
+            {"title": "Fusión Nuclear Comercial: El Avance que Cambiará la Energía Mundial", "category": "noticias", "emoji": "⚡"},
+            {"title": "Controversia Científica: ¿Tienen Consciencia los Animales más Inteligentes?", "category": "polemicas", "emoji": "🧠"},
+            {"title": "Microplásticos en el Cuerpo Humano: Nuevas Investigaciones Médicas", "category": "noticias", "emoji": "🩺"},
+            {"title": "Avances en Motores de Plasma para Viajes Tripulados a Marte", "category": "descubrimientos", "emoji": "🪐"},
+            {"title": "El Enigma de la Fosa de las Marianas y Criaturas de las Profundidades", "category": "virales", "emoji": "🌊"},
+        ],
+        [
+            {"title": "Inteligencia Artificial Médica Diagnostica Enfermedades Raras en Segundos", "category": "descubrimientos", "emoji": "🩺"},
+            {"title": "Debate Geopolítico: La Carrera Mundial por el Litio y Tierras Raras", "category": "polemicas", "emoji": "⛏️"},
+            {"title": "Superconductores a Temperatura Ambiente: ¿Realidad o Falsas Esperanzas?", "category": "noticias", "emoji": "🧲"},
+            {"title": "Descubrimiento en Marte: Evidencias de Ríos Antiguos y Clima Húmedo", "category": "descubrimientos", "emoji": "🔴"},
+            {"title": "La Revolución de los Chips Fotónicos: Luz en Lugar de Electricidad", "category": "noticias", "emoji": "💡"},
+            {"title": "Dilema Social: Impacto de las Pantallas y Redes en la Atención Humana", "category": "polemicas", "emoji": "📱"},
+            {"title": "Restauración de Ecosistemas con Drones de Reforestación Acelerada", "category": "virales", "emoji": "🌱"},
+            {"title": "La Paradoja de Fermi: ¿Por Qué Aún No Hemos Detectado Vida Extraterrestre?", "category": "descubrimientos", "emoji": "🛸"},
+        ]
     ]
-    random.shuffle(FALLBACK_TOPICS)
-    return {"topics": FALLBACK_TOPICS}
+    chosen_bank = random.choice(ROTATING_BANKS)
+    random.shuffle(chosen_bank)
+    return {"topics": chosen_bank}
 
 
 @app.post("/api/cleanup")
