@@ -120,20 +120,10 @@ REQUISITO CRÍTICO E INNEGOCIABLE DE DURACIÓN:
 - RITMO AUDIOVISUAL DINÁMICO: Ningún plano ni fondo debe permanecer estático por mucho tiempo. Cada escena debe cambiar de perspectiva: alternar entre el gancho directo del avatar, tomas de B-Roll documental reactivo en pantalla completa, tarjetas Bento con cifras duras y momentos de debate.
 - NUNCA escribas frases cortas de 1-2 líneas como speech. Cada speech debe ser un PÁRRAFO COMPLETO Y NUTRIDO.
 
-REGLAS DE GANCHO Y ENTRADA (PROHIBIDO SALUDOS CLICHÉ):
-- NUNCA comiences diciendo "¡Hola a todos!", "Bienvenidos a mi canal", "En este video vamos a ver...", o saludos genéricos de relleno.
-- COMIENZA SIEMPRE con un GANCHO DIRECTO E IMPACTANTE: una pregunta provocadora, una afirmación contundente, una paradoja fascinante o un dato duro que sacuda al espectador desde el segundo 0.
-- Ejemplo de inicio excelente: "¿Sabías que tu perro percibe el mundo en 300 millones de receptores olfativos mientras tú apenas alcanzas 6 millones? Lo que la ciencia acaba de descubrir sobre los sentidos caninos desafía todo lo que creíamos saber..."
-
-REGLAS DE FLUIDEZ Y PROSODIA HUMANA (SÍNTESIS ULTRA-NATURAL, TEMPO MEDIO Y SIN TRABAS):
-- Redacta con cadencia de conversación real, fluida, apasionada y a un TEMPO MEDIO NATURAL (ni apresurado ni robótico).
-- Escribe como un locutor o cronista profesional hablando en vivo: párrafos continuos con estructura gramatical natural, oraciones completas y ritmo envolvente (ejemplo: "Imagina despertar mañana y descubrir que el precio de la gasolina se ha disparado. Que algunas rutas comerciales han quedado bloqueadas. Que países que hasta hace poco negociaban ahora movilizan tropas...").
-- ESTRICTAMENTE PROHIBIDO colocar comas tras palabras o frases de inicio como 'Es que,', 'Y es que,', 'Pero,', 'Porque,', 'Así que,', 'O sea,'. Escribe 'Es que la verdad...', 'Pero qué significa...', 'Porque si lo analizamos...' de corrido para que el locutor no se quede congelado o tartamudo al empezar a hablar.
-- ESTRICTAMENTE PROHIBIDO el abuso de comas innecesarias dentro de las frases. Las comas en síntesis neural generan pausas bruscas de respiración; úsalas ÚNICAMENTE para separar ideas lógicas al final de una cláusula completa.
-- PROHIBIDO usar puntos suspensivos triples ("...") o guiones largos ("—") en medio de una frase simple porque hacen que el motor TTS vacile o corte el aliento artificialmente. Usa puntos seguidos y comas estándar limpias.
-- PROHIBIDO partir las frases en trozos microscópicos con puntos seguidos cada 3 palabras. Escribe oraciones bien hilvanadas, ricas y con ritmo narrativo de televisión.
-- Los números, años y cifras deben integrarse con total naturalidad (ej: 'en mil novecientos noventa y tres', 'casi un ochenta por ciento').
-- Mantén un tono inteligente, seguro y cercano como un divulgador de élite en YouTube hablando con soltura a su audiencia.
+REGLAS DE REDACCIÓN Y GUION NARRATIVO:
+- Redacta cada escena como un guion audiovisual profesional: con fluidez, naturalidad y excelente ortografía y puntuación en español (comas y puntos donde correspondan de forma orgánica).
+- Habla de forma directa, cautivadora e inteligente, como un narrador o divulgador de primer nivel dirigiéndose a su público.
+- Evita muletillas o saludos vacíos (como "Hola a todos" o "Bienvenidos a mi canal"); entra directo al tema con energía y datos interesantes.
 
 REGLAS PARA DATOS, ESTADÍSTICAS Y COMPARATIVAS (TARJETAS BENTO HUD):
 - SIEMPRE que se mencione una cifra, porcentaje, estadística, comparativa (ej: perro vs humano, velocidad, capacidad, año récord), o hecho verificable, la escena DEBE ser de tipo "card_focus" O incluir obligatoriamente el objeto "card".
