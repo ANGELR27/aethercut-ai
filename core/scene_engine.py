@@ -284,7 +284,7 @@ class SceneEngine:
                 av_y = int(self.H - av_w + 30)
                 filter_parts.append(
                     f"[{av_idx}:v]scale={av_w}:{av_w},format=rgba[avatar];"
-                    f"[{cur_v}][avatar]overlay={av_x}:{av_y}:shortest=1[v_av]"
+                    f"[{cur_v}][avatar]overlay={av_x}:{av_y}:eof_action=pass[v_av]"
                 )
             else:
                 # Avatar en recuadro PIP en la esquina inferior derecha
@@ -293,7 +293,7 @@ class SceneEngine:
                 av_y = int(self.H - av_w - (45 if not self.is_vertical else 110))
                 filter_parts.append(
                     f"[{av_idx}:v]scale={av_w}:{av_w},format=rgba[avatar];"
-                    f"[{cur_v}][avatar]overlay={av_x}:{av_y}:shortest=1[v_av]"
+                    f"[{cur_v}][avatar]overlay={av_x}:{av_y}:eof_action=pass[v_av]"
                 )
             cur_v = "v_av"
 

@@ -114,7 +114,7 @@ REQUISITO CRÍTICO E INNEGOCIABLE DE DURACIÓN:
 - Cada escena debe durar aproximadamente {seconds_per_scene} segundos de narración hablada.
 - CADA campo "speech" DEBE contener MÍNIMO {words_per_scene} PALABRAS de texto hablado.
 - El total de TODAS las escenas sumadas debe dar aproximadamente {total_words} PALABRAS.
-- Ritmo de lectura: 140 palabras por minuto (2.33 palabras por segundo).
+- Ritmo de locución y lectura: locución fluida y natural de televisión a 120 palabras por minuto (~2.0 palabras por segundo). Cada idea debe tener tiempo de expresarse sin correr.
 - Si la duración es de 3 minutos o más, es OBLIGATORIO desarrollar cada escena con argumentos completos,
   contexto histórico, datos precisos, ejemplos concretos, comparaciones y reflexiones. NO RESUMAS.
 - RITMO AUDIOVISUAL DINÁMICO: Ningún plano ni fondo debe permanecer estático por mucho tiempo. Cada escena debe cambiar de perspectiva: alternar entre el gancho directo del avatar, tomas de B-Roll documental reactivo en pantalla completa, tarjetas Bento con cifras duras y momentos de debate.
@@ -240,8 +240,8 @@ class AIDirector:
             num_scenes = min(20, max(12, dur // 28))
 
         seconds_per_scene = round(dur / num_scenes)
-        # ~140 palabras por minuto = ~2.33 palabras por segundo
-        words_per_scene = max(25, round(seconds_per_scene * 2.33))
+        # Ritmo de narración natural y elocuente (~120 palabras por minuto = ~2.0 palabras por segundo)
+        words_per_scene = max(22, round(seconds_per_scene * 2.0))
         total_words = words_per_scene * num_scenes
 
         if dur >= 600:
@@ -329,7 +329,7 @@ class AIDirector:
         dur = max(30, duration_target)
         num_scenes = 5
         sec_per_scene = round(dur / num_scenes)
-        words_per_scene = max(30, round(sec_per_scene * 2.33))
+        words_per_scene = max(24, round(sec_per_scene * 2.0))
 
         # Generar párrafos extensos proporcionales al objetivo
         def _expand(base: str, target_words: int) -> str:
