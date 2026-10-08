@@ -15,6 +15,8 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
     PIXABAY_API_KEY: str = os.getenv("PIXABAY_API_KEY", "")
+    NVIDIA_API_KEY: str = os.getenv("NVIDIA_API_KEY", "")
+    NVIDIA_MODEL: str = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
     # Modelo principal activo de Gemini para análisis y redacción
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 

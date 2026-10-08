@@ -200,7 +200,37 @@ class FactChecker:
             for i, e in enumerate(evidence, start=1)
         )
         prompt = JUDGE_PROMPT.format(mode=mode, headline=card.headline, claim=card.claim, evidence=numbered)
-        # El juez solo debe usar los fragmentos recopilados y luego citados en la tarjeta.
+
+        # 1. Intentar con NVIDIA Nemotron 3.5 Lightning (Razonamiento profundo ultra-preciso)
+        from config.settings import settings
+        if settings.NVIDIA_API_KEY:
+            try:
+                from openai import OpenAI
+                nv_client = OpenAI(
+                    base_url="https://integrate.api.nvidia.com/v1",
+                    api_key=settings.NVIDIA_API_KEY,
+                    timeout=30.0,
+                )
+                safe_log(f"[FactChecker] Auditando «{card.headline}» con NVIDIA Nemotron 3.5 Lightning...")
+                response = nv_client.chat.completions.create(
+                    model=settings.NVIDIA_MODEL,
+                    messages=[
+                        {"role": "system", "content": "Eres un auditor y verificador de hechos estricto. Responde siempre con JSON puro sin markdown ni explicaciones previas."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                    temperature=0.1,
+                    max_tokens=1024,
+                )
+                raw_text = response.choices[0].message.content or ""
+                parsed = JSONValidator.extract_and_parse(raw_text)
+                if parsed and isinstance(parsed, dict) and "verdict" in parsed:
+                    safe_log(f"[FactChecker] Veredicto exitoso de NVIDIA Nemotron: {parsed.get('verdict')}")
+                    return parsed
+            except Exception as exc:
+                safe_log(f"[FactChecker] NVIDIA Nemotron no disponible ({exc}). Continuando con Gemini...")
+
+        # 2. Respaldo transparente en Gemini
         return JSONValidator.extract_and_parse(
             self.llm.generate(prompt, json_mode=True, progress=progress, max_models=1)
         )
