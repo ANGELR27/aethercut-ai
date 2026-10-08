@@ -342,6 +342,11 @@ class InfoCardRenderer:
         )
         out_img = Image.alpha_composite(out_img, border_img)
 
+        target_out = out_path or Path("card_output.png")
+        target_out.parent.mkdir(parents=True, exist_ok=True)
+        out_img.save(target_out, "PNG")
+        return target_out
+
     def _render_stat_hero_card(
         self,
         headline: str,

@@ -180,18 +180,40 @@ class VideoRenderEngine:
                     if p and Path(p).exists():
                         items.append({"kind": "video" if is_video else "photo", "path": p, "start": s, "dur": d})
 
-        # Sin choques: dos elementos en la misma zona de pantalla no se pisan.
+        # Sin choques: si dos elementos ocurren en sucesión rápida, alternar zona libre (upper_right, upper_left, lower_right, lower_left)
         items.sort(key=lambda x: x["start"])
         zone_free: Dict[str, float] = {}
         final = []
+        alt_positions = ["upper_right", "upper_left", "lower_right", "lower_left"]
+
         for it in items:
-            position = it.get("position", "auto")
-            zone = "full" if it["kind"] == "video" else (position if position != "auto" else ("right" if it["kind"] == "card" else "left"))
-            blockers = [zone, "full"] if zone != "full" else ["full", "right", "left"]
-            if any(zone_free.get(z, -1) > it["start"] for z in blockers):
+            if it["kind"] == "video":
+                # Video B-roll toma toda la pantalla
+                if zone_free.get("full", -1) > it["start"]:
+                    continue
+                zone_free["full"] = it["start"] + it["dur"] + 0.3
+                final.append(it)
                 continue
-            zone_free[zone] = it["start"] + it["dur"] + 0.6
+
+            current_pos = it.get("position", "auto")
+            preferred_pos = "upper_right" if current_pos in ("auto", "right") else current_pos
+
+            # Si la zona preferida está ocupada en este timestamp, buscar una alternativa disponible
+            assigned_pos = preferred_pos
+            if zone_free.get(assigned_pos, -1) > it["start"]:
+                for candidate in alt_positions:
+                    if zone_free.get(candidate, -1) <= it["start"]:
+                        assigned_pos = candidate
+                        break
+
+            # Si todas las zonas están ocupadas simultáneamente, omitir para no saturar
+            if zone_free.get(assigned_pos, -1) > it["start"]:
+                continue
+
+            it["position"] = assigned_pos
+            zone_free[assigned_pos] = it["start"] + it["dur"] + 0.35
             final.append(it)
+
         return final
 
     def compose(self, base_video: Path, overlays: List[Dict], ass_file: Optional[Path], out: Path, zoom_segments: Optional[List[Dict]] = None, censor_segments: Optional[List[Dict]] = None) -> bool:
@@ -254,14 +276,10 @@ class VideoRenderEngine:
                 slide = int(W * 0.04)
                 ease = f"pow(1-min((t-{s:.3f})/0.45\\,1)\\,3)"  # ease-out cúbico
                 position = it.get("position", "auto")
-                if it["kind"] == "card":
-                    right = position in ("auto", "upper_right", "lower_right")
-                    upper = position in ("auto", "upper_left", "upper_right")
-                    pos_x = f"W-w-{margin_x}+{slide}*{ease}" if right else f"{margin_x}-{slide}*{ease}"
-                    pos_y = str(margin_y) if upper else f"H-h-{margin_y}"
-                else:
-                    pos_x = f"{margin_x}-{slide}*{ease}"
-                    pos_y = str(margin_y)
+                right = position in ("upper_right", "lower_right", "auto", "right")
+                upper = position in ("upper_left", "upper_right", "auto")
+                pos_x = f"W-w-{margin_x}+{slide}*{ease}" if right else f"{margin_x}-{slide}*{ease}"
+                pos_y = str(margin_y) if upper else f"H-h-{margin_y}"
             nxt = f"b{i}"
             chains.append(
                 f"[{cur}][o{i}]overlay=x='{pos_x}':y='{pos_y}':eof_action=pass:format=auto:"
