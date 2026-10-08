@@ -44,6 +44,12 @@ class DirectorScene:
     chips: List[str] = field(default_factory=list)
     sfx: str = "whoosh"  # whoosh, chime, impact, alert, none
     duration_est: float = 10.0
+    # Beats visuales: varios clips de referencia por escena, cada uno ligado a la frase exacta del speech
+    # [{"trigger": "frase del speech", "query": "english search", "recent": true}]
+    visual_beats: List[Dict[str, Any]] = field(default_factory=list)
+    # Pop-ups informativos sincronizados con la locución
+    # [{"trigger": "frase del speech", "text": "texto corto", "kind": "stat|fact|alert|quote"}]
+    popups: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -89,6 +95,8 @@ class DirectorBroadcastPlan:
                     chips=s.get("chips", []),
                     sfx=s.get("sfx", "whoosh"),
                     duration_est=float(s.get("duration_est", s.get("duration_est_sec", 10.0))),
+                    visual_beats=_clean_beats(s.get("visual_beats")),
+                    popups=_clean_popups(s.get("popups")),
                 )
             )
         return cls(
@@ -101,8 +109,48 @@ class DirectorBroadcastPlan:
         )
 
 
+def _clean_beats(raw: Any) -> List[Dict[str, Any]]:
+    """Normaliza la lista de beats visuales devuelta por el LLM (tolerante a formatos sucios)."""
+    out: List[Dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return out
+    for b in raw[:5]:
+        if not isinstance(b, dict):
+            continue
+        q = str(b.get("query") or "").strip()
+        if not q:
+            continue
+        out.append({
+            "trigger": str(b.get("trigger") or "").strip(),
+            "query": q,
+            "recent": bool(b.get("recent", True)),
+        })
+    return out
+
+
+def _clean_popups(raw: Any) -> List[Dict[str, Any]]:
+    """Normaliza la lista de pop-ups informativos."""
+    out: List[Dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return out
+    for p in raw[:3]:
+        if not isinstance(p, dict):
+            continue
+        txt = str(p.get("text") or "").strip()
+        if not txt:
+            continue
+        kind = str(p.get("kind") or "fact").strip().lower()
+        out.append({
+            "trigger": str(p.get("trigger") or "").strip(),
+            "text": txt[:60],
+            "kind": kind if kind in ("stat", "fact", "alert", "quote") else "fact",
+        })
+    return out
+
+
 DIRECTOR_SYSTEM_PROMPT = """Eres el DIRECTOR DE TELEVISIÓN Y STREAMING con Inteligencia Artificial de KAI.
 Tu misión no es solo escribir un monólogo, sino DIRIGIR UNA PRODUCCIÓN AUDIOVISUAL COMPLETA.
+FECHA ACTUAL: {today}. Toda referencia visual debe priorizar material reciente (año {year} o {prev_year}) salvo que el tema sea histórico.
 
 Debes dividir la emisión en EXACTAMENTE {num_scenes} ESCENAS según la duración solicitada ({duration_target} segundos = {duration_label}).
 
@@ -148,6 +196,12 @@ REGLAS DE SELECCIÓN VISUAL (MÁXIMA RELEVANCIA Y MULTI-VIDEO POR ESCENA):
   * "visual_query": El clip de video protagonista para la primera mitad de la escena (en inglés, hiper-específico, 4k/hd, ej: 'velociraptor feathered paleoart documentary animation 4k video').
   * "visual_query2": Un segundo clip de video o ángulo complementario para alternar a mitad de la escena (ej: 'fossil amber feather paleontology laboratory close up video').
 - PREDOMINIO ABSOLUTO DE VIDEO: Más del 70% de las escenas deben usar clips de video dinámicos en movimiento.
+- BEATS VISUALES ("visual_beats") OBLIGATORIOS: cada escena debe traer de 2 a 4 beats. Cada beat es un clip de referencia EXACTA de lo que se dice en esa frase:
+  * "trigger": copia LITERAL de 3 a 6 palabras consecutivas del "speech" donde debe entrar ese clip (en el orden en que aparecen en el speech).
+  * "query": búsqueda en inglés hiper-específica de lo que se nombra en esa frase (persona real, lugar, institución, evento, objeto). Ej: si dice "el Banco Central recortó la tasa", query = "argentina central bank building buenos aires news footage".
+  * "recent": true si es actualidad (se buscará material del año en curso primero), false solo si es contexto histórico.
+  * Prohibido usar queries genéricos ("cinematic", "abstract", "documentary 4k" solos). Nombra la entidad concreta.
+- POP-UPS ("popups"): de 0 a 2 por escena. Texto corto (máx. 40 caracteres) que aparece en el instante exacto en que se pronuncia el "trigger" (copia LITERAL de 2 a 5 palabras del speech). "kind": "stat" (cifra), "fact" (dato), "alert" (advertencia/polémica) o "quote" (cita). No repitas lo que ya está en la "card".
 - PROHIBIDO repetir el mismo visual_query entre escenas. Cada toma debe ser fresca y diferente.
 - EXCLUSIÓN TOTAL DE MARCAS DE AGUA Y SELLOS: NUNCA busques marcas de stock comercial con sellos (Shutterstock, Alamy, iStock, Adobe Stock).
 ==============================================================================
@@ -201,6 +255,14 @@ RESPONDE EXCLUSIVAMENTE EN FORMATO JSON VÁLIDO:
       "chips": ["Canis lupus", "Homo sapiens"],
       "visual_query": "dog biology scientific research laboratory 4k video",
       "visual_query2": "microscopic sensory receptors biology animation video",
+      "visual_beats": [
+        {{"trigger": "Miren los datos duros", "query": "police sniffer dog working airport footage", "recent": true}},
+        {{"trigger": "trescientos millones frente a", "query": "dog nose close up macro sniffing", "recent": false}},
+        {{"trigger": "su capacidad de rastreo", "query": "search and rescue dog tracking scent field", "recent": true}}
+      ],
+      "popups": [
+        {{"trigger": "La diferencia es monumental", "text": "50 veces más receptores", "kind": "stat"}}
+      ],
       "sfx": "chime",
       "duration_est_sec": {seconds_per_scene}
     }}
@@ -254,7 +316,12 @@ class AIDirector:
         else:
             duration_label = f"{dur} segundos"
 
+        import datetime as _dt
+        _now = _dt.date.today()
         prompt = DIRECTOR_SYSTEM_PROMPT.format(
+            today=_now.isoformat(),
+            year=_now.year,
+            prev_year=_now.year - 1,
             topic=topic,
             style_instructions=style_instructions,
             duration_target=dur,
@@ -308,6 +375,8 @@ class AIDirector:
                         chips=s.get("chips", []),
                         sfx=s.get("sfx", "whoosh"),
                         duration_est=float(s.get("duration_est_sec", seconds_per_scene)),
+                        visual_beats=_clean_beats(s.get("visual_beats")),
+                        popups=_clean_popups(s.get("popups")),
                     )
                 )
 

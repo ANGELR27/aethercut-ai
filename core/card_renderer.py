@@ -785,6 +785,96 @@ class InfoCardRenderer:
         out_img.save(target, "PNG")
         return target
 
+    def render_info_popup(
+        self,
+        text: str,
+        kind: str = "fact",
+        out_path: Optional[Path] = None,
+    ) -> Path:
+        """
+        Micro Pop-up HUD reactivo sincronizado con la frase:
+        - Pastilla compacta Obsidian Glass con brillo de borde
+        - Indicador luminoso de color según categoría (stat=ámbar, fact=cian, alert=rojo, quote=esmeralda)
+        - Tipografía de alta fidelidad, padding respirable y sombra difusa suave
+        """
+        scale = 2
+        pad_x = 18 * scale
+        h_logical = 44
+        H = h_logical * scale
+        radius = (h_logical // 2) * scale
+
+        palette = {
+            "stat": ((251, 191, 36, 255), "DATO"),
+            "fact": ((56, 189, 248, 255), "CLAVE"),
+            "alert": ((248, 113, 113, 255), "ALERTA"),
+            "quote": ((52, 211, 153, 255), "CITA"),
+        }
+        pip_col, tag_label = palette.get(kind.lower(), ((56, 189, 248, 255), "CLAVE"))
+
+        f_txt = _font(["segoeuib.ttf", "arialbd.ttf"], 14 * scale)
+        f_tag = _font(["segoeuib.ttf", "arialbd.ttf"], 10 * scale)
+
+        probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+        clean_text = text.strip()
+        txt_w = int(probe.textlength(clean_text, font=f_txt))
+        tag_w = int(probe.textlength(tag_label, font=f_tag))
+
+        W = pad_x * 2 + tag_w + (22 * scale) + txt_w
+        W = max(int(220 * scale), W)
+
+        im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(im)
+
+        # Fondo obsidian con borde sutil
+        d.rounded_rectangle(
+            (0, 0, W - 1, H - 1),
+            radius=radius,
+            fill=(14, 15, 20, 240) if self.theme == "dark" else (248, 249, 252, 245),
+            outline=(255, 255, 255, 65) if self.theme == "dark" else (200, 205, 220, 255),
+            width=1 * scale,
+        )
+
+        cur_x = pad_x
+        # Punto de luz
+        dot_r = 3.5 * scale
+        dot_cy = H // 2
+        d.ellipse((cur_x, dot_cy - dot_r, cur_x + dot_r * 2, dot_cy + dot_r), fill=pip_col)
+        cur_x += int(11 * scale)
+
+        # Etiqueta mini badge
+        d.text((cur_x, dot_cy), tag_label, font=f_tag, fill=pip_col, anchor="lm")
+        cur_x += tag_w + int(12 * scale)
+
+        # Divisor vertical sutil
+        d.line([(cur_x, int(10 * scale)), (cur_x, H - int(10 * scale))], fill=(255, 255, 255, 40), width=1 * scale)
+        cur_x += int(12 * scale)
+
+        # Texto informativo
+        text_fill = (255, 255, 255, 255) if self.theme == "dark" else (15, 23, 42, 255)
+        d.text((cur_x, dot_cy), clean_text, font=f_txt, fill=text_fill, anchor="lm")
+
+        final_w = W // scale
+        final_h = H // scale
+        comp = im.resize((final_w, final_h), Image.LANCZOS)
+
+        margin = 12
+        shadow = Image.new("RGBA", (final_w + 2 * margin, final_h + 2 * margin), (0, 0, 0, 0))
+        ImageDraw.Draw(shadow).rounded_rectangle(
+            (margin, margin + 3, margin + final_w, margin + final_h + 3),
+            radius=h_logical // 2,
+            fill=(0, 0, 0, 160),
+        )
+        shadow = shadow.filter(ImageFilter.GaussianBlur(6))
+
+        out_img = Image.new("RGBA", (final_w + 2 * margin, final_h + 2 * margin), (0, 0, 0, 0))
+        out_img.paste(shadow, (0, 0), shadow)
+        out_img.paste(comp, (margin, margin), comp)
+
+        target = out_path or Path("info_popup.png")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        out_img.save(target, "PNG")
+        return target
+
     def render_all(self, cards: List[InfoCard], workdir: Path) -> List[InfoCard]:
         for card in cards:
             if not card.enabled or card.verdict not in ("supported", "contradicted", "insufficient"):

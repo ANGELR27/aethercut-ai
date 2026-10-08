@@ -348,9 +348,18 @@ class YouTubeReactionAssetProvider(AssetProvider):
                     'no_warnings': True,
                     'socket_timeout': 18,
                 }
-                search_query = f"ytsearch1:{query} 4k 1080p documentary video"
+                # Priorizar material reciente en actualidad
+                import datetime as _dt
+                cur_yr = _dt.date.today().year
+                has_year = any(str(y) in query for y in range(2000, 2035))
+                search_term = f"{query} {cur_yr} 4k 1080p documentary video" if not has_year else f"{query} 4k 1080p documentary video"
+                search_query = f"ytsearch1:{search_term}"
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([search_query])
+                    try:
+                        ydl.download([search_query])
+                    except Exception:
+                        # Fallback a búsqueda sin año si fue muy restrictivo
+                        ydl.download([f"ytsearch1:{query} 4k 1080p video"])
 
                 matches = list(target_dir.glob(f"{cue.cue_id}_yt.*"))
                 if matches and matches[0].exists() and matches[0].stat().st_size > 50000:

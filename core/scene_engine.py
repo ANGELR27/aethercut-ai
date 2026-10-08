@@ -143,23 +143,51 @@ class SceneEngine:
             is_video_reaction = (scene.type != "avatar_cam") or ("video" in (scene.visual_query or "").lower())
             broll_img = await self._get_scene_visual(scene.visual_query, scene_dir, is_video_scene=is_video_reaction)
 
-        # 2b. Descargar segundo clip o ángulo complementario si está especificado en la escena
-        broll_img2 = None
-        vq2 = getattr(scene, "visual_query2", "") or (scene.visual_queries[1] if len(getattr(scene, "visual_queries", [])) > 1 else "")
-        if vq2 and vq2.strip() and vq2.strip().lower() != (scene.visual_query or "").strip().lower():
+        # 2b. Descargar clips secuenciales de referencia (visual_beats) o segundo clip complementario
+        bg_clips: List[Tuple[Path, float]] = []
+        if broll_img and broll_img.exists():
+            bg_clips.append((broll_img, 0.0))
+
+        # Si el director aportó visual_beats con frases exactas, sincronizar cortes con esas frases
+        beats = getattr(scene, "visual_beats", []) or []
+        if beats and len(beats) > 1 and duration >= 5.0:
+            # Calcular momentos de corte para cada beat
+            segment_step = duration / len(beats)
+            for b_idx, beat in enumerate(beats[1:], start=1):
+                b_query = beat.get("query") if isinstance(beat, dict) else str(beat)
+                if not b_query or not b_query.strip():
+                    continue
+                # Si beat tiene trigger literal, intentar ubicar el timestamp exacto en boundaries
+                b_time = round(b_idx * segment_step, 2)
+                b_trig = (beat.get("trigger") or "").lower().strip() if isinstance(beat, dict) else ""
+                if b_trig and sentence_boundaries:
+                    for s_st, _s_en, s_txt in sentence_boundaries:
+                        if b_trig in s_txt.lower() or any(w in s_txt.lower() for w in b_trig.split()[:3]):
+                            b_time = max(1.5, min(duration - 2.0, round(s_st, 2)))
+                            break
+                try:
+                    clip_path = await self._get_scene_visual(b_query, scene_dir, is_video_scene=True)
+                    if clip_path and clip_path.exists():
+                        bg_clips.append((clip_path, b_time))
+                except Exception as _eb:
+                    safe_log(f"[SceneEngine] Error obteniendo beat visual '{b_query}': {_eb}")
+        elif vq2 and vq2.strip() and vq2.strip().lower() != (scene.visual_query or "").strip().lower():
             try:
                 broll_img2 = await self._get_scene_visual(vq2, scene_dir, is_video_scene=True)
+                if broll_img2 and broll_img2.exists():
+                    bg_clips.append((broll_img2, round(duration * 0.5, 2)))
             except Exception as _e:
                 safe_log(f"[SceneEngine] Fallback en segundo clip: {_e}")
 
-        # Si no se pudo obtener B-Roll o falló la descarga, NUNCA dejar la pantalla en negro:
-        # Usar el fondo de estudio ambiental desenfocado en alta definición
-        if not broll_img or not broll_img.exists():
+        # Ordenar clips de fondo por segundo de inicio
+        bg_clips.sort(key=lambda x: x[1])
+
+        # Si no se pudo obtener ningún B-Roll o falló la descarga, usar estudio ambiental
+        if not bg_clips:
             studio_blur_path = Path("assets/streamer_studio_blur_9_16.jpg" if self.is_vertical else "assets/streamer_studio_blur_16_9.jpg")
-            if studio_blur_path.exists():
-                broll_img = studio_blur_path
-            elif Path("assets/streamer_studio_room.jpg").exists():
-                broll_img = Path("assets/streamer_studio_room.jpg")
+            fallback_bg = studio_blur_path if studio_blur_path.exists() else Path("assets/streamer_studio_room.jpg")
+            if fallback_bg.exists():
+                bg_clips.append((fallback_bg, 0.0))
 
         # Generar clip de avatar con sincronización reactiva labial a la voz de la escena
         scene_avatar_clip = scene_dir / "kai_avatar_synced.mov"
@@ -201,7 +229,6 @@ class SceneEngine:
         if getattr(scene, "chips", None) and scene.chips:
             out_chip_path = scene_dir / f"chips_{scene.scene_id}.png"
             chips_img_path = self._render_chips_overlay(scene.chips, out_chip_path)
-            # Buscar si alguna oración contiene los términos de los chips para hacer el pop-up en el segundo exacto
             if sentence_boundaries:
                 chip_keywords = [str(c).lower() for c in scene.chips]
                 for s_st, _s_en, s_txt in sentence_boundaries:
@@ -210,9 +237,31 @@ class SceneEngine:
                         chip_start_time = max(0.5, round(s_st, 2))
                         break
 
-        # 3c. Preparar Rótulo Broadcast Lower Third si no hay tarjeta Bento para contexto visual
+        # 3c. Preparar Pop-up reactivo sincronizado si la escena tiene popups definidos
+        popup_img_path = None
+        popup_start_time = 1.2
+        popups_list = getattr(scene, "popups", []) or []
+        if popups_list and not card_img_path:
+            p_data = popups_list[0] if isinstance(popups_list[0], dict) else {"text": str(popups_list[0])}
+            p_txt = p_data.get("text", "").strip()
+            p_kind = p_data.get("kind", "fact")
+            p_trig = (p_data.get("trigger") or "").lower().strip()
+            if p_txt:
+                out_pop_path = scene_dir / f"popup_{scene.scene_id}.png"
+                try:
+                    popup_img_path = self.card_renderer.render_info_popup(text=p_txt, kind=p_kind, out_path=out_pop_path)
+                    if p_trig and sentence_boundaries:
+                        for s_st, _s_en, s_txt in sentence_boundaries:
+                            if p_trig in s_txt.lower():
+                                popup_start_time = max(0.6, round(s_st, 2))
+                                break
+                except Exception as _ep:
+                    safe_log(f"[SceneEngine] Error renderizando popup: {_ep}")
+                    popup_img_path = None
+
+        # 3d. Preparar Rótulo Broadcast Lower Third si no hay tarjeta Bento ni popup para contexto visual
         lower_third_img_path = None
-        if not card_img_path and scene.type in ("video_reaction", "breaking_news", "avatar_cam") and duration >= 4.0:
+        if not card_img_path and not popup_img_path and scene.type in ("video_reaction", "breaking_news", "avatar_cam") and duration >= 4.0:
             lt_tag = "NOTICIA EN VIVO" if scene.type == "breaking_news" else ("REACCIÓN EN VIVO" if scene.type == "video_reaction" else "EN VIVO")
             lt_sub = (scene.speech[:75].rsplit(" ", 1)[0] + "…") if len(scene.speech) > 75 else scene.speech
             out_lt_path = scene_dir / f"lower_third_{scene.scene_id}.png"
@@ -235,38 +284,39 @@ class SceneEngine:
         filter_parts: List[str] = []
         num_in = 0
 
-        # Fondo con soporte de 1 o 2 videos secuenciales en la misma escena
-        has_two_clips = bool(broll_img2 and broll_img2.exists())
-        mid_cut_sec = round(duration * 0.5, 2) if has_two_clips else 0.0
-
-        if broll_img and broll_img.exists():
-            if broll_img.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
-                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(broll_img)])
+        # Montaje secuencial dinámico de todos los clips de fondo (bg_clips)
+        if bg_clips:
+            first_bg_path, _ = bg_clips[0]
+            if first_bg_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(first_bg_path)])
             else:
-                inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(broll_img)])
+                inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(first_bg_path)])
             filter_parts.append(
-                f"[0:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[v_bg1]"
+                f"[0:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[v_bg0]"
             )
-            cur_v = "v_bg1"
+            cur_v = "v_bg0"
+            num_in += 1
+
+            # Superponer clips subsiguientes en sus marcas de tiempo exactas
+            for c_idx_sub, (clip_p, cut_sec) in enumerate(bg_clips[1:], start=1):
+                if clip_p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(clip_p)])
+                else:
+                    inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(clip_p)])
+                clip_in_idx = num_in
+                num_in += 1
+                v_scaled = f"v_bg_scaled_{c_idx_sub}"
+                v_next = f"v_bg_seq_{c_idx_sub}"
+                filter_parts.append(
+                    f"[{clip_in_idx}:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[{v_scaled}];"
+                    f"[{cur_v}][{v_scaled}]overlay=0:0:enable='gte(t,{cut_sec:.2f})'[{v_next}]"
+                )
+                cur_v = v_next
         else:
             inputs.extend(["-f", "lavfi", "-i", f"color=c=0x0a0a0c:s={self.W}x{self.H}:d={dur_str}:r=25"])
-            filter_parts.append("[0:v]format=yuva420p[v_bg1]")
-            cur_v = "v_bg1"
-        num_in += 1
-
-        if has_two_clips:
-            # Segundo clip complementario que entra en la segunda mitad de la escena
-            if broll_img2.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
-                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(broll_img2)])
-            else:
-                inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(broll_img2)])
-            broll2_idx = num_in
+            filter_parts.append("[0:v]format=yuva420p[v_bg0]")
+            cur_v = "v_bg0"
             num_in += 1
-            filter_parts.append(
-                f"[{broll2_idx}:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[v_bg2];"
-                f"[{cur_v}][v_bg2]overlay=0:0:enable='gte(t,{mid_cut_sec})'[v_bg_combined]"
-            )
-            cur_v = "v_bg_combined"
 
         # Desenfoque temporal dinámico: si hay tarjeta, solo desenfocar durante su aparición (hasta 9.5s)
         # para que el espectador tenga tiempo real de leer el gráfico/mapa antes de volver a la toma nítida
@@ -324,6 +374,26 @@ class SceneEngine:
             card_y = 190 if not self.is_vertical else int(self.H * 0.40)
             filter_parts.append(f"[{cur_v}][card_animated]overlay=x='{ease_x}':y={card_y}:enable='between(t,0.5,{card_end:.2f})'[v_card]")
             cur_v = "v_card"
+
+        elif popup_img_path and popup_img_path.exists():
+            # Pop-up informativo HUD animado con entrada suave y salida
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(popup_img_path)])
+            pop_idx = num_in
+            num_in += 1
+            pop_start = popup_start_time
+            pop_dur = min(4.5, duration - pop_start - 0.4)
+            pop_end = pop_start + max(2.5, pop_dur)
+            pop_fo = max(pop_start + 0.3, pop_end - 0.35)
+            filter_parts.append(
+                f"[{pop_idx}:v]format=rgba,fade=t=in:st={pop_start:.2f}:d=0.30:alpha=1,fade=t=out:st={pop_fo:.2f}:d=0.35:alpha=1[pop_animated]"
+            )
+            pop_x = 85 if not self.is_vertical else 30
+            pop_y = 220 if not self.is_vertical else int(self.H * 0.42)
+            slide_dist = 22
+            slide_calc = f"min(max((t-{pop_start:.2f})/0.35\\,0)\\,1)"
+            ease_x = f"{pop_x}-{slide_dist}*(1-pow({slide_calc}\\,3))"
+            filter_parts.append(f"[{cur_v}][pop_animated]overlay=x='{ease_x}':y={pop_y}:enable='between(t,{pop_start:.2f},{pop_end:.2f})'[v_pop]")
+            cur_v = "v_pop"
 
         elif lower_third_img_path and lower_third_img_path.exists():
             # Rótulo Broadcast Lower Third con entrada en el segundo 0.8 hasta el 4.8
