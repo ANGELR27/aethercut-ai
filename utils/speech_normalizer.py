@@ -124,10 +124,16 @@ def refine_speech_cadence(text: str) -> str:
         (r"(\b\w+\b)\s+(poniendo en riesgo\b)", r"\1, poniendo en riesgo"),
     ]
 
+    # Pausa tras cláusulas subordinadas largas iniciadas por 'Cuando ...' o 'Si ...'
+    clean = re.sub(r"(Cuando\s+[\w\s]{18,38}?\b[A-Za-zÁ-ú]{4,})\s+(nos encontramos|vemos|chocamos|aparece|surge)", r"\1, \2", clean, flags=re.IGNORECASE)
+
+    # Pausa tras 'en Colombia' o similares cuando van en medio de cláusula temporal
+    clean = re.sub(r"(\ben Colombia)\s+(nos encontramos|vemos|analizamos)", r"\1, \2", clean, flags=re.IGNORECASE)
+
     for pat, rep in rules:
         clean = re.sub(pat, rep, clean, flags=re.IGNORECASE)
 
-    # Si hay oraciones largas de más de 14 palabras sin coma antes de 'y', agregar coma antes de la conjunción
+    # Si hay oraciones largas sin coma antes de 'y', agregar coma antes de la conjunción
     clean = re.sub(r"([A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,})\s+y\s+([A-Za-zÁ-ú]{4,}\s+[A-Za-zÁ-ú]{4,})", r"\1, y \2", clean)
 
     # Limpiar dobles comas accidentales

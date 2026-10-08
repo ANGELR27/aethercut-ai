@@ -286,6 +286,10 @@ class AIDirector:
                     if c_data
                     else None
                 )
+                raw_speech = s.get("speech", "").strip()
+                from utils.speech_normalizer import normalize_speech_for_tts
+                polished_speech = normalize_speech_for_tts(raw_speech)
+
                 scenes.append(
                     DirectorScene(
                         scene_id=idx + 1,
@@ -293,7 +297,7 @@ class AIDirector:
                         type=s.get("type", "avatar_cam"),
                         emotion=s.get("emotion", "excited"),
                         camera=s.get("camera", "hero_center" if idx in (0, len(raw_scenes) - 1) else "pip_corner"),
-                        speech=s.get("speech", "").strip(),
+                        speech=polished_speech or raw_speech,
                         visual_query=s.get("visual_query", topic),
                         visual_queries=[q for q in [s.get("visual_query"), s.get("visual_query2")] if q],
                         visual_query2=s.get("visual_query2", ""),
