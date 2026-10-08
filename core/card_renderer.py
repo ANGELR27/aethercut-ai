@@ -389,15 +389,17 @@ class InfoCardRenderer:
         badge_txt_col = bcfg["text"]
         pip_col = bcfg["pip"]
 
-        # 1. Renderizar gráfico infográfico profesional con Matplotlib
+        # 1. Renderizar gráfico infográfico profesional o mapa geopolítico
         chart_w_logical = 195
         chart_h_logical = 160
         chart_img: Optional[Image.Image] = None
         try:
             from core.chart_generator import BroadcastChartGenerator
+            # Enriquecer el contexto con body y headline para que detecte países (ej. México, EE.UU.) y datos
+            enriched_context = f"{headline} {body}".strip()
             chart_img = BroadcastChartGenerator.render_chart_image(
                 stat_value=stat_value,
-                headline=headline,
+                headline=enriched_context,
                 width_px=chart_w_logical * scale,
                 height_px=chart_h_logical * scale,
                 dpi=150

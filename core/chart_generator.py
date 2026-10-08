@@ -304,24 +304,47 @@ class BroadcastChartGenerator:
         height_px: int,
         dpi: int,
     ) -> Optional[Image.Image]:
-        """Renderiza un micro-indicador de 3 barras de ecualizador de datos para cifras generales."""
+        """Renderiza un indicador de datos visual futurista con anillo de cristal neón y métricas dinámicas."""
         fig_w = width_px / dpi
         fig_h = height_px / dpi
 
         fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi, facecolor="none")
         ax.set_facecolor("none")
 
-        x_indices = [0.8, 1.8, 2.8]
-        heights = [0.45, 0.90, 0.65]
-        colors = ["#38bdf8", "#10b981", "#f59e0b"]
+        # 1. Indicador de 5 segmentos con gradiente luminoso y pistas de cristal
+        segments = 5
+        angles = np.linspace(0.85 * np.pi, 0.15 * np.pi, segments)
+        radii = np.linspace(0.65, 0.95, segments)
 
-        # Barras de fondo
-        ax.bar(x_indices, [1.0, 1.0, 1.0], width=0.45, color="#222224", alpha=0.6)
-        # Barras de datos
-        ax.bar(x_indices, heights, width=0.45, color=colors)
+        # Barra de progreso estilizada en arco
+        t = np.linspace(np.pi, 0, 100)
+        # Pista oscura de fondo
+        ax.plot(np.cos(t), np.sin(t), color="#1e293b", lw=8, alpha=0.7, solid_capstyle="round")
+        
+        # Pista activa en gradiente neón
+        t_active = np.linspace(np.pi, 0.25 * np.pi, 75)
+        ax.plot(np.cos(t_active), np.sin(t_active), color="#38bdf8", lw=8, solid_capstyle="round")
+        
+        # Segmento culmen en esmeralda
+        t_peak = np.linspace(0.40 * np.pi, 0.25 * np.pi, 20)
+        ax.plot(np.cos(t_peak), np.sin(t_peak), color="#10b981", lw=8, solid_capstyle="round")
 
-        ax.set_xlim(0.2, 3.4)
-        ax.set_ylim(0, 1.1)
+        # Icono / Tag numérico en el centro
+        ax.text(
+            0, 0.18, "HUD METRIC",
+            va="center", ha="center",
+            color="#38bdf8", fontsize=7.5, fontweight="bold",
+            fontfamily="sans-serif"
+        )
+        ax.text(
+            0, -0.05, "VERIFICADO",
+            va="center", ha="center",
+            color="#94a3b8", fontsize=6, fontweight="bold",
+            fontfamily="sans-serif"
+        )
+
+        ax.set_xlim(-1.15, 1.15)
+        ax.set_ylim(-0.25, 1.15)
         ax.axis("off")
 
         buf = io.BytesIO()

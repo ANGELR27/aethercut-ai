@@ -138,10 +138,19 @@ class SceneEngine:
             elif Path("assets/streamer_studio_room.jpg").exists():
                 broll_img = Path("assets/streamer_studio_room.jpg")
 
-        if not broll_img:
+        if not broll_img or not broll_img.exists():
             # Priorizar video en movimiento para todas las escenas con B-Roll, reacción, noticias o contexto
             is_video_reaction = (scene.type != "avatar_cam") or ("video" in (scene.visual_query or "").lower())
             broll_img = await self._get_scene_visual(scene.visual_query, scene_dir, is_video_scene=is_video_reaction)
+
+        # Garantizar que NUNCA quede un fondo negro vacío: si la descarga no encontró imagen externa,
+        # usar el set de estudio iluminado cinemático con bokeh de KAI
+        if not broll_img or not broll_img.exists():
+            fallback_bg = Path("assets/streamer_studio_blur_9_16.jpg" if self.is_vertical else "assets/streamer_studio_blur_16_9.jpg")
+            if not fallback_bg.exists():
+                fallback_bg = Path("assets/streamer_studio_room.jpg")
+            if fallback_bg.exists():
+                broll_img = fallback_bg
 
         # 2b. Descargar clips secuenciales de referencia (visual_beats) o segundo clip complementario
         bg_clips: List[Tuple[Path, float]] = []
