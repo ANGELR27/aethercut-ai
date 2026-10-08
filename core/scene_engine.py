@@ -345,17 +345,42 @@ class SceneEngine:
             av_idx = num_in
             num_in += 1
 
+            # REGLA DE RETENCIÓN DE AUDIENCIA:
+            # El avatar al frente en plano central ('hero_center' o 'avatar_cam') solo debe permanecer
+            # los primeros 3.0 a 3.8 segundos para soltar la frase de gancho (Hook). Luego pasa fluidamente a PIP
+            # en la esquina para que el contenido visual (video, broll, gráficos) sea el protagonista y la gente no se aburra.
             if scene.camera == "hero_center" or scene.type == "avatar_cam":
-                # Avatar protagonista (centro o primer plano dinámico)
-                av_w = int(self.W * (0.55 if not self.is_vertical else 0.70))
-                av_x = int((self.W - av_w) / 2)
-                av_y = int(self.H - av_w + 30)
-                filter_parts.append(
-                    f"[{av_idx}:v]scale={av_w}:{av_w},format=rgba[avatar];"
-                    f"[{cur_v}][avatar]overlay={av_x}:{av_y}:eof_action=pass[v_av]"
-                )
+                hook_dur = min(3.8, max(2.5, duration * 0.28)) if duration > 5.0 else duration
+                if duration > 5.0:
+                    # Fase 1 (0 a hook_dur): Primer plano frontal del avatar diciendo el gancho
+                    # Fase 2 (hook_dur al final): Transición inmediata a recuadro PIP en esquina
+                    av_w_hero = int(self.W * (0.52 if not self.is_vertical else 0.68))
+                    av_x_hero = int((self.W - av_w_hero) / 2)
+                    av_y_hero = int(self.H - av_w_hero + 30)
+
+                    av_w_pip = int(self.W * (0.26 if not self.is_vertical else 0.40))
+                    av_x_pip = int(self.W - av_w_pip - (45 if not self.is_vertical else 30))
+                    av_y_pip = int(self.H - av_w_pip - (45 if not self.is_vertical else 110))
+
+                    filter_parts.append(
+                        f"[{av_idx}:v]split=2[av_h_raw][av_p_raw];"
+                        f"[{cur_v}][av_h_raw]scale2ref={av_w_hero}:{av_w_hero}[v_ref1][av_h_sc];"
+                        f"[av_h_sc]format=rgba[av_h];"
+                        f"[v_ref1][av_h]overlay={av_x_hero}:{av_y_hero}:enable='between(t,0,{hook_dur:.2f})'[v_mid];"
+                        f"[{av_p_raw}]scale={av_w_pip}:{av_w_pip},format=rgba[av_p];"
+                        f"[v_mid][av_p]overlay={av_x_pip}:{av_y_pip}:enable='gte(t,{hook_dur:.2f})':eof_action=pass[v_av]"
+                    )
+                else:
+                    # Si la escena dura menos de 5s, avatar protagonista centrado
+                    av_w = int(self.W * (0.55 if not self.is_vertical else 0.70))
+                    av_x = int((self.W - av_w) / 2)
+                    av_y = int(self.H - av_w + 30)
+                    filter_parts.append(
+                        f"[{av_idx}:v]scale={av_w}:{av_w},format=rgba[avatar];"
+                        f"[{cur_v}][avatar]overlay={av_x}:{av_y}:eof_action=pass[v_av]"
+                    )
             else:
-                # Avatar en recuadro PIP en la esquina inferior derecha
+                # Avatar directamente en recuadro PIP en la esquina inferior derecha
                 av_w = int(self.W * (0.26 if not self.is_vertical else 0.40))
                 av_x = int(self.W - av_w - (45 if not self.is_vertical else 30))
                 av_y = int(self.H - av_w - (45 if not self.is_vertical else 110))
