@@ -240,7 +240,8 @@ class WebPhotoAssetProvider(AssetProvider):
         "gettyimages", "123rf", "adobestock", "depositphotos", "bigstockphoto", "canstockphoto",
         "freepik", "vectorstock", "stockphoto", "watermark", "pond5", "envato",
         "storyblocks", "motionelements", "pixtastock", "agefotostock",
-        "ftcdn.net", "ftcdn", "stock.adobe", "adobe.com", "canva", "eyeem", "shutter"
+        "ftcdn.net", "ftcdn", "stock.adobe", "adobe.com", "canva", "eyeem", "shutter",
+        "renderhub", "turbosquid", "cgtrader", "vector", "clipart", "shutter stock"
     )
 
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
@@ -254,9 +255,9 @@ class WebPhotoAssetProvider(AssetProvider):
             try:
                 from ddgs import DDGS
                 with DDGS() as ddgs:
-                    # Priorizar imágenes Wallpaper o Large fotorrealistas sin marcas de agua
+                    # Priorizar imágenes reales de prensa, artículos científicos, foros y web editorial
                     res = []
-                    search_term = f"{query} editorial documentary photograph -stock -watermark -shutterstock -adobestock"
+                    search_term = f"{query} news report editorial press photograph -stock -watermark -shutterstock -alamy"
                     try:
                         res = list(ddgs.images(search_term, size="Wallpaper", max_results=15))
                     except Exception:
@@ -267,7 +268,7 @@ class WebPhotoAssetProvider(AssetProvider):
                         except Exception:
                             pass
                     if not res:
-                        res = list(ddgs.images(f"{query} documentary -stock", size="Large", max_results=15))
+                        res = list(ddgs.images(f"{query} real photo documentary article -stock", size="Large", max_results=15))
                     if not res:
                         res = list(ddgs.images(query, max_results=15))
 
@@ -379,18 +380,20 @@ class YouTubeReactionAssetProvider(AssetProvider):
 
 
 class AssetProviderFactory:
-    """Fábrica que prioriza fotos reales web de alta resolución sin marcas de agua ni deformaciones y clips de video para video-reacciones."""
+    """Fábrica que prioriza fotos reales web de prensa/noticias sin marcas de agua y clips de video reales antes de stock."""
 
     @staticmethod
     def get_providers():
         providers = []
+        # 1. Videos reales y reacciones de fuentes dinámicas
+        providers.append(YouTubeReactionAssetProvider())
+        # 2. Fotografías reales de prensa, artículos científicos, foros y web editorial (sin stock ni marcas)
+        providers.append(WebPhotoAssetProvider())
+        # 3. Archivo enciclopédico de alta resolución (Wikimedia Commons)
+        providers.append(OpenStockAssetProvider())
+        # 4. Proveedores de stock genérico solo como último recurso si las anteriores fallan
         if settings.PEXELS_API_KEY:
             providers.append(PexelsAssetProvider())
         if settings.PIXABAY_API_KEY:
             providers.append(PixabayAssetProvider())
-        # Proveedor de video-clips para reacciones y B-Rolls dinámicos
-        providers.append(YouTubeReactionAssetProvider())
-        # Priorizar fotos reales web de alta definición
-        providers.append(WebPhotoAssetProvider())
-        providers.append(OpenStockAssetProvider())
         return providers

@@ -416,3 +416,73 @@ class BroadcastChartGenerator:
         buf.seek(0)
         return Image.open(buf).convert("RGBA")
 
+    @classmethod
+    def render_ai_custom_chart(
+        cls,
+        topic: str,
+        stat_value: str,
+        headline: str,
+        width_px: int = 1280,
+        height_px: int = 720,
+    ) -> Optional[Image.Image]:
+        """
+        Utiliza NVIDIA (o LLM) para generar código de renderizado de infografía a medida
+        estilo Studio Broadcast (Obsidian Glass, Dark Mode, acentos Neón) cuando se requiere
+        un gráfico o diagrama cinemático avanzado que no encaja en las plantillas básicas.
+        """
+        from config.settings import settings
+        if not getattr(settings, "NVIDIA_API_KEY", None):
+            return None
+
+        from openai import OpenAI
+        prompt = (
+            f"Escribe un script de Python usando matplotlib (backend Agg, plt.subplots, facecolor='#0b0f19') "
+            f"para crear una infografía cinematográfica premium sobre:\n"
+            f"Tema: {topic}\n"
+            f"Dato clave: {stat_value}\n"
+            f"Titular: {headline}\n\n"
+            f"Requisitos estrictos:\n"
+            f"- Dimensiones: {width_px}x{height_px} px (dpi=150, figsize=({width_px/150:.1f}, {height_px/150:.1f})).\n"
+            f"- Fondo oscuro profesional '#0b0f19', texto blanco '#f8fafc', detalles en cian '#38bdf8' y esmeralda '#10b981'.\n"
+            f"- Incluye barras, métricas o visualización de datos limpia y moderna.\n"
+            f"- El script debe asignar la figura a la variable 'fig'.\n"
+            f"- Responde ÚNICAMENTE con el código Python dentro de un bloque ```python ... ``` sin comentarios ni explicaciones adicionales."
+        )
+
+        try:
+            client = OpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=settings.NVIDIA_API_KEY,
+                timeout=25.0,
+            )
+            resp = client.chat.completions.create(
+                model=getattr(settings, "NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct"),
+                messages=[
+                    {"role": "system", "content": "Eres un programador experto en visualización de datos con Matplotlib."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=1500,
+            )
+            raw_code = resp.choices[0].message.content or ""
+            # Extraer bloque de código
+            m = re.search(r"```(?:python)?\s*([\s\S]*?)\s*```", raw_code)
+            code = m.group(1) if m else raw_code
+
+            # Ejecutar de forma segura para obtener 'fig'
+            local_vars: dict = {"matplotlib": matplotlib, "plt": plt, "np": np}
+            exec(code, local_vars, local_vars)
+
+            fig = local_vars.get("fig")
+            if fig is not None:
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+                plt.close(fig)
+                buf.seek(0)
+                img = Image.open(buf).convert("RGBA")
+                return img
+        except Exception as exc:
+            from core.llm import safe_log
+            safe_log(f"[ChartGenerator] Error generando gráfico con NVIDIA: {exc}")
+        return None
+
