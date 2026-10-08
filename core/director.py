@@ -125,11 +125,13 @@ REGLAS DE GANCHO Y ENTRADA (PROHIBIDO SALUDOS CLICHÉ):
 - COMIENZA SIEMPRE con un GANCHO DIRECTO E IMPACTANTE: una pregunta provocadora, una afirmación contundente, una paradoja fascinante o un dato duro que sacuda al espectador desde el segundo 0.
 - Ejemplo de inicio excelente: "¿Sabías que tu perro percibe el mundo en 300 millones de receptores olfativos mientras tú apenas alcanzas 6 millones? Lo que la ciencia acaba de descubrir sobre los sentidos caninos desafía todo lo que creíamos saber..."
 
-REGLAS DE FLUIDEZ Y PROSODIA HUMANA (SÍNTESIS ULTRA-NATURAL, TEMPO MEDIO Y SIN PAUSAS MECÁNICAS):
+REGLAS DE FLUIDEZ Y PROSODIA HUMANA (SÍNTESIS ULTRA-NATURAL, TEMPO MEDIO Y SIN TRABAS):
 - Redacta con cadencia de conversación real, fluida, apasionada y a un TEMPO MEDIO NATURAL (ni apresurado ni robótico).
+- Escribe como un locutor o cronista profesional hablando en vivo: párrafos continuos con estructura gramatical natural, oraciones completas y ritmo envolvente (ejemplo: "Imagina despertar mañana y descubrir que el precio de la gasolina se ha disparado. Que algunas rutas comerciales han quedado bloqueadas. Que países que hasta hace poco negociaban ahora movilizan tropas...").
 - ESTRICTAMENTE PROHIBIDO colocar comas tras palabras o frases de inicio como 'Es que,', 'Y es que,', 'Pero,', 'Porque,', 'Así que,', 'O sea,'. Escribe 'Es que la verdad...', 'Pero qué significa...', 'Porque si lo analizamos...' de corrido para que el locutor no se quede congelado o tartamudo al empezar a hablar.
-- ESTRICTAMENTE PROHIBIDO el abuso de comas innecesarias dentro de las frases. Las comas en síntesis neural generan pausas bruscas de respiración; úsalas ÚNICAMENTE para separar ideas lógicas largas al final de una oración completa.
-- PROHIBIDO partir las frases en trozos microscópicos con puntos seguidos cada 3 palabras. Escribe párrafos con oraciones ricas, bien hilvanadas y fluidas.
+- ESTRICTAMENTE PROHIBIDO el abuso de comas innecesarias dentro de las frases. Las comas en síntesis neural generan pausas bruscas de respiración; úsalas ÚNICAMENTE para separar ideas lógicas al final de una cláusula completa.
+- PROHIBIDO usar puntos suspensivos triples ("...") o guiones largos ("—") en medio de una frase simple porque hacen que el motor TTS vacile o corte el aliento artificialmente. Usa puntos seguidos y comas estándar limpias.
+- PROHIBIDO partir las frases en trozos microscópicos con puntos seguidos cada 3 palabras. Escribe oraciones bien hilvanadas, ricas y con ritmo narrativo de televisión.
 - Los números, años y cifras deben integrarse con total naturalidad (ej: 'en mil novecientos noventa y tres', 'casi un ochenta por ciento').
 - Mantén un tono inteligente, seguro y cercano como un divulgador de élite en YouTube hablando con soltura a su audiencia.
 

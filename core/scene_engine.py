@@ -31,12 +31,12 @@ from core.llm import safe_log
 
 
 EMOTION_VOICE_MODULATION: Dict[str, Tuple[str, str]] = {
-    "excited": ("+1%", "+2Hz"),
-    "surprised": ("+0%", "+2Hz"),
-    "serious": ("-2%", "-1Hz"),
-    "skeptical": ("-2%", "-1Hz"),
+    "excited": ("+0%", "+0Hz"),
+    "surprised": ("+0%", "+0Hz"),
+    "serious": ("+0%", "+0Hz"),
+    "skeptical": ("+0%", "+0Hz"),
     "confident": ("+0%", "+0Hz"),
-    "humor": ("+1%", "+1Hz"),
+    "humor": ("+0%", "+0Hz"),
 }
 
 
@@ -121,23 +121,9 @@ class SceneEngine:
                     d_sec = chunk["duration"] / 10_000_000
                     sentence_boundaries.append((s_sec, s_sec + d_sec, chunk["text"].strip()))
 
-        # Medir duración inicial y aplicar silenceremove inteligente para eliminar pausas muertas y silencios largos
-        trimmed_audio_path = scene_dir / "voice_trimmed.mp3"
-        try:
-            trim_cmd = [
-                "ffmpeg", "-y", "-i", str(audio_path),
-                "-af", "silenceremove=stop_periods=-1:stop_duration=0.22:stop_threshold=-32dB:start_periods=1:start_duration=0.01:start_threshold=-32dB",
-                str(trimmed_audio_path),
-            ]
-            res_trim = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=15)
-            if res_trim.returncode == 0 and trimmed_audio_path.exists() and trimmed_audio_path.stat().st_size > 1000:
-                audio_path = trimmed_audio_path
-        except Exception as exc_trim:
-            safe_log(f"[SceneEngine] Fallback silenceremove: {exc_trim}")
-
-        # Medir duración exacta del audio real de la escena (sin silencios muertos)
+        # Medir duración exacta del audio real de la escena generado limpiamente por el TTS neural
         tts_duration = self._get_audio_duration(audio_path)
-        # La escena se ajusta de forma milimétrica al audio hablado para evitar silencios y pausas vacías
+        # La escena se ajusta de forma milimétrica al audio hablado para evitar silencios y mantener sincronía exacta con los fotogramas
         duration = max(3.0, round(tts_duration + 0.15, 2))
         dur_str = f"{duration:.2f}"
 
