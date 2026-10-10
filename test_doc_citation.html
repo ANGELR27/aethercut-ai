@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .doc-card {
+    width: 680px;
+    background: linear-gradient(145deg, rgba(17, 24, 39, 0.96) 0%, rgba(9, 13, 22, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.9), 0 0 40px rgba(250, 204, 21, 0.12);
+    border-radius: 14px;
+    padding: 30px 34px;
+    color: #f8fafc;
+    position: relative;
+    overflow: hidden;
+  }
+  .doc-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #facc15, #fbbf24, #38bdf8);
+  }
+  .doc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    margin-bottom: 20px;
+  }
+  .source-tag {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: #facc15;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .date-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #94a3b8;
+    letter-spacing: 0.5px;
+  }
+  .doc-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    background: rgba(250, 204, 21, 0.15);
+    border: 1px solid rgba(250, 204, 21, 0.35);
+    border-radius: 4px;
+    color: #facc15;
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .doc-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    line-height: 1.25;
+    color: #ffffff;
+    margin-bottom: 16px;
+  }
+  .doc-body {
+    font-size: 16px;
+    line-height: 1.6;
+    color: #e2e8f0;
+    background: rgba(2, 6, 23, 0.4);
+    padding: 16px 20px;
+    border-radius: 8px;
+    border-left: 3px solid rgba(250, 204, 21, 0.6);
+  }
+  .highlighter {
+    background: rgba(250, 204, 21, 0.32);
+    border-bottom: 2px solid #facc15;
+    color: #fef08a;
+    font-weight: 700;
+    padding: 2px 4px;
+    border-radius: 2px;
+    text-shadow: 0 0 12px rgba(250, 204, 21, 0.4);
+  }
+</style>
+</head>
+<body>
+  <div class="doc-card">
+    <div class="doc-header">
+      <div class="source-tag">📄 INFORME NACIONES UNIDAS · GINEBRA 2026</div>
+      <div class="date-tag">REGISTRO OFICIAL</div>
+    </div>
+    <div class="doc-badge">● EVIDENCIA DOCUMENTAL</div>
+    <div class="doc-title">Resolución sobre Armamento Autónomo y Enjambres</div>
+    <div class="doc-body">El uso de sistemas letales autónomos <mark class="highlighter">sin control humano significativo plantea riesgos inaceptables</mark> para la estabilidad estratégica y el derecho internacional humanitario.</div>
+  </div>
+</body>
+</html>

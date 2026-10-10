@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .ranking-card {
+    width: 660px;
+    background: linear-gradient(145deg, rgba(9, 10, 13, 0.98) 0%, rgba(4, 5, 7, 0.99) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.95), 0 0 45px rgba(12, 24, 48, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 30px 36px;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    position: relative;
+    overflow: hidden;
+  }
+  .ranking-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; width: 140px;
+    height: 2px;
+    background: linear-gradient(90deg, #38bdf8, transparent);
+  }
+  .number-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 120px;
+    height: 120px;
+    background: rgba(14, 18, 26, 0.85);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(56, 189, 248, 0.06);
+    border-radius: 12px;
+    position: relative;
+  }
+  .big-number {
+    font-family: 'Outfit', sans-serif;
+    font-size: 76px;
+    font-weight: 800;
+    line-height: 1;
+    background: linear-gradient(180deg, #ffffff 30%, #38bdf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 4px 14px rgba(56, 189, 248, 0.35));
+    letter-spacing: -2px;
+  }
+  .info-content {
+    flex: 1;
+  }
+  .rank-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 11px;
+    border-radius: 4px;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    color: #38bdf8;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .rank-badge svg { flex-shrink: 0; }
+  .rank-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 26px;
+    font-weight: 800;
+    color: #f1f5f9;
+    line-height: 1.2;
+    letter-spacing: -0.4px;
+    margin-bottom: 7px;
+  }
+  .rank-sub {
+    font-size: 13.5px;
+    color: #94a3b8;
+    line-height: 1.45;
+  }
+</style>
+</head>
+<body>
+  <div class="ranking-card">
+    <div class="number-box">
+      <div class="big-number">01</div>
+    </div>
+    <div class="info-content">
+      <div class="rank-badge">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="5" r="3" fill="#38bdf8"/><circle cx="5" cy="5" r="4.5" stroke="#38bdf8" stroke-opacity="0.5"/></svg>
+        <span>TOP IMPACTO</span>
+      </div>
+      <div class="rank-title">ESTRATEGIA GEOPOLITICA</div>
+      <div class="rank-sub">Mayor despliegue logistico registrado en la decada.</div>
+    </div>
+  </div>
+</body>
+</html>

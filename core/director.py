@@ -50,6 +50,8 @@ class DirectorScene:
     # Pop-ups informativos sincronizados con la locución
     # [{"trigger": "frase del speech", "text": "texto corto", "kind": "stat|fact|alert|quote"}]
     popups: List[Dict[str, Any]] = field(default_factory=list)
+    # Texto libre cinemático flotante (sin card, con desenfoque de fondo opcional)
+    free_title: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -97,6 +99,7 @@ class DirectorBroadcastPlan:
                     duration_est=float(s.get("duration_est", s.get("duration_est_sec", 10.0))),
                     visual_beats=_clean_beats(s.get("visual_beats")),
                     popups=_clean_popups(s.get("popups")),
+                    free_title=s.get("free_title"),
                 )
             )
         return cls(
@@ -190,8 +193,20 @@ REGLAS PARA DATOS, MAPAS, ESTADÍSTICAS Y TARJETAS BENTO HUD (AL MENOS 60% DE LA
   * "headline": Título corto y concreto del dato, mapa o comparativa (ej: "Alianza Geopolítica: EE.UU. e Israel", "Capacidad Olfativa: Perro vs Humano", "Inflación Mensual").
   * "stat": La cifra, métrica o relación clave destacada (ej: "300M vs 6M", "52.9%", "+450%", "Alianza Bilateral").
   * "body": Explicación sintética y contundente del dato con fuentes contrastadas.
-  * "badge": "ESTADÍSTICA", "DATO CLAVE", "COMPARATIVA", "MAPA GLOBAL" o "CONFIRMADO".
+  * "badge":
+    - "EVIDENCIA DOCUMENTAL" o "INFORME OFICIAL": Genera automáticamente una cita de artículo / informe con texto resaltado fluorescente estilo Vox / Johnny Harris.
+    - "COMPARATIVA" o "VERSUS": (ej: headline "Estados Unidos vs China", stat "$886B vs $296B") Genera automáticamente la pantalla dividida cinemática Versus con divisor láser.
+    - "ESTADÍSTICA", "DATO CLAVE", "MAPA GLOBAL" o "CONFIRMADO": Genera la tarjeta Bento Box Obsidian / Tactical con gráfico e indicador de estado.
 - De esta manera el espectador ve el avatar hablando pero al mismo tiempo tiene en pantalla la tarjeta gráfica interactiva mostrando los mapas, números reales y comparativas en pantalla sin sentirse vacío.
+
+REGLAS PARA TEXTO LIBRE ANIMADO CINEMÁTICO ("free_title") (SIN CAJAS, FLOTANTE EN PANTALLA):
+- Si la escena representa un TOP / RANKING (ej: "Puesto 3"), una ENUMERACIÓN DE COSAS IMPORTANTES (ej: "Factor #1: Velocidad", "Paso 2: Neutralización") o un CONCEPTO DE IMPACTO ("Guerra Sin Humanos", "Inversión Récord"), incluye el objeto "free_title" (flotará libre directamente sobre el video sin caja ni contenedor):
+  * "title": Titular principal (ej: "DRONES AUTÓNOMOS", "VELOCIDAD DE REACCIÓN", "CONTROL BALÍSTICO").
+  * "number": Número destacado de 2 dígitos si aplica (ej: "03", "01") o dejarlo vacío.
+  * "tag": Etiqueta superior en micro-letras (ej: "PUESTO 03 · RANKING", "FACTOR DETERMINANTE #1", "ALERTA ESTRATÉGICA").
+  * "subtitle": Frase corta explicativa (máximo 12 palabras).
+  * "highlight": La palabra exacta del título que debe brillar con halo de luz de color.
+  * "blur_bg": true (desenfoca momentáneamente el fondo del video durante 2 segundos mientras aparece el título flotante).
 
 REGLAS PARA EDICIÓN AVANZADA Y REFERENCIAS VISUALES ("chips"):
 - SIEMPRE que en la narración se enumeren, comparen o mencionen países (ej: Estados Unidos, China, Argentina, España), marcas o entidades, agrega en la escena el array "chips" con los nombres limpios oficiales (ej: ["Estados Unidos", "China", "Argentina"]).
@@ -217,8 +232,9 @@ TIPOS DE ESCENA DISPONIBLES:
 1. "avatar_cam": KAI diciendo la primera frase de gancho (Hook de impacto de 3 a 4 segundos MÁXIMO) y luego entra inmediatamente el contenido visual y B-Roll para que la audiencia no se aburra. Ideal para abrir con intriga o para la conclusión final reflexiva.
 2. "video_reaction": Clip de video dinámico a pantalla completa con KAI en recuadro PIP en la esquina reaccionando en vivo ("¡Miren esta toma!", "¡Fíjense en este detalle!").
 3. "card_focus": Tarjeta Bento HUD con gráfico infográfico (Matplotlib) y KAI en PIP. ¡OBLIGATORIA para estadísticas y comparativas!
-4. "chat_debate": KAI interactúa con preguntas y dilemas de la audiencia, contrastando posturas.
-5. "breaking_news": Titular o primicia urgente con tono dinámico y clip de video en movimiento.
+4. "vector_motion": Animación vectorial con física y diseño Signature Pro (redes neuronales, flujos de razonamiento o personajes realizando acciones como analizar datos, operar pantallas o tomar decisiones). ¡Ideal para explicar conceptos abstractos o procesos complejos!
+5. "chat_debate": KAI interactúa con preguntas y dilemas de la audiencia, contrastando posturas.
+6. "breaking_news": Titular o primicia urgente con tono dinámico y clip de video en movimiento.
 
 EMOCIONES DE KAI POR ESCENA:
 - "excited": Entusiasta, dinámico, revelaciones fascinantes.
@@ -316,7 +332,7 @@ class AIDirector:
         elif dur <= 360:
             num_scenes = max(10, dur // 25)
         else:
-            num_scenes = min(20, max(12, dur // 28))
+            num_scenes = min(48, max(12, dur // 28)) if dur > 1200 else min(20, max(12, dur // 28))
 
         seconds_per_scene = round(dur / num_scenes)
         # Ritmo de narración natural y elocuente (~130 palabras por minuto = ~2.15 palabras por segundo)
@@ -349,9 +365,9 @@ class AIDirector:
         )
 
         try:
-            gen_timeout = max(45.0, min(180.0, float(dur * 0.15)))
+            gen_timeout = max(45.0, min(420.0 if dur > 1200 else 180.0, float(dur * 0.15)))
             raw = await asyncio.wait_for(
-                asyncio.to_thread(self.llm.generate, prompt, json_mode=True, max_models=2),
+                asyncio.to_thread(self.llm.generate, prompt, json_mode=True, max_models=2, deadline_sec=gen_timeout),
                 timeout=gen_timeout,
             )
             cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)

@@ -61,115 +61,44 @@ def numero_a_palabras(n: int) -> str:
 
 def refine_speech_cadence(text: str) -> str:
     """
-    Pule la cadencia oral del texto insertando pausas naturales (comas y puntos):
-    1. Si está disponible NVIDIA Nemotron (o LLM), extrae la versión puntuada con comas limpias.
-    2. Reglas gramaticales y fonéticas del español para garantizar que ninguna frase de más de 8-10 palabras
-       carezca de coma antes de conectores explicativos, causales o adversativos.
+    Pule la cadencia oral del texto respetando la prosodia natural de Edge-TTS:
+    - NO inserta comas artificiales arbitrarias que provoquen pausas muertas o tartamudeo.
+    - Corrige comas huérfanas entre determinantes, adjetivos y sustantivos (ej: 'ninguna, decisión' -> 'ninguna decisión').
+    - Limpia comas antes de conjunciones copulativas innecesarias (ej: ', y' -> ' y').
     """
-    if not text or len(text.strip()) < 15:
+    if not text or len(text.strip()) < 5:
         return text
 
     clean = text.strip()
 
-    # Intento 1: NVIDIA Nemotron 3.5 Lightning (si está disponible)
-    try:
-        from config.settings import settings
-        if getattr(settings, "NVIDIA_API_KEY", None):
-            from openai import OpenAI
-            client = OpenAI(
-                base_url="https://integrate.api.nvidia.com/v1",
-                api_key=settings.NVIDIA_API_KEY,
-                timeout=5.0,
-            )
-            prompt_refine = (
-                "Reescribe el siguiente texto exactamente igual pero insertando comas naturales donde un locutor de radio "
-                "deba respirar. No agregues saludos ni explicaciones, responde SOLO con el texto puntuado:\n\n" + clean
-            )
-            resp = client.chat.completions.create(
-                model=settings.NVIDIA_MODEL,
-                messages=[{"role": "user", "content": prompt_refine}],
-                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-                max_tokens=len(clean) + 80,
-                temperature=0.1,
-            )
-            raw_ans = resp.choices[0].message.content.strip()
-            # Si el modelo devuelve un bloque con explicaciones o markdown, extraer la línea relevante
-            lines = [l.strip().strip('*"`\'') for l in raw_ans.split("\n") if l.strip() and not l.strip().lower().startswith(("aquí", "por qué", "explicación", "1.", "2."))]
-            for l in lines:
-                if len(l.split()) >= len(clean.split()) - 3:
-                    if l.count(",") >= 1:
-                        return l
-    except Exception:
-        pass
+    # 1. Corregir comas huérfanas entre determinantes/pronombres/artículos y sustantivos
+    clean = re.sub(
+        r'\b(un|una|unos|unas|el|la|los|las|este|esta|estos|estas|ningún|ningun|ninguna|ninguno|todo|toda|cada|su|sus|mi|mis|tu|tus)\s*,\s*',
+        r'\1 ',
+        clean,
+        flags=re.IGNORECASE,
+    )
 
-    # Intento 2: Reglas fonéticas deterministas del español para locución de radio
-    # Conectores y cláusulas que requieren pausa oral obligatoria si no llevan coma previa
-    rules = [
-        (r"(\b\w+\b)\s+(porque\b)", r"\1, porque"),
-        (r"(\b\w+\b)\s+(mientras\b)", r"\1, mientras"),
-        (r"(\b\w+\b)\s+(donde\b)", r"\1, donde"),
-        (r"(\b\w+\b)\s+(aunque\b)", r"\1, aunque"),
-        (r"(\b\w+\b)\s+(pero\b)", r"\1, pero"),
-        (r"(\b\w+\b)\s+(sino que\b)", r"\1, sino que"),
-        (r"(\b\w+\b)\s+(ya que\b)", r"\1, ya que"),
-        (r"(\b\w+\b)\s+(dado que\b)", r"\1, dado que"),
-        (r"(\b\w+\b)\s+(debido a que\b)", r"\1, debido a que"),
-        (r"(\b\w+\b)\s+(sin embargo\b)", r"\1, sin embargo,"),
-        (r"(\b\w+\b)\s+(por lo que\b)", r"\1, por lo que"),
-        (r"(\b\w+\b)\s+(con lo cual\b)", r"\1, con lo cual"),
-        (r"(\b\w+\b)\s+(demostrando\b)", r"\1, demostrando"),
-        (r"(\b\w+\b)\s+(afectando\b)", r"\1, afectando"),
-        (r"(\b\w+\b)\s+(generando\b)", r"\1, generando"),
-        (r"(\b\w+\b)\s+(restando\b)", r"\1, restando"),
-        (r"(\b\w+\b)\s+(poniendo en riesgo\b)", r"\1, poniendo en riesgo"),
-        (r"(\b\w+\b)\s+(a pesar de\b)", r"\1, a pesar de"),
-        (r"(\b\w+\b)\s+(mientras que\b)", r"\1, mientras que"),
-    ]
+    # 2. Corregir comas accidentales antes de la conjunción 'y' en enumeraciones continuas
+    clean = re.sub(r',\s+y\b', ' y', clean)
 
-    # Pausa tras cláusulas subordinadas largas iniciadas por 'Cuando ...', 'Si ...', 'Al ...', 'Tras ...'
-    clean = re.sub(r"((?:Cuando|Si|Al|Tras)\s+[\w\s]{16,40}?\b[A-Za-zÁ-ú]{4,})\s+(nos encontramos|vemos|chocamos|aparece|surge|marca|deja)", r"\1, \2", clean, flags=re.IGNORECASE)
+    # 3. Corregir comas pegadas a palabras o con espaciado incorrecto
+    clean = re.sub(r'\s+,', ',', clean)
+    clean = re.sub(r',([^\s\d])', r', \1', clean)
 
-    # Pausa tras 'en Colombia' o países similares cuando van en medio de cláusula temporal
-    clean = re.sub(r"(\ben (?:Colombia|México|Argentina|España|Estados Unidos))\s+(nos encontramos|vemos|analizamos|chocamos)", r"\1, \2", clean, flags=re.IGNORECASE)
-
-    for pat, rep in rules:
-        clean = re.sub(pat, rep, clean, flags=re.IGNORECASE)
-
-    # Si hay oraciones largas sin coma antes de 'y', agregar coma antes de la conjunción
-    clean = re.sub(r"([A-Za-zÁ-ú]{3,}\s+[A-Za-zÁ-ú]{3,}\s+[A-Za-zÁ-ú]{3,})\s+y\s+([A-Za-zÁ-ú]{3,}\s+[A-Za-zÁ-ú]{3,})", r"\1, y \2", clean)
-
-    # Candado definitivo: ninguna secuencia de más de 16 palabras puede quedar sin pausa
-    # Si entre signos de puntuación (. , ; : ? !) hay más de 14 palabras, colocar coma en el conector o espacio natural central
-    def _enforce_max_segment_length(t: str, max_words: int = 14) -> str:
-        parts = re.split(r"([,.;:?!])", t)
-        out_parts = []
-        for i in range(0, len(parts), 2):
-            seg = parts[i]
-            punct = parts[i + 1] if i + 1 < len(parts) else ""
-            w_list = seg.split()
-            if len(w_list) > max_words:
-                # Partir en mitades de 8-12 palabras insertando coma
-                mid = len(w_list) // 2
-                seg = " ".join(w_list[:mid]) + ", " + " ".join(w_list[mid:])
-            out_parts.append(seg + punct)
-        return "".join(out_parts)
-
-    clean = _enforce_max_segment_length(clean, max_words=14)
-
-    # Limpiar dobles comas accidentales
-    clean = re.sub(r",\s*,+", ", ", clean)
-    clean = re.sub(r"\s+,\s*", ", ", clean)
+    # 4. Eliminar dobles comas o signos repetidos
+    clean = re.sub(r',(\s*,)+', ',', clean)
+    clean = re.sub(r'([,.])\1+', r'\1', clean)
 
     return clean
 
 
 def normalize_speech_for_tts(text: str) -> str:
     """
-    Normalización limpia y respetuosa de la voz:
-    - Conserva 100% los acentos, tildes y signos naturales de puntuación del español.
-    - Aplica refinación de cadencia oral (comas de respiración) para que el locutor hable fluido.
-    - Únicamente limpia espacios dobles y asegura que los porcentajes (ej: 25%) se lean continuos.
-    - Cero cortes mecánicos ni fragmentaciones artificiales.
+    Normalización limpia y de alta fidelidad para Edge-TTS:
+    - Conserva 100% los acentos, tildes y entonación humana natural.
+    - Convierte porcentajes fonéticamente ('25%' -> '25 por ciento').
+    - Limpia comas accidentales sin insertar pausas artificiales mecánicas.
     """
     if not text:
         return ""
@@ -181,10 +110,8 @@ def normalize_speech_for_tts(text: str) -> str:
     # Normalizar porcentaje para lectura fonética correcta
     text = re.sub(r"(\d+)\s*%", r"\1 por ciento", text)
 
-    # Refinar cadencia oral (comas de respiración) si el texto venía como un bloque plano sin comas
+    # Pulir cadencia sin introducir frenadas o cortes en seco
     text = refine_speech_cadence(text)
 
-    # Eliminar dobles signos seguidos accidentales (ej: ,, o ..)
-    text = re.sub(r"([,.])\1+", r"\1", text)
-
     return text
+

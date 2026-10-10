@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .card {
+    width: 580px;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(10, 14, 26, 0.97) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    padding: 28px;
+    color: #f8fafc;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #38bdf8, #818cf8, transparent);
+  }
+  .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: #38bdf8;
+    text-transform: uppercase;
+  }
+  .badge-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 8px #38bdf8;
+  }
+  .source-tag {
+    font-size: 11px;
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .metric-box {
+    background: rgba(2, 6, 23, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .metric-val {
+    font-family: 'Outfit', sans-serif;
+    font-size: 38px;
+    font-weight: 800;
+    color: #38bdf8;
+    line-height: 1;
+    letter-spacing: -0.5px;
+  }
+  .metric-label {
+    font-size: 12px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 4px;
+    font-weight: 600;
+  }
+  .chart-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 5px;
+    height: 44px;
+  }
+  .c-bar {
+    width: 8px;
+    border-radius: 2px;
+    background: rgba(56, 189, 248, 0.25);
+  }
+  .c-bar.active {
+    background: linear-gradient(180deg, #38bdf8, #0284c7);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+  }
+  .headline {
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.25;
+    color: #ffffff;
+    margin-bottom: 10px;
+  }
+  .body-text {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: #cbd5e1;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="top-row">
+      <div class="badge"><span class="badge-dot"></span>Dato Verificado</div>
+      <div class="source-tag">Registro Oficial 2026</div>
+    </div>
+    <div class="metric-box">
+      <div>
+        <div class="metric-val">95%</div>
+        <div class="metric-label">Tasa de Precisión Autónoma</div>
+      </div>
+      <div class="chart-bars">
+        <div class="c-bar" style="height: 35%;"></div>
+        <div class="c-bar" style="height: 50%;"></div>
+        <div class="c-bar" style="height: 65%;"></div>
+        <div class="c-bar" style="height: 80%;"></div>
+        <div class="c-bar active" style="height: 95%;"></div>
+      </div>
+    </div>
+    <div class="headline">Drones Autónomos de Combate</div>
+    <div class="body-text">Algoritmos neuronales capaces de fijar y neutralizar objetivos sin intervención humana directa.</div>
+  </div>
+</body>
+</html>

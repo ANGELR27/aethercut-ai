@@ -136,21 +136,42 @@ button { cursor: pointer; }
     position: relative;
     z-index: 10;
     width: 100%;
-    max-width: 1280px;
+    max-width: 1400px;
     background: var(--glass-bg);
-    backdrop-filter: blur(44px) saturate(160%);
-    -webkit-backdrop-filter: blur(44px) saturate(160%);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-window);
-    box-shadow: 
-        0 40px 100px -20px rgba(0, 0, 0, 0.85),
-        inset 0 1px 1px rgba(255, 255, 255, 0.16),
-        inset 0 -1px 1px rgba(0, 0, 0, 0.3);
-    padding: 30px 38px 36px;
+    backdrop-filter: blur(52px) saturate(175%);
+    -webkit-backdrop-filter: blur(52px) saturate(175%);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 24px;
+    box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.4),
+        0 48px 120px -24px rgba(0, 0, 0, 0.9),
+        0 24px 64px -12px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+    padding: 0 0 36px;
     display: flex;
     flex-direction: column;
-    gap: 26px;
+    gap: 0;
+    overflow: hidden;
 }
+
+/* Línea de acento superior — detalle profesional tipo macOS */
+.glass-studio-window::before {
+    content: '';
+    display: block;
+    height: 2px;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(56, 189, 248, 0.6) 20%,
+        rgba(139, 92, 246, 0.5) 50%,
+        rgba(20, 184, 166, 0.5) 80%,
+        transparent 100%
+    );
+    flex-shrink: 0;
+}
+
 
 /* ==========================================================================
    3. WINDOW TOP HEADER BAR
@@ -160,6 +181,10 @@ button { cursor: pointer; }
     align-items: center;
     justify-content: space-between;
     gap: 20px;
+    padding: 18px 36px 16px;
+    background: rgba(255, 255, 255, 0.025);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    flex-shrink: 0;
 }
 
 .brand-monogram {
@@ -2443,6 +2468,162 @@ button { cursor: pointer; }
     color: #fee2e2;
 }
 
+/* ==========================================================================
+   MEJORAS PROFESIONALES #mainStudioWindow — v2 Studio Pro
+   Agregado directamente en disco por el sistema de edición real.
+   ========================================================================== */
 
+/* ── Padding interior compensado para el nuevo layout sin gap ── */
+#mainStudioWindow > section,
+#mainStudioWindow > .bento-main-card,
+#mainStudioWindow > div:not([aria-hidden]) {
+    margin: 0 32px;
+}
+
+/* Primera sección (tabs + primer panel) tiene margen extra superior */
+#mainStudioWindow > section:first-of-type,
+#mainStudioWindow > .view-tabs-wrap {
+    margin-top: 20px;
+}
+
+/* Separador sutil entre cada panel del estudio */
+#mainStudioWindow > section + section,
+#mainStudioWindow > .bento-main-card + .bento-main-card {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 24px;
+    margin-top: 4px;
+}
+
+/* ── Bento card mejorado ── */
+.bento-main-card {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 18px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 2px 12px rgba(0, 0, 0, 0.2);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.bento-main-card:hover {
+    border-color: rgba(255, 255, 255, 0.11);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Stage preview: modo YouTube horizontal 16:9 (default) ── */
+.stage-preview-box {
+    aspect-ratio: 16 / 9;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.4),
+        0 16px 48px -8px rgba(0, 0, 0, 0.7),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: aspect-ratio 0.3s ease, border-color 0.2s ease;
+    background: #000;
+    position: relative;
+}
+
+/* ── Modo 9:16 (YouTube Shorts / Vertical) ── */
+.stage-preview-box.preview-vertical {
+    aspect-ratio: 9 / 16;
+    max-height: 520px;
+    width: auto;
+    margin: 0 auto;
+}
+
+/* ── Contenedor del preview con botones de modo ── */
+.preview-mode-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.preview-mode-btn {
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    letter-spacing: 0.03em;
+}
+
+.preview-mode-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.preview-mode-btn.active {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: rgba(56, 189, 248, 0.4);
+    color: #38bdf8;
+}
+
+/* ── Brand logo pill mejorado ── */
+.brand-logo-pill {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(139, 92, 246, 0.15));
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    box-shadow:
+        0 4px 12px rgba(56, 189, 248, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transition: box-shadow 0.2s ease;
+}
+
+.brand-logo-pill:hover {
+    box-shadow:
+        0 6px 20px rgba(56, 189, 248, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* ── Tabs de navegación del studio: más definidos ── */
+.segmented-tabs {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    padding: 3px;
+    border-radius: 12px;
+}
+
+.seg-tab {
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 16px;
+    transition: all 0.15s ease;
+}
+
+.seg-tab.active {
+    background: rgba(56, 189, 248, 0.18);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: #38bdf8;
+    box-shadow: 0 2px 8px rgba(56, 189, 248, 0.15);
+}
+
+/* ── Scrollbar del studio más elegante ── */
+#mainStudioWindow ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+#mainStudioWindow ::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#mainStudioWindow ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+#mainStudioWindow ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
 
 

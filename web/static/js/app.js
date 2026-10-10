@@ -1,5 +1,8 @@
+import { $, fmtDuration, ageLabel, eventTime, esc, percent, waitForEvent } from "./modules/utils.js";
+import { setupHudPlayer } from "./modules/player.js";
+import { AgentCopilot } from "./modules/agent_copilot.js";
+
 document.addEventListener("DOMContentLoaded", () => {
-    const $ = (id) => document.getElementById(id);
     const form = $("uploadForm");
     const fileInput = $("videoFileInput");
     const dropzone = $("dropzone");
@@ -142,6 +145,113 @@ document.addEventListener("DOMContentLoaded", () => {
         return list.find((item) => item.id === selectedEditorItem.id) || null;
     }
 
+    // Tooltip flotante interactivo para vista previa de clips
+    let timelineTooltipEl = null;
+
+    function getOrCreateTimelineTooltip() {
+        if (!timelineTooltipEl) {
+            timelineTooltipEl = document.getElementById("prismTimelineTooltip");
+            if (!timelineTooltipEl) {
+                timelineTooltipEl = document.createElement("div");
+                timelineTooltipEl.id = "prismTimelineTooltip";
+                document.body.appendChild(timelineTooltipEl);
+            }
+        }
+        return timelineTooltipEl;
+    }
+
+    function showTimelineTooltip(e, item, type, end) {
+        const tip = getOrCreateTimelineTooltip();
+        let badgeHtml = "";
+        let bodyHtml = "";
+        let thumbHtml = "";
+        const durStr = `${fmtDuration(item.start)} - ${fmtDuration(end)} (${Math.max(1, Math.round(end - item.start))}s)`;
+
+        if (type === "card") {
+            badgeHtml = `<div class="pt-tip-badge card">📊 Tarjeta Bento HUD · Escena ${item.scene_id || 1}</div>`;
+            if (item.card_url) {
+                thumbHtml = `<img class="pt-tip-thumb" src="${item.card_url}" onerror="this.remove()">`;
+            }
+            bodyHtml = `
+                ${badgeHtml}
+                ${thumbHtml}
+                <div class="pt-tip-title">${esc(item.headline || item.title || "Tarjeta Bento")}</div>
+                ${item.stat_value ? `<div class="pt-tip-stat">⚡ ${esc(item.stat_value)}</div>` : ''}
+                ${item.body ? `<div class="pt-tip-desc">${esc(item.body)}</div>` : ''}
+                <div class="pt-tip-time">
+                    <span>⏱️ ${durStr}</span>
+                    <span>${esc(item.position || 'auto')}</span>
+                </div>
+            `;
+        } else if (type === "scene") {
+            badgeHtml = `<div class="pt-tip-badge scene">🎬 Escena ${item.scene_id || 1} · ${esc(item.camera || 'Avatar')}</div>`;
+            if (item.thumb_url) {
+                thumbHtml = `<img class="pt-tip-thumb" src="${item.thumb_url}" onerror="this.remove()">`;
+            }
+            bodyHtml = `
+                ${badgeHtml}
+                ${thumbHtml}
+                <div class="pt-tip-title">${esc(item.title || item.name || "Escena")}</div>
+                ${item.speech ? `<div class="pt-tip-desc">«${esc(item.speech)}»</div>` : ''}
+                <div class="pt-tip-time">
+                    <span>⏱️ ${durStr}</span>
+                    <span>${esc(item.type || 'Modular')}</span>
+                </div>
+            `;
+        } else if (type === "broll") {
+            badgeHtml = `<div class="pt-tip-badge broll">🎞️ B-Roll de Apoyo Visual</div>`;
+            if (item.thumb_url) {
+                thumbHtml = `<img class="pt-tip-thumb" src="${item.thumb_url}" onerror="this.remove()">`;
+            }
+            bodyHtml = `
+                ${badgeHtml}
+                ${thumbHtml}
+                <div class="pt-tip-title">${esc(item.concept || item.title || "B-Roll")}</div>
+                <div class="pt-tip-time">
+                    <span>⏱️ ${durStr}</span>
+                    <span>✓ Material listo</span>
+                </div>
+            `;
+        } else if (type === "speech") {
+            badgeHtml = `<div class="pt-tip-badge speech">🎙️ Locución Neural KAI</div>`;
+            bodyHtml = `
+                ${badgeHtml}
+                <div class="pt-tip-title" style="font-size:11.5px; font-weight:normal; line-height:1.45;">«${esc(item.text || item.title || "")}»</div>
+                <div class="pt-tip-time">
+                    <span>⏱️ ${durStr}</span>
+                    <span>Voz sintetizada</span>
+                </div>
+            `;
+        }
+
+        tip.innerHTML = bodyHtml;
+        tip.classList.add("active");
+        positionTimelineTooltip(e);
+    }
+
+    function positionTimelineTooltip(e) {
+        const tip = getOrCreateTimelineTooltip();
+        if (!tip || !tip.classList.contains("active")) return;
+        const tipW = 290;
+        const tipH = tip.offsetHeight || 160;
+        let left = e.clientX + 14;
+        let top = e.clientY - tipH - 12;
+
+        if (left + tipW > window.innerWidth - 10) {
+            left = e.clientX - tipW - 14;
+        }
+        if (top < 10) {
+            top = e.clientY + 20;
+        }
+        tip.style.left = `${Math.max(10, left)}px`;
+        tip.style.top = `${Math.max(10, top)}px`;
+    }
+
+    function hideTimelineTooltip() {
+        const tip = getOrCreateTimelineTooltip();
+        if (tip) tip.classList.remove("active");
+    }
+
     function renderInspector() {
         const inspector = $("editorInspector");
         const item = getSelectedItem();
@@ -149,12 +259,20 @@ document.addEventListener("DOMContentLoaded", () => {
             inspector.innerHTML = "<b>Selecciona un elemento de la línea de tiempo</b><p>Podrás cambiar su momento, duración, posición o retirarlo antes de una nueva exportación.</p>";
             return;
         }
-        const kind = selectedEditorItem.type === "card" ? "Tarjeta verificada" : "Apoyo B-Roll";
-        const title = selectedEditorItem.type === "card" ? item.headline : item.concept;
+        const kind = selectedEditorItem.type === "card" ? "Tarjeta Bento verificada" : "Apoyo B-Roll";
+        const title = selectedEditorItem.type === "card" ? (item.headline || item.title) : item.concept;
         const end = selectedEditorItem.type === "card" ? Number(item.start) + Number(item.duration || 7) : item.end;
         const context = selectedEditorItem.type === "card" ? (item.body || item.note || item.claim) : item.status;
         const positions = ["auto", "upper_left", "upper_right", "lower_left", "lower_right"];
-        inspector.innerHTML = `<b>${esc(kind)} · ${esc(title)}</b><p>${esc(context || "Aún se está preparando.")}</p>
+        inspector.innerHTML = `
+            <b>${esc(kind)} · ${esc(title)}</b>
+            ${item.card_url ? `<div style="margin: 8px 0; text-align:center;"><img src="${item.card_url}${item.card_url.includes('?') ? '&' : '?'}t=${Date.now()}" style="max-width: 100%; max-height: 120px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 4px 16px rgba(0,0,0,0.5);"></div>` : ''}
+            <p>${esc(context || "Aún se está preparando.")}</p>
+            ${selectedEditorItem.type === "card" ? `
+                <div style="margin: 8px 0; font-size: 11px; color: #38bdf8; background: rgba(56, 189, 248, 0.08); padding: 7px 10px; border-radius: 6px; border-left: 3px solid #38bdf8; line-height: 1.45;">
+                    🤖 <b>AetherCopilot:</b> Tarjeta seleccionada para IA. Puedes pedirle al chat: <i>"Cambia el titular de esta tarjeta a ..."</i> o <i>"Actualiza la cifra a ..."</i>.
+                </div>
+            ` : ''}
             <label>Activo <input id="editEnabled" type="checkbox" ${item.enabled === false ? "" : "checked"}></label>
             <label>Inicio <input id="editStart" type="number" min="0" step="0.1" value="${Number(item.start || 0).toFixed(1)}"></label>
             <label>Fin <input id="editEnd" type="number" min="0" step="0.1" value="${Number(end || 0).toFixed(1)}"></label>
@@ -183,24 +301,79 @@ document.addEventListener("DOMContentLoaded", () => {
         button.className = `clip clip-${type}${item.enabled === false ? " is-muted" : ""}${selectedEditorItem?.type === type && selectedEditorItem.id === item.id ? " is-selected" : ""}`;
         button.style.left = percent(item.start, duration);
         button.style.width = `max(2.2%, ${percent(Math.max(1, end - Number(item.start)), duration)})`;
-        button.textContent = type === "card" ? item.headline : (type === "broll" ? item.concept : item.title);
-        button.title = `${button.textContent} · ${fmtDuration(item.start)}`;
-        button.addEventListener("click", () => {
-            selectedEditorItem = (type === "card" || type === "broll") ? { type, id: item.id } : null;
+        if (item.scene_id) button.dataset.sceneId = item.scene_id;
+        
+        let label = item.title || "";
+        if (type === "card") label = item.headline || item.title || "Tarjeta Bento";
+        else if (type === "broll") label = item.concept || item.title || "Clip B-Roll";
+        else if (type === "scene") label = item.title || item.name || `Escena ${item.scene_id}`;
+        else if (type === "speech") label = item.title || item.text || "Locución";
+        
+        const thumbUrl = item.thumb_url || (type === "card" ? item.card_url : null);
+        const icon = type === "card" ? "📊" : (type === "scene" ? "🎬" : (type === "broll" ? "🎞️" : "🎙️"));
+
+        button.innerHTML = `
+            ${thumbUrl ? `<img class="clip-mini-thumb" src="${thumbUrl}" onerror="this.remove()">` : `<span class="clip-icon-tag">${icon}</span>`}
+            <span class="clip-text-label">${esc(label)}</span>
+        `;
+        button.title = ""; // Tooltip flotante nativo enriquecido
+
+        button.addEventListener("mouseenter", (e) => showTimelineTooltip(e, item, type, end));
+        button.addEventListener("mousemove", (e) => positionTimelineTooltip(e));
+        button.addEventListener("mouseleave", () => hideTimelineTooltip());
+
+        button.addEventListener("click", (e) => {
+            e.stopPropagation();
+            hideTimelineTooltip();
+            selectedEditorItem = { type, id: item.id };
+            window.selectedEditorItem = selectedEditorItem;
             setPreviewTime(item.start);
             renderTimeline();
             renderInspector();
+            if (type === "scene") {
+                const row = document.querySelector(`.prism-sb-scene-row[data-scene-id="${item.scene_id}"]`);
+                if (row) {
+                    row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                }
+            }
         });
         return button;
     }
+
+    // Puente público para que AetherCopilot modifique tarjetas en tiempo real
+    window.updateCardFromCopilot = function(action) {
+        if (!editorState || !editorState.cards) return false;
+        const targetId = action.card_id || selectedEditorItem?.id;
+        const card = editorState.cards.find(c => c.id === targetId || String(c.scene_id) === String(action.scene_id) || c.headline === action.current_headline);
+        if (!card) return false;
+        if (action.headline) card.headline = action.headline;
+        if (action.title) card.title = action.title || action.headline;
+        if (action.stat_value) card.stat_value = action.stat_value;
+        if (action.body) card.body = action.body;
+        if (action.position) card.position = action.position;
+        if (action.start !== undefined) card.start = Number(action.start);
+        if (action.duration !== undefined) card.duration = Number(action.duration);
+        if (action.card_url) card.card_url = action.card_url;
+        markEditorDirty();
+        renderTimeline();
+        renderInspector();
+        renderStudio(editorState);
+        setPreviewTime(card.start);
+        return true;
+    };
+    window.getSelectedItem = () => getSelectedItem();
+    window.selectedEditorItem = selectedEditorItem;
 
     function renderTimeline() {
         if (!editorState) return;
         const duration = Number(editorState.duration || 1);
         const ruler = $("timelineRuler");
         const tracks = $("timelineTracks");
+        const scrollable = $("timelineScrollable") || ruler?.parentElement;
+        if (!ruler || !tracks) return;
         ruler.replaceChildren();
         tracks.replaceChildren();
+
         const marks = Math.max(4, Math.min(12, Math.ceil(duration / 60)));
         for (let i = 0; i <= marks; i += 1) {
             const label = document.createElement("span");
@@ -208,12 +381,46 @@ document.addEventListener("DOMContentLoaded", () => {
             label.textContent = fmtDuration((duration / marks) * i);
             ruler.append(label);
         }
-        const rows = [
-            ["Tarjetas", "card", editorState.cards || []],
-            ["B-Roll", "broll", editorState.brolls || []],
-            ["Shorts", "short", editorState.shorts || []],
-            ["Cortes", "cut", editorState.cuts || []],
-        ];
+
+        // Clic en la regla o pistas para mover el cabezal directamente
+        function seekFromPointer(e) {
+            const target = ruler.getBoundingClientRect();
+            if (target.width <= 0) return;
+            const ratio = Math.max(0, Math.min(1, (e.clientX - target.left) / target.width));
+            setPreviewTime(ratio * duration);
+        }
+        ruler.onclick = seekFromPointer;
+        if (scrollable) {
+            scrollable.onclick = (e) => {
+                if (e.target.closest(".clip") || e.target.closest(".track-name")) return;
+                seekFromPointer(e);
+            };
+        }
+
+        const rows = [];
+        if (editorState.scenes && editorState.scenes.length > 0) {
+            rows.push(["🎬 Escenas", "scene", editorState.scenes]);
+        }
+        if (editorState.cards && editorState.cards.length > 0) {
+            rows.push(["📊 Tarjetas", "card", editorState.cards]);
+        } else {
+            rows.push(["📊 Tarjetas", "card", []]);
+        }
+        if (editorState.brolls && editorState.brolls.length > 0) {
+            rows.push(["🎞️ B-Roll", "broll", editorState.brolls]);
+        } else {
+            rows.push(["🎞️ B-Roll", "broll", []]);
+        }
+        if (editorState.speech && editorState.speech.length > 0) {
+            rows.push(["🎙️ Locución", "speech", editorState.speech]);
+        }
+        if (editorState.shorts && editorState.shorts.length > 0) {
+            rows.push(["⚡ Shorts", "short", editorState.shorts]);
+        }
+        if (editorState.cuts && editorState.cuts.length > 0) {
+            rows.push(["✂️ Cortes", "cut", editorState.cuts]);
+        }
+
         rows.forEach(([label, type, items]) => {
             const row = document.createElement("div"); row.className = "track";
             const name = document.createElement("span"); name.className = "track-name"; name.textContent = label;
@@ -226,6 +433,26 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    function setStudioAspectRatio(aspect, isManual = false) {
+        if (isManual) window._studioAspectManuallySet = true;
+        const wrap = $("viewportScreenWrap");
+        const badge = $("monitorAspectBadge");
+        const btn169 = $("btnStudioAspect169");
+        const btn916 = $("btnStudioAspect916");
+        const is169 = (aspect === "16:9" || aspect === "horizontal" || aspect === "youtube");
+
+        if (wrap) {
+            wrap.classList.toggle("aspect-16-9", is169);
+            wrap.classList.toggle("aspect-9-16", !is169);
+        }
+        if (badge) {
+            badge.textContent = is169 ? "16:9" : "9:16";
+        }
+        if (btn169) btn169.classList.toggle("active", is169);
+        if (btn916) btn916.classList.toggle("active", !is169);
+    }
+    window.setStudioAspectRatio = setStudioAspectRatio;
+
     function renderStudio(editor, previewUrl) {
         if (!editor) return;
         const changed = JSON.stringify(editor) !== JSON.stringify(editorState);
@@ -234,9 +461,107 @@ document.addEventListener("DOMContentLoaded", () => {
         const duration = Number(editorState.duration || 0);
         if (activeMode === "studio") $("studioSection").hidden = false;
         $("exportTimelineBtn").disabled = editorDirty || !observedTaskId;
-        $("studioSummary").textContent = `${(editorState.cards || []).length} tarjetas · ${(editorState.brolls || []).length} B-Rolls · ${(editorState.shorts || []).length} Shorts`;
-        $("studioIntro").textContent = editorState.summary || "El agente está estructurando los elementos de la edición.";
-        $("previewDuration").textContent = fmtDuration(duration);
+
+        if (!window._studioAspectManuallySet && (editorState.aspect_ratio || editor?.aspect_ratio)) {
+            setStudioAspectRatio(editorState.aspect_ratio || editor?.aspect_ratio);
+        }
+
+        const scCount = (editorState.scenes || []).length;
+        const cdCount = (editorState.cards || []).length;
+        const brCount = (editorState.brolls || []).length;
+        const parts = [];
+        if (scCount) parts.push(`${scCount} escenas`);
+        if (cdCount) parts.push(`${cdCount} tarjetas`);
+        if (brCount) parts.push(`${brCount} B-Rolls`);
+        if ($("studioSummary")) $("studioSummary").textContent = parts.join(" · ") || `${fmtDuration(duration)} · Master 1080p`;
+        if ($("studioTitle")) $("studioTitle").textContent = editorState.summary || "Estudio de Producción KAI";
+        if ($("studioIntro")) $("studioIntro").textContent = editorState.summary || "El agente está estructurando los elementos de la edición.";
+        if ($("previewDuration")) $("previewDuration").textContent = fmtDuration(duration);
+
+        // Actualizar sideboard de escenas
+        const studioScenesList = $("studioLiveScenesList");
+        const studioScenesCount = $("studioScenesCount");
+        if (studioScenesCount) studioScenesCount.textContent = scCount;
+        if (studioScenesList && scCount > 0) {
+            studioScenesList.replaceChildren();
+            editorState.scenes.forEach((sc, idx) => {
+                const sNum = sc.scene_id || (idx + 1);
+                const sRow = document.createElement("div");
+                sRow.className = "prism-sb-scene-row";
+                sRow.dataset.sceneId = sNum;
+                sRow.dataset.start = sc.start;
+                sRow.dataset.end = sc.end;
+                sRow.innerHTML = `
+                    <div class="prism-sb-scene-thumb"><img src="${sc.thumb_url}" onerror="this.src='/static/images/app_bg.jpg'"></div>
+                    <div class="prism-sb-scene-info">
+                        <div class="prism-sb-scene-name">E${sNum}: ${sc.name || sc.title}</div>
+                        <div class="prism-sb-scene-sub">
+                            <span>${sc.camera || "PIP"}</span>
+                            <span>${sc.type || "Modular"}</span>
+                            <span>${fmtDuration(sc.duration || 0)}</span>
+                        </div>
+                    </div>
+                    <span class="prism-sb-scene-status done">✓ ${fmtDuration(sc.start)}</span>
+                `;
+                sRow.addEventListener("click", () => {
+                    setPreviewTime(sc.start);
+                    const preview = $("projectPreview");
+                    if (preview && preview.paused) preview.play().catch(() => {});
+                });
+                studioScenesList.appendChild(sRow);
+            });
+        }
+
+        // Actualizar sideboard de tarjetas Bento
+        const studioCardsList = $("studioLiveCardsList");
+        const studioCardsCount = $("studioCardsCount");
+        if (studioCardsCount) studioCardsCount.textContent = cdCount;
+        if (studioCardsList && cdCount > 0) {
+            studioCardsList.replaceChildren();
+            editorState.cards.forEach((cd) => {
+                const cRow = document.createElement("div");
+                cRow.className = "prism-sb-card-row";
+                cRow.style.cursor = "pointer";
+                cRow.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span class="prism-sb-card-badge">E${cd.scene_id || 1} · BENTO HUD</span>
+                        ${cd.stat_value ? `<strong class="prism-sb-card-stat" style="color:#f59e0b;">${cd.stat_value}</strong>` : ""}
+                    </div>
+                    <div class="prism-sb-card-headline">${cd.headline || cd.title || "Dato Clave"}</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:3px;">${cd.body ? cd.body.slice(0, 70) + '...' : ''} · ${fmtDuration(cd.start)}</div>
+                `;
+                cRow.addEventListener("click", () => {
+                    setPreviewTime(cd.start);
+                });
+                studioCardsList.appendChild(cRow);
+            });
+        }
+
+        // Actualizar sideboard de hechos e investigación
+        const studioFactsBox = $("studioLiveFactsBox");
+        if (studioFactsBox) {
+            studioFactsBox.replaceChildren();
+            const factItem = document.createElement("div");
+            factItem.style.padding = "8px 10px";
+            factItem.style.fontSize = "11px";
+            factItem.style.lineHeight = "1.5";
+            factItem.style.color = "#cbd5e1";
+            factItem.innerHTML = `
+                <strong style="color:#38bdf8; display:block; margin-bottom:4px;">🎯 Producción Master Sincronizada:</strong>
+                ${editorState.topic || editorState.summary || "Transmisión KAI"}
+                <div style="margin-top:8px; font-size:10px; color:#64748b;">
+                    Duración Total: <b>${fmtDuration(duration)}</b> · 1080p FHD Broadcast · 25 FPS
+                </div>
+            `;
+            studioFactsBox.appendChild(factItem);
+        }
+
+        // Estado del monitor KAI
+        if ($("studioTelemetryStepBadge")) $("studioTelemetryStepBadge").textContent = "● PRODUCCIÓN MASTER LISTA";
+        if ($("studioTelemetryPct")) $("studioTelemetryPct").textContent = "100%";
+        if ($("studioTelemetryMsg")) $("studioTelemetryMsg").textContent = "Todos los materiales y escenas sincronizados en la línea de tiempo.";
+
+        // Cargar video en preview si es necesario
         const preview = $("projectPreview");
         if (previewUrl && preview.dataset.source !== previewUrl) {
             preview.dataset.source = previewUrl;
@@ -257,8 +582,19 @@ document.addEventListener("DOMContentLoaded", () => {
         editorDirty = false;
         selectedEditorItem = null;
 
-        // Asegurar que el modo esté en streamer para que el monitor y controles sean visibles
-        switchMode("streamer");
+        // Asegurar que el modo esté en Mesa & Timeline para ver el monitor y pistas
+        switchMode("studio");
+
+        // Configurar relación de aspecto del monitor (16:9 vs 9:16) según opciones del proyecto
+        const projAspect = data.project?.options?.aspect_ratio || data.project?.aspect_ratio || (data.project?.options?.mode === "shorts" ? "9:16" : "16:9");
+        window._studioAspectManuallySet = false;
+        setStudioAspectRatio(projAspect);
+
+        // Si el proyecto sigue en curso (ej: status render o running), activar escucha en vivo
+        const projStatus = data.project?.status;
+        if (projStatus && projStatus !== "done" && projStatus !== "error" && projStatus !== "cancelled") {
+            listen(projectId);
+        }
 
         // Reactivar y desbloquear botón de transmisión
         const startStreamerBtn = $("startStreamerBtn");
@@ -272,40 +608,42 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.project?.result) {
             didShowResults = true;
             showResults(data.project.result, projectId);
-        } else {
-            const previewBox = $("previewContainer");
-            if (previewBox) {
-                previewBox.hidden = false;
-                previewBox.style.display = "block";
-            }
-            const dropWrap = $("copilotDropWrap");
-            if (dropWrap) {
-                dropWrap.hidden = true;
-                dropWrap.style.display = "none";
-            }
-            const preview = $("projectPreview");
-            if (preview) {
-                preview.hidden = false;
-                preview.style.display = "block";
-                preview.controls = false;
-                preview.volume = 1;
-                preview.muted = false;
+        }
+
+        const previewBox = $("previewContainer");
+        if (previewBox) {
+            previewBox.hidden = false;
+            previewBox.style.display = "block";
+        }
+        const dropWrap = $("copilotDropWrap");
+        if (dropWrap) {
+            dropWrap.hidden = true;
+            dropWrap.style.display = "none";
+        }
+        const preview = $("projectPreview");
+        if (preview && previewUrl) {
+            preview.hidden = false;
+            preview.style.display = "block";
+            preview.controls = false;
+            preview.volume = 1;
+            preview.muted = false;
+            if (preview.src !== previewUrl && !preview.src.endsWith(previewUrl)) {
                 preview.src = previewUrl;
                 preview.load();
             }
-            const monitorBar = $("monitorDownloadBar");
-            if (monitorBar) {
-                monitorBar.hidden = false;
-                monitorBar.style.display = "flex";
-            }
-            const dlBtn = $("downloadMasterBtn");
-            if (dlBtn) {
-                dlBtn.href = "#";
-                dlBtn.onclick = (e) => {
-                    e.preventDefault();
-                    triggerDownload(`/api/projects/${encodeURIComponent(projectId)}/download`, `KAI_${projectId}.mp4`);
-                };
-            }
+        }
+        const monitorBar = $("monitorDownloadBar");
+        if (monitorBar) {
+            monitorBar.hidden = false;
+            monitorBar.style.display = "flex";
+        }
+        const dlBtn = $("downloadMasterBtn");
+        if (dlBtn) {
+            dlBtn.href = "#";
+            dlBtn.onclick = (e) => {
+                e.preventDefault();
+                triggerDownload(`/api/projects/${encodeURIComponent(projectId)}/download`, `KAI_${projectId}.mp4`);
+            };
         }
 
         if (data.editor) {
@@ -634,7 +972,57 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 });
                 actionLeft.append(resumeBtn);
+
+                // Botón Cancelar proceso activo desde la biblioteca
+                const cancelPillBtn = document.createElement("button");
+                cancelPillBtn.type = "button";
+                cancelPillBtn.className = "yt-open-pill-btn";
+                cancelPillBtn.style.background = "rgba(239, 68, 68, 0.18)";
+                cancelPillBtn.style.borderColor = "rgba(239, 68, 68, 0.4)";
+                cancelPillBtn.style.color = "#f87171";
+                cancelPillBtn.title = "Cancelar este proceso en ejecución";
+                cancelPillBtn.innerHTML = `<span>Cancelar</span> <span style="font-size:10px;">✕</span>`;
+                cancelPillBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`¿Deseas cancelar el proceso de «${project.name || project.id}»?`)) return;
+                    cancelPillBtn.disabled = true;
+                    cancelPillBtn.textContent = "Cancelando...";
+                    try {
+                        const res = await fetch(`/api/cancel-task/${encodeURIComponent(project.id)}`, { method: "POST" });
+                        if (res.ok) {
+                            loadSavedProjects();
+                        } else {
+                            const err = await res.json();
+                            alert(err.detail || "No se pudo cancelar.");
+                            cancelPillBtn.disabled = false;
+                            cancelPillBtn.innerHTML = `<span>Cancelar</span> <span style="font-size:10px;">✕</span>`;
+                        }
+                    } catch {
+                        alert("Error de conexión al cancelar.");
+                        cancelPillBtn.disabled = false;
+                        cancelPillBtn.innerHTML = `<span>Cancelar</span> <span style="font-size:10px;">✕</span>`;
+                    }
+                });
+                actionLeft.append(cancelPillBtn);
             }
+
+            // Botón Encolar Tema
+            const queueBtn = document.createElement("button");
+            queueBtn.type = "button";
+            queueBtn.className = "yt-card-del-btn";
+            queueBtn.style.color = "#c084fc";
+            queueBtn.title = "Añadir este tema a la cola de emisión de KAI";
+            queueBtn.innerHTML = `📋`;
+            queueBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const topicToAdd = project.topic || (project.name || "").replace("KAI Stream: ", "");
+                if (topicToAdd) {
+                    window.__aetherQueue = window.__aetherQueue || [];
+                    window.__aetherQueue.push(topicToAdd);
+                    updateQueueBadge();
+                    alert(`«${topicToAdd}» añadido a la cola de emisión (${window.__aetherQueue.length} temas en cola).`);
+                }
+            });
 
             // Botón Ver Video en Ventana Flotante
             const openBtn = document.createElement("button");
@@ -659,7 +1047,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 openProject(project.id).catch((error) => console.error("Error abriendo en estudio:", error));
             });
 
-            actionLeft.append(ytPublishBtn, openBtn, editStudioBtn);
+            actionLeft.append(ytPublishBtn, openBtn, editStudioBtn, queueBtn);
 
             // Botón Eliminar
             const delBtn = document.createElement("button");
@@ -768,6 +1156,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function paintPhases(step, failedStep) {
         phaseIds.forEach((id, index) => {
             const item = $(id);
+            if (!item) return; // El elemento puede no existir si la vista no está montada
             item.classList.remove("is-active", "is-complete", "is-error");
             if (step === "done") {
                 item.classList.add("is-complete");
@@ -888,18 +1277,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (totalScenes > 0) {
                 if (sceneRatioEl) sceneRatioEl.textContent = `${currentSceneIdx} / ${totalScenes}`;
+                const studioCountEl = $("studioScenesCount");
+                if (studioCountEl) studioCountEl.textContent = totalScenes;
 
-                // Actualizar monitor central de escena
+                // Actualizar monitor central de escena (tanto en telemetría como en el monitor de la mesa)
                 const activeSceneData = rawLiveScenes[currentSceneIdx - 1] || sceneMatches.find((sc) => sc.idx === currentSceneIdx);
+                const activeTaskId = currentTaskId || (currentState && currentState.id) || new URLSearchParams(window.location.search).get("project") || new URLSearchParams(window.location.search).get("task") || "";
+                const activeThumbUrl = (activeSceneData && activeSceneData.thumb_url) ? activeSceneData.thumb_url : (activeTaskId ? `/storage/projects/${activeTaskId}/work/scene_${currentSceneIdx}/scene_thumb.jpg` : "/static/images/app_bg.jpg");
+
                 if (activeSceneData) {
                     if (stageSceneTitle) stageSceneTitle.textContent = `Escena ${currentSceneIdx}: ${activeSceneData.name || "En render"}`;
                     if (stageSceneMeta) stageSceneMeta.textContent = `Encuadre: ${activeSceneData.camera || "PIP"} · ${activeSceneData.type || "Modular"}` + (activeSceneData.headline ? ` · «${activeSceneData.headline}»` : "");
-                    if (stageImg && activeSceneData.thumb_url) {
-                        stageImg.src = activeSceneData.thumb_url;
-                    }
+                    if (stageImg) stageImg.src = activeThumbUrl;
+                }
+
+                // Sincronizar también el monitor de la mesa si aún no hay video final cargado
+                const stageImgStudio = $("telemetryStageImgStudio");
+                const projectVideo = $("projectPreview");
+                if (stageImgStudio && (!projectVideo || !projectVideo.src || projectVideo.src.endsWith(".mp4") === false)) {
+                    stageImgStudio.src = activeThumbUrl;
+                    stageImgStudio.style.display = "block";
+                    if (projectVideo) projectVideo.style.display = "none";
                 }
 
                 scenesListEl.replaceChildren();
+                const studioScenesList = $("studioLiveScenesList");
+                if (studioScenesList) studioScenesList.replaceChildren();
+
                 for (let sNum = 1; sNum <= totalScenes; sNum++) {
                     const match = rawLiveScenes[sNum - 1] || sceneMatches.find((sc) => sc.idx === sNum);
                     const isDone = sNum < currentSceneIdx;
@@ -909,7 +1313,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     item.className = "telemetry-scene-item" + (isRendering ? " is-rendering" : isDone ? " is-done" : "");
 
                     // Miniatura gráfica: priorizar match.thumb_url, o reconstruir desde el ID de la tarea actual
-                    const activeTaskId = currentTaskId || (currentState && currentState.id) || new URLSearchParams(window.location.search).get("project") || new URLSearchParams(window.location.search).get("task") || "";
                     const computedThumbUrl = (match && match.thumb_url) ? match.thumb_url : (activeTaskId ? `/storage/projects/${activeTaskId}/work/scene_${sNum}/scene_thumb.jpg` : "/static/images/app_bg.jpg");
 
                     const thumbWrap = document.createElement("div");
@@ -942,11 +1345,74 @@ document.addEventListener("DOMContentLoaded", () => {
                     // Clic para inspeccionar miniatura en el monitor
                     item.addEventListener("click", () => {
                         if (stageImg) stageImg.src = computedThumbUrl;
+                        if (stageImgStudio) stageImgStudio.src = computedThumbUrl;
                         if (stageSceneTitle) stageSceneTitle.textContent = `Escena ${sNum}: ` + (match ? match.name : `Escena ${sNum}`);
                         if (stageSceneMeta) stageSceneMeta.textContent = (match && match.type) ? `Tipo: ${match.type}` : "Modular";
                     });
 
                     scenesListEl.appendChild(item);
+
+                    // Renderizar también en el tablero de la Mesa & Timeline
+                    if (studioScenesList) {
+                        const sRow = document.createElement("div");
+                        sRow.className = "prism-sb-scene-row" + (isRendering ? " active" : "");
+                        sRow.innerHTML = `
+                            <div class="prism-sb-scene-thumb"><img src="${computedThumbUrl}" onerror="this.src='/static/images/app_bg.jpg'"></div>
+                            <div class="prism-sb-scene-info">
+                                <div class="prism-sb-scene-name">E${sNum}: ${match ? match.name : `Escena ${sNum}`}</div>
+                                <div class="prism-sb-scene-sub">
+                                    <span>${match ? (match.camera || "PIP") : "PIP"}</span>
+                                    <span>${match ? (match.type || "Modular") : "Modular"}</span>
+                                </div>
+                            </div>
+                            <span class="prism-sb-scene-status ${isDone ? "done" : isRendering ? "active" : "queued"}">
+                                ${isDone ? "✓ Lista" : isRendering ? "● Grabando" : "En cola"}
+                            </span>
+                        `;
+                        sRow.addEventListener("click", () => {
+                            if (stageImgStudio) stageImgStudio.src = computedThumbUrl;
+                        });
+                        studioScenesList.appendChild(sRow);
+                    }
+                }
+
+                // Renderizar Tarjetas Bento y Hechos en el tablero de la Mesa
+                const studioCardsList = $("studioLiveCardsList");
+                const studioCardsCount = $("studioCardsCount");
+                const studioFactsBox = $("studioLiveFactsBox");
+
+                if (rawLiveScenes.length > 0) {
+                    const cardsWithContent = rawLiveScenes.filter(sc => sc.headline || sc.stat);
+                    if (studioCardsCount) studioCardsCount.textContent = cardsWithContent.length;
+                    if (studioCardsList && cardsWithContent.length > 0) {
+                        studioCardsList.replaceChildren();
+                        cardsWithContent.forEach(sc => {
+                            const cRow = document.createElement("div");
+                            cRow.className = "prism-sb-card-row";
+                            cRow.innerHTML = `
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span class="prism-sb-card-badge">E${sc.scene_id} · BENTO HUD</span>
+                                    ${sc.stat ? `<strong class="prism-sb-card-stat">${sc.stat}</strong>` : ""}
+                                </div>
+                                <div class="prism-sb-card-headline">${sc.headline || "Dato Clave"}</div>
+                            `;
+                            studioCardsList.appendChild(cRow);
+                        });
+                    }
+                }
+
+                // Extraer hechos investigados de los eventos y mostrarlos en la pestaña de Hechos
+                if (studioFactsBox) {
+                    const researchEvents = list.filter(ev => (ev.message || "").toLowerCase().includes("investig") || (ev.message || "").toLowerCase().includes("fuente"));
+                    if (researchEvents.length > 0) {
+                        studioFactsBox.replaceChildren();
+                        researchEvents.forEach(ev => {
+                            const fRow = document.createElement("div");
+                            fRow.className = "prism-sb-fact-row";
+                            fRow.textContent = ev.message;
+                            studioFactsBox.appendChild(fRow);
+                        });
+                    }
                 }
             }
         }
@@ -1023,18 +1489,26 @@ document.addEventListener("DOMContentLoaded", () => {
         const isDone = Boolean(state.completed) && !isCancelled;
         const cancelling = Boolean(state.cancel_requested);
         const active = !isError && !isDone && !isCancelled;
-        $("statusTitle").textContent = isError ? "No se pudo completar la edición"
+        const statusTitleEl = $("statusTitle");
+        if (statusTitleEl) statusTitleEl.textContent = isError ? "No se pudo completar la edición"
             : isCancelled ? "Edición cancelada"
                 : cancelling ? "Cancelando edición"
             : isDone ? "Edición terminada"
                 : (stageLabels[step] || "Procesando video");
-        $("pipelineStatusText").textContent = isError ? state.error
+        const pipelineStatusEl = $("pipelineStatusText");
+        if (pipelineStatusEl) pipelineStatusEl.textContent = isError ? state.error
             : isCancelled ? (state.message || "La edición se canceló.")
                 : (state.message || "Esperando una actualización del proceso.");
-        $("jobFileName").textContent = state.file_name || (selectedFile ? selectedFile.name : "Video en proceso");
+        const jobFileEl = $("jobFileName");
+        if (jobFileEl) jobFileEl.textContent = state.file_name || (selectedFile ? selectedFile.name : "Video en proceso");
         const percent = Math.max(0, Math.min(100, Number(state.progress || 0)));
-        $("progressPctText").textContent = `${Math.round(percent)}%`;
-        $("progressBarFill").style.width = `${percent}%`;
+        const pctTextEl = $("progressPctText");
+        if (pctTextEl) pctTextEl.textContent = `${Math.round(percent)}%`;
+        const barFill = $("progressBarFill");
+        if (barFill) {
+            barFill.style.width = `${percent}%`;
+            barFill.parentElement.setAttribute("aria-valuenow", String(Math.round(percent)));
+        }
         const donutText = $("donutPctText");
         const donutArc = $("donutProgressArc");
         const donutLabel = $("donutLabelText");
@@ -1043,11 +1517,12 @@ document.addEventListener("DOMContentLoaded", () => {
             donutArc.style.strokeDashoffset = 100 - percent;
         }
         if (donutLabel) donutLabel.textContent = isDone ? "Completado" : active ? "En emisión" : isError ? "Error" : "Listo";
-        $("progressBarFill").parentElement.setAttribute("aria-valuenow", String(Math.round(percent)));
         const icon = $("workIndicator");
-        icon.classList.toggle("is-active", active);
-        icon.classList.toggle("is-done", isDone);
-        icon.classList.toggle("is-error", isError);
+        if (icon) {
+            icon.classList.toggle("is-active", active);
+            icon.classList.toggle("is-done", isDone);
+            icon.classList.toggle("is-error", isError);
+        }
         paintPhases(step === "cancelling" || step === "cancelled" ? state.cancelled_step : step, state.failed_step);
         renderActivity(state.events, state.error);
         renderStudio(state.editor, state.preview_url);
@@ -1106,6 +1581,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 didShowResults = true;
                 showResults(state.result, taskId);
             }
+            if ($("studioCancelBtn")) $("studioCancelBtn").style.display = "none";
         } else {
             controls.disabled = true;
             startBtn.disabled = true;
@@ -1117,6 +1593,17 @@ document.addEventListener("DOMContentLoaded", () => {
             cancelBtn.hidden = !state.cancel_supported;
             cancelBtn.disabled = cancelling;
             cancelBtn.textContent = cancelling ? "Cancelando…" : "Cancelar edición";
+
+            const studioCancelBtn = $("studioCancelBtn");
+            if (studioCancelBtn) {
+                studioCancelBtn.style.display = "inline-flex";
+                studioCancelBtn.disabled = cancelling;
+                studioCancelBtn.textContent = cancelling ? "Cancelando…" : "✕ Cancelar Proceso";
+            }
+            const studioSummary = $("studioSummary");
+            if (studioSummary && step !== "done") {
+                studioSummary.textContent = `${stageLabels[step] || step} (${Math.round(percent)}%)`;
+            }
         }
 
         // CONTROL VISUAL DE LA PANTALLA DEDICADA DE TELEMETRÍA (MISSION CONTROL)
@@ -1151,6 +1638,65 @@ document.addEventListener("DOMContentLoaded", () => {
                 const timeEl = $("telemetryTimeElapsed");
                 if (timeEl && $("totalElapsed")) {
                     timeEl.textContent = `⏱ ${$("totalElapsed").textContent}`;
+                }
+
+                // Sincronizar el Tablero de Telemetría integrado en la Mesa & Timeline
+                const studioStepBadge = $("studioTelemetryStepBadge");
+                if (studioStepBadge) {
+                    studioStepBadge.textContent = (stageLabels[step] || step).toUpperCase();
+                }
+                const studioPct = $("studioTelemetryPct");
+                if (studioPct) {
+                    studioPct.textContent = `${Math.round(percent)}%`;
+                }
+                const studioMsg = $("studioTelemetryMsg");
+                if (studioMsg) {
+                    studioMsg.textContent = state.message || "KAI procesando en vivo...";
+                }
+
+                // Si la Mesa & Timeline no tiene pistas cargadas todavía, intentar poblar provisionalmente desde /api/projects/{taskId}/broadcast-plan
+                if (!editorState && taskId) {
+                    fetch(`/api/projects/${encodeURIComponent(taskId)}/broadcast-plan`).then(r => r.json()).then(bp => {
+                        if (bp && bp.available && Array.isArray(bp.scenes) && bp.scenes.length > 0) {
+                            const provisionalCards = [];
+                            const provisionalBrolls = [];
+                            let accTime = 0;
+                            bp.scenes.forEach(sc => {
+                                const dur = Number(sc.duration || 10);
+                                if (sc.headline) {
+                                    provisionalCards.push({
+                                        id: `card-${sc.scene_id}`,
+                                        start: accTime,
+                                        duration: dur,
+                                        headline: sc.headline,
+                                        kind: "dato",
+                                        verdict: "supported",
+                                        stat_value: sc.stat || "",
+                                        enabled: true
+                                    });
+                                }
+                                provisionalBrolls.push({
+                                    id: `broll-${sc.scene_id}`,
+                                    start: accTime,
+                                    end: accTime + dur,
+                                    concept: sc.name || `Escena ${sc.scene_id}`,
+                                    download_status: "COMPLETED",
+                                    enabled: true
+                                });
+                                accTime += dur;
+                            });
+                            const provisionalEditor = {
+                                summary: bp.title || state.file_name || "Transmisión en Emisión KAI",
+                                duration: accTime,
+                                cards: provisionalCards,
+                                brolls: provisionalBrolls,
+                                shorts: [],
+                                cuts: []
+                            };
+                            editorState = provisionalEditor;
+                            renderTimeline();
+                        }
+                    }).catch(() => {});
                 }
             } else {
                 telemetryCard.hidden = true;
@@ -1267,7 +1813,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function showResults(result, explicitTaskId) {
-        results.hidden = false;
+        results.hidden = true;
         const videoUrl = result.master_video_url || result.media_url || "";
         const taskId = explicitTaskId || observedTaskId || "";
         if (taskId) observedTaskId = taskId;
@@ -1276,8 +1822,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const downloadEndpoint = taskId ? `/api/projects/${taskId}/download` : (videoUrl || "#");
         const zipEndpoint = taskId ? `/api/projects/${taskId}/materials-zip` : "#";
         
-        // 1. Cambiar a modo streamer para que la mesa de emisión y monitor estén activos
-        switchMode("streamer");
+        // 1. Cambiar a modo Mesa & Timeline (studio) para ver el video completo y pistas
+        switchMode("studio");
 
         // Reactivar y dejar listo el botón de emisión
         const startStreamerBtn = $("startStreamerBtn");
@@ -1294,10 +1840,15 @@ document.addEventListener("DOMContentLoaded", () => {
             const bannerWatchBtn = $("bannerWatchBtn");
             if (bannerWatchBtn) {
                 bannerWatchBtn.onclick = () => {
-                    results.hidden = false;
-                    setTimeout(() => results.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-                    const masterPlayer = $("masterVideoPlayer");
-                    if (masterPlayer) masterPlayer.play().catch(() => {});
+                    results.hidden = true;
+                    switchMode("studio");
+                    const studioSec = $("studioSection");
+                    if (studioSec) {
+                        studioSec.hidden = false;
+                        studioSec.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }
+                    const preview = $("projectPreview");
+                    if (preview) preview.play().catch(() => {});
                 };
             }
             const bannerDlBtn = $("bannerDownloadBtn");
@@ -1453,6 +2004,35 @@ document.addEventListener("DOMContentLoaded", () => {
         if (openFBtn) {
             openFBtn.hidden = !taskId;
             openFBtn.onclick = (e) => { e.preventDefault(); openFolder(); };
+        }
+
+        // Acciones Master integradas en el Studio de Video
+        const studioDlBtn = $("studioDownloadMasterBtn");
+        if (studioDlBtn) {
+            studioDlBtn.href = downloadEndpoint;
+            studioDlBtn.onclick = (e) => { e.preventDefault(); saveDirectToDownloads(); };
+            studioDlBtn.hidden = !taskId;
+        }
+
+        const studioZipBtn = $("studioDownloadZipBtn");
+        if (studioZipBtn) {
+            studioZipBtn.href = zipEndpoint;
+            studioZipBtn.onclick = (e) => {
+                e.preventDefault();
+                const a = document.createElement("a");
+                a.href = zipEndpoint;
+                a.setAttribute("download", `${cleanTitle}_Materiales.zip`);
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => a.remove(), 1000);
+            };
+            studioZipBtn.hidden = !taskId;
+        }
+
+        const studioFolderBtn = $("studioOpenFolderBtn");
+        if (studioFolderBtn) {
+            studioFolderBtn.hidden = !taskId;
+            studioFolderBtn.onclick = (e) => { e.preventDefault(); openFolder(); };
         }
 
         // 6. Barra de descarga del monitor superior
@@ -1628,18 +2208,68 @@ document.addEventListener("DOMContentLoaded", () => {
         if ($("statTimeSaved")) $("statTimeSaved").textContent = `${Number(result.time_saved_sec || 0).toFixed(1)} s`;
         renderFacts(result.cards || []);
 
-        // Scroll suave al apartado exclusivo de producción con retardo para permitir repintado completo
-        results.hidden = false;
+        // En lugar del diseño viejo, mantener results oculto y sincronizar Mesa & Timeline
+        results.hidden = true;
+        switchMode("studio");
         setTimeout(() => {
-            results.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 150);
+            const studioSec = $("studioSection");
+            if (studioSec) {
+                studioSec.hidden = false;
+                studioSec.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        }, 80);
     }
 
     $("projectPreview").addEventListener("timeupdate", () => {
         const preview = $("projectPreview");
-        $("previewCurrentTime").textContent = fmtDuration(preview.currentTime);
-        $("timelineCursor").value = String(preview.currentTime || 0);
+        const cur = preview.currentTime || 0;
+        const dur = preview.duration || (editorState ? editorState.duration : 0) || 1;
+        $("previewCurrentTime").textContent = fmtDuration(cur);
+        $("timelineCursor").value = String(cur);
+
+        // Aguja Playhead interactiva
+        const playhead = $("timelinePlayhead");
+        if (playhead && dur > 0) {
+            playhead.style.left = `${Math.min(100, Math.max(0, (cur / dur) * 100))}%`;
+        }
+
+        // Timecode del monitor Studio
+        const hudTimecode = $("hudTimecode");
+        if (hudTimecode && dur > 0) {
+            hudTimecode.innerHTML = `${fmtDuration(cur)} <span>/</span> ${fmtDuration(dur)}`;
+        }
+
+        // Sincronizar escena activa en tiempo real (sideboard y clip de pista)
+        if (editorState && editorState.scenes && editorState.scenes.length > 0) {
+            editorState.scenes.forEach((sc) => {
+                const isActive = cur >= sc.start && cur < sc.end;
+                const scRow = document.querySelector(`.prism-sb-scene-row[data-scene-id="${sc.scene_id}"]`);
+                if (scRow) scRow.classList.toggle("active", isActive);
+                const scClip = document.querySelector(`.clip.clip-scene[data-scene-id="${sc.scene_id}"]`);
+                if (scClip) scClip.classList.toggle("is-active", isActive);
+                if (isActive) {
+                    const recBadge = $("stageBadgeRec");
+                    if (recBadge) recBadge.innerHTML = `<i></i> E${sc.scene_id}: ${sc.name || sc.title}`;
+                }
+            });
+        }
     });
+
+    // Botones de salto a clip/escena anterior o siguiente
+    $("hudPrevBtn")?.addEventListener("click", () => {
+        if (!editorState?.scenes?.length) return;
+        const cur = $("projectPreview").currentTime || 0;
+        const prev = [...editorState.scenes].reverse().find(s => s.start < cur - 1);
+        if (prev) setPreviewTime(prev.start);
+        else setPreviewTime(0);
+    });
+    $("hudNextBtn")?.addEventListener("click", () => {
+        if (!editorState?.scenes?.length) return;
+        const cur = $("projectPreview").currentTime || 0;
+        const next = editorState.scenes.find(s => s.start > cur + 0.5);
+        if (next) setPreviewTime(next.start);
+    });
+
     $("timelineCursor").addEventListener("input", (event) => setPreviewTime(event.target.value));
 
     $("saveTimelineBtn").addEventListener("click", async () => {
@@ -1717,30 +2347,30 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    dropzone.addEventListener("click", () => fileInput.click());
-    dropzone.addEventListener("dragover", (event) => { event.preventDefault(); dropzone.classList.add("drag-active"); });
-    dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-active"));
-    dropzone.addEventListener("drop", (event) => {
+    dropzone?.addEventListener("click", () => fileInput?.click());
+    dropzone?.addEventListener("dragover", (event) => { event.preventDefault(); dropzone.classList.add("drag-active"); });
+    dropzone?.addEventListener("dragleave", () => dropzone.classList.remove("drag-active"));
+    dropzone?.addEventListener("drop", (event) => {
         event.preventDefault();
         dropzone.classList.remove("drag-active");
         chooseFile(event.dataTransfer.files?.[0]);
     });
-    fileInput.addEventListener("change", () => chooseFile(fileInput.files?.[0]));
-    $("removeFileBtn").addEventListener("click", () => {
+    fileInput?.addEventListener("change", () => chooseFile(fileInput.files?.[0]));
+    $("removeFileBtn")?.addEventListener("click", () => {
         selectedFile = null;
-        fileInput.value = "";
-        fileBadge.hidden = true;
-        startBtn.disabled = true;
-        startBtnText.textContent = "Selecciona un video";
-        $("jobFileName").textContent = "Sin archivo seleccionado";
-        $("statusTitle").textContent = "Carga un video para empezar";
-        $("pipelineStatusText").textContent = "Aquí verás qué etapa está activa y la última acción reportada por el proceso.";
+        if (fileInput) fileInput.value = "";
+        if (fileBadge) fileBadge.hidden = true;
+        if (startBtn) startBtn.disabled = true;
+        if (startBtnText) startBtnText.textContent = "Selecciona un video";
+        if ($("jobFileName")) $("jobFileName").textContent = "Sin archivo seleccionado";
+        if ($("statusTitle")) $("statusTitle").textContent = "Carga un video para empezar";
+        if ($("pipelineStatusText")) $("pipelineStatusText").textContent = "Aquí verás qué etapa está activa y la última acción reportada por el proceso.";
     });
-    $("silenceThreshold").addEventListener("input", (event) => {
-        $("silenceVal").textContent = `${Number(event.target.value).toFixed(1)} s`;
+    $("silenceThreshold")?.addEventListener("input", (event) => {
+        if ($("silenceVal")) $("silenceVal").textContent = `${Number(event.target.value).toFixed(1)} s`;
     });
 
-    form.addEventListener("submit", async (event) => {
+    form?.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (!selectedFile) return;
         controls.disabled = true;
@@ -1852,6 +2482,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const tabCopilot = $("tabModeCopilot");
         const tabStudio = $("tabModeStudio");
         const tabProjects = $("tabModeProjects");
+        const tabMultiAgent = $("tabModeMultiAgent");
         const dockStreamer = $("dockStreamer");
         const dockCopilot = $("dockCopilot");
         const dockStudio = $("dockStudio");
@@ -1866,13 +2497,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const uploadForm = $("uploadForm");
         const studioSec = $("studioSection");
         const projectsCard = $("savedProjectsCard");
+        const multiAgentSec = $("multiAgentSection");
 
         // Limpiar clases activas
-        [tabStreamer, tabCopilot, tabStudio, tabProjects].forEach(t => t && t.classList.remove("active"));
+        [tabStreamer, tabCopilot, tabStudio, tabProjects, tabMultiAgent].forEach(t => t && t.classList.remove("active"));
         [dockStreamer, dockCopilot, dockStudio, dockProjects].forEach(d => d && d.classList.remove("active"));
         if (studioSec) studioSec.hidden = true;
         if (projectsCard) projectsCard.hidden = true;
-        if (results && mode !== "streamer") results.hidden = true;
+        if (multiAgentSec) multiAgentSec.hidden = true;
+        if (results) results.hidden = true;
 
         const bentoPane = $("streamerTabPane");
         const trendingRow = $("trendingChipsRow");
@@ -1880,17 +2513,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (mode === "streamer") {
             if (tabStreamer) tabStreamer.classList.add("active");
             if (dockStreamer) dockStreamer.classList.add("active");
-            if (heroTitle) heroTitle.textContent = "Transmisión Autónoma";
-            if (heroSubtitle) heroSubtitle.textContent = "KAI investiga la web, redacta el guión y produce el video broadcast en vivo";
-            if (bentoTitle) bentoTitle.textContent = "Mesa de Transmisión KAI";
-            if (bentoSub) bentoSub.textContent = "Configuración de emisión y vista previa en tiempo real";
             if (trendingRow) trendingRow.hidden = false;
             if (bentoPane) bentoPane.hidden = false;
-            if (results && didShowResults) results.hidden = false;
-            if (previewBox) {
-                previewBox.hidden = false;
-                previewBox.style.display = "block";
-            }
+            if (studioSec) studioSec.hidden = true;
+            if (results) results.hidden = true;
             if (dropWrap) {
                 dropWrap.hidden = true;
                 dropWrap.style.display = "none";
@@ -1901,33 +2527,26 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (mode === "copilot") {
             if (tabCopilot) tabCopilot.classList.add("active");
             if (dockCopilot) dockCopilot.classList.add("active");
-            if (heroTitle) heroTitle.textContent = "Editor de Video Co-Piloto";
-            if (heroSubtitle) heroSubtitle.textContent = "Sube tu video y KAI cortará pausas, buscará B-Rolls y creará tarjetas Bento";
-            if (bentoTitle) bentoTitle.textContent = "Edición de Video Inteligente";
-            if (bentoSub) bentoSub.textContent = "Arrastra tu video para análisis neuronal y corte automático";
             if (trendingRow) trendingRow.hidden = true;
             if (bentoPane) bentoPane.hidden = false;
-            const preview = $("projectPreview");
-            const hasVideo = preview && preview.src && preview.src !== window.location.href && !preview.src.endsWith("#");
-            if (hasVideo) {
-                if (previewBox) { previewBox.hidden = false; previewBox.style.display = "block"; }
-                if (dropWrap) { dropWrap.hidden = true; dropWrap.style.display = "none"; }
-            } else {
-                if (previewBox) { previewBox.hidden = true; previewBox.style.display = "none"; }
-                if (dropWrap) { dropWrap.hidden = false; dropWrap.style.display = "block"; }
-            }
+            if (studioSec) studioSec.hidden = true;
+            if (dropWrap) { dropWrap.hidden = false; dropWrap.style.display = "block"; }
             if (streamerForm) streamerForm.hidden = true;
             if (uploadForm) uploadForm.hidden = false;
             setPhaseLabels(["Preparar", "Analizar", "Detectar pausas", "Buscar recursos", "Renderizar"]);
         } else if (mode === "studio") {
             if (tabStudio) tabStudio.classList.add("active");
             if (dockStudio) dockStudio.classList.add("active");
-            if (heroTitle) heroTitle.textContent = "Mesa de Edición & Timeline";
-            if (heroSubtitle) heroSubtitle.textContent = "Ajusta la duración, tarjetas interactivas, B-rolls y exporta el corte final";
             if (trendingRow) trendingRow.hidden = true;
             if (bentoPane) bentoPane.hidden = true;
             if (studioSec) studioSec.hidden = false;
+            if (previewBox) {
+                previewBox.hidden = false;
+                previewBox.style.display = "flex";
+            }
             renderStudio(editorState, $("projectPreview")?.src);
+            if ($("topbarSectionBadge")) $("topbarSectionBadge").textContent = "Mesa & Timeline";
+            if ($("topbarSectionDesc")) $("topbarSectionDesc").textContent = "Secuenciador multicapa y edición no destructiva";
         } else if (mode === "projects") {
             if (tabProjects) tabProjects.classList.add("active");
             if (dockProjects) dockProjects.classList.add("active");
@@ -1938,7 +2557,24 @@ document.addEventListener("DOMContentLoaded", () => {
             if (previewBox) previewBox.hidden = true;
             if (results) results.hidden = true;
             if (projectsCard) projectsCard.hidden = false;
+            if ($("topbarSectionBadge")) $("topbarSectionBadge").textContent = "Biblioteca de Proyectos";
+            if ($("topbarSectionDesc")) $("topbarSectionDesc").textContent = "Colección de emisiones finalizadas y videos guardados";
             loadSavedProjects();
+        } else if (mode === "multiagent") {
+            if (tabMultiAgent) tabMultiAgent.classList.add("active");
+            if (heroTitle) heroTitle.textContent = "Multi-Agent Dev Studio";
+            if (heroSubtitle) heroSubtitle.textContent = "Orquestación autónoma de desarrollo con GLM-5.3, GLM-5.3-flash y Kimi-k3";
+            if (trendingRow) trendingRow.hidden = true;
+            if (bentoPane) bentoPane.hidden = true;
+            if (previewBox) previewBox.hidden = true;
+            if (results) results.hidden = true;
+            if (multiAgentSec) multiAgentSec.hidden = false;
+            if ($("topbarSectionBadge")) $("topbarSectionBadge").textContent = "Dev Studio";
+            if ($("topbarSectionDesc")) $("topbarSectionDesc").textContent = "Agentes autónomos de desarrollo";
+        }
+        if (mode === "streamer") {
+            if ($("topbarSectionBadge")) $("topbarSectionBadge").textContent = "KAI Streamer";
+            if ($("topbarSectionDesc")) $("topbarSectionDesc").textContent = "Transmisión Autónoma & Edición Neural";
         }
     }
 
@@ -1947,16 +2583,223 @@ document.addEventListener("DOMContentLoaded", () => {
     $("tabModeCopilot")?.addEventListener("click", () => switchMode("copilot"));
     $("tabModeStudio")?.addEventListener("click", () => switchMode("studio"));
     $("tabModeProjects")?.addEventListener("click", () => switchMode("projects"));
+    $("tabModeMultiAgent")?.addEventListener("click", () => switchMode("multiagent"));
+
+    // Dictado por voz (Micro) para el requerimiento multi-agente
+    let maSpeechRecognition = null;
+    let isRecordingMaVoice = false;
+
+    $("btnMicMultiAgent")?.addEventListener("click", () => {
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const micBtn = $("btnMicMultiAgent");
+        const micText = $("maMicText");
+        const micIcon = $("maMicIcon");
+        const voiceStatus = $("maVoiceStatus");
+        const reqInput = $("maRequirementInput");
+
+        if (!SpeechRec) {
+            alert("Tu navegador no soporta Web Speech Recognition API de manera nativa. Usa Chrome o Edge para hablarle directamente.");
+            return;
+        }
+
+        if (isRecordingMaVoice) {
+            if (maSpeechRecognition) maSpeechRecognition.stop();
+            return;
+        }
+
+        try {
+            maSpeechRecognition = new SpeechRec();
+            maSpeechRecognition.lang = "es-ES";
+            maSpeechRecognition.continuous = true;
+            maSpeechRecognition.interimResults = true;
+
+            maSpeechRecognition.onstart = () => {
+                isRecordingMaVoice = true;
+                if (micBtn) {
+                    micBtn.style.background = "rgba(239,68,68,0.2)";
+                    micBtn.style.borderColor = "rgba(239,68,68,0.5)";
+                    micBtn.style.color = "#ef4444";
+                }
+                if (micText) micText.textContent = "Detener Micro";
+                if (micIcon) micIcon.textContent = "⏹️";
+                if (voiceStatus) {
+                    voiceStatus.textContent = "🎙️ Escuchando... habla tu requerimiento";
+                    voiceStatus.style.display = "inline";
+                }
+            };
+
+            maSpeechRecognition.onresult = (evt) => {
+                let fullTranscript = "";
+                for (let i = 0; i < evt.results.length; ++i) {
+                    fullTranscript += evt.results[i][0].transcript;
+                }
+                if (reqInput) {
+                    reqInput.value = fullTranscript;
+                }
+            };
+
+            maSpeechRecognition.onerror = (err) => {
+                console.warn("Speech recognition error:", err);
+                if (voiceStatus) voiceStatus.textContent = `Error mic: ${err.error || "desconocido"}`;
+            };
+
+            maSpeechRecognition.onend = () => {
+                isRecordingMaVoice = false;
+                if (micBtn) {
+                    micBtn.style.background = "rgba(56,189,248,0.1)";
+                    micBtn.style.borderColor = "rgba(56,189,248,0.3)";
+                    micBtn.style.color = "#38bdf8";
+                }
+                if (micText) micText.textContent = "Hablar por Micro";
+                if (micIcon) micIcon.textContent = "🎙️";
+                if (voiceStatus) {
+                    voiceStatus.textContent = "✓ Voz capturada";
+                    setTimeout(() => { if (voiceStatus) voiceStatus.style.display = "none"; }, 3000);
+                }
+            };
+
+            maSpeechRecognition.start();
+        } catch (e) {
+            console.error(e);
+            alert("No se pudo iniciar el micrófono: " + e.message);
+        }
+    });
+
+    // Manejo de Modo de Auditoría (Análisis vs Administrador)
+    let currentAuditMode = "analysis";
+    const btnAnalysis = $("btnModeAnalysis");
+    const btnAdmin = $("btnModeAdmin");
+    const auditorBadge = $("agModeAuditorBadge");
+
+    btnAnalysis?.addEventListener("click", () => {
+        currentAuditMode = "analysis";
+        btnAnalysis.classList.add("active");
+        btnAdmin?.classList.remove("active");
+        if (auditorBadge) {
+            auditorBadge.textContent = "Modo Análisis";
+            auditorBadge.style.color = "#38bdf8";
+            auditorBadge.style.background = "rgba(56,189,248,0.15)";
+        }
+    });
+
+    btnAdmin?.addEventListener("click", () => {
+        currentAuditMode = "admin";
+        btnAdmin.classList.add("active");
+        btnAnalysis?.classList.remove("active");
+        if (auditorBadge) {
+            auditorBadge.textContent = "Modo Administrador";
+            auditorBadge.style.color = "#ef4444";
+            auditorBadge.style.background = "rgba(239,68,68,0.15)";
+        }
+    });
+
+    // Event handler para iniciar desarrollo multiagente
+    $("btnStartMultiAgent")?.addEventListener("click", async () => {
+        const reqInput = $("maRequirementInput");
+        const statusTxt = $("maStatusText");
+        const monitor = $("maMonitorContainer");
+        const logsFeed = $("maLogsFeed");
+        const pctEl = $("maProgressPercent");
+        const barEl = $("maProgressBar");
+
+        const text = (reqInput?.value || "").trim();
+        if (!text) {
+            alert("Por favor ingresa un requerimiento o módulo a desarrollar.");
+            return;
+        }
+
+        statusTxt.textContent = `Iniciando orquestación con GLM-5.3 (${currentAuditMode === "analysis" ? "Modo Análisis" : "Modo Administrador"})...`;
+        monitor.style.display = "block";
+        logsFeed.innerHTML = "";
+        pctEl.textContent = "5%";
+        barEl.style.width = "5%";
+
+        try {
+            const resp = await fetch("/api/multiagent/run", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ requirement: text, audit_mode: currentAuditMode })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || "Error iniciando sesión");
+
+            const sessionId = data.session_id;
+            statusTxt.textContent = `Sesión activa: ${sessionId}`;
+
+            // Polling en vivo del estado de los 3 agentes
+            const pollTimer = setInterval(async () => {
+                try {
+                    const stResp = await fetch(`/api/multiagent/status/${sessionId}`);
+                    if (!stResp.ok) return;
+                    const st = await stResp.json();
+
+                    statusTxt.textContent = st.message;
+                    pctEl.textContent = `${st.progress}%`;
+                    barEl.style.width = `${st.progress}%`;
+
+                    // Renderizar logs
+                    if (st.logs && st.logs.length) {
+                        logsFeed.innerHTML = st.logs.map(l => 
+                            `<div style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05); color:#cbd5e1;">` +
+                            `<span style="color:#38bdf8;">[${l.pct}%]</span> ${l.msg}</div>`
+                        ).join("");
+                        logsFeed.scrollTop = logsFeed.scrollHeight;
+                    }
+
+                    // Actualizar las tarjetas individuales y razonamiento en vivo de cada modelo
+                    if (st.agents) {
+                        const agMap = [
+                            { key: "planner", actId: "agActionPlanner", rzId: "agReasoningPlanner", tagId: "agTagPlanner", color: "#10b981" },
+                            { key: "implementer", actId: "agActionImplementer", rzId: "agReasoningImplementer", tagId: "agTagImplementer", color: "#38bdf8" },
+                            { key: "auditor", actId: "agActionAuditor", rzId: "agReasoningAuditor", tagId: "agTagAuditor", color: "#f59e0b" },
+                        ];
+                        agMap.forEach(item => {
+                            const info = st.agents[item.key];
+                            if (!info) return;
+                            const actEl = $(item.actId);
+                            const rzEl = $(item.rzId);
+                            const tagEl = $(item.tagId);
+                            if (actEl && info.action) actEl.textContent = info.action;
+                            if (rzEl && info.reasoning) {
+                                rzEl.textContent = info.reasoning;
+                                rzEl.scrollTop = rzEl.scrollHeight;
+                            }
+                            if (tagEl) {
+                                tagEl.textContent = info.status || "Activo";
+                                tagEl.style.color = info.status === "Activo" ? item.color : "#64748b";
+                            }
+                        });
+                    }
+
+                    if (st.status === "done" || st.status === "error") {
+                        clearInterval(pollTimer);
+                        if (st.status === "done") {
+                            statusTxt.innerHTML = `<span style="color:#10b981; font-weight:700;">✓ Proyecto completado y auditado</span>`;
+                            if (st.result && st.result.report_markdown) {
+                                logsFeed.innerHTML += `<div style="margin-top:12px; padding:10px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:8px; color:#fff;">` +
+                                    `<strong>Informe Final:</strong><br><pre style="white-space:pre-wrap; margin-top:6px;">${st.result.report_markdown.substring(0, 500)}...</pre></div>`;
+                            }
+                        } else {
+                            statusTxt.innerHTML = `<span style="color:#ef4444; font-weight:700;">❌ Error: ${st.message}</span>`;
+                        }
+                    }
+                } catch (_e) {}
+            }, 2500);
+
+        } catch (err) {
+            statusTxt.textContent = `Fallo: ${err.message}`;
+        }
+    });
 
     $("dockStreamer")?.addEventListener("click", () => switchMode("streamer"));
     $("dockCopilot")?.addEventListener("click", () => switchMode("copilot"));
     $("dockStudio")?.addEventListener("click", () => switchMode("studio"));
     $("dockProjects")?.addEventListener("click", () => switchMode("projects"));
 
-    // Pills de formato 16:9 vs 9:16
-    document.querySelectorAll("#formatPillsWrap .subcard-pill-btn").forEach(btn => {
+    // Pills de formato 16:9 vs 9:16 (Compatible con .kai-pill-btn y .subcard-pill-btn)
+    document.querySelectorAll("#formatPillsWrap button").forEach(btn => {
         btn.addEventListener("click", () => {
-            document.querySelectorAll("#formatPillsWrap .subcard-pill-btn").forEach(b => b.classList.remove("active"));
+            document.querySelectorAll("#formatPillsWrap button").forEach(b => b.classList.remove("active"));
             btn.classList.add("active");
             const fmt = btn.dataset.fmt;
             if ($("streamerFormat")) $("streamerFormat").value = fmt;
@@ -1965,38 +2808,18 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // Pills de duración (1m, 3m, 5m, 10m)
-    document.querySelectorAll("#durationPillsWrap .subcard-pill-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-            document.querySelectorAll("#durationPillsWrap .subcard-pill-btn").forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
-            const sec = btn.dataset.sec;
-            if ($("streamerDuration")) $("streamerDuration").value = sec;
-            const min = Math.round(parseInt(sec, 10) / 60);
-            if ($("readoutDuration")) $("readoutDuration").textContent = `${min} min`;
-            if ($("heroDurationVal")) $("heroDurationVal").innerHTML = `${min}<sup>min</sup>`;
-        });
+    // Sincronización del selector desplegable de duración
+    $("streamerDuration")?.addEventListener("change", (e) => {
+        const min = Math.round(parseInt(e.target.value, 10) / 60);
+        if ($("readoutDuration")) $("readoutDuration").textContent = `${min} min`;
     });
 
-    // Pills de Tonalidad & Estilo (soporte individual y multi-selección combinada)
-    document.querySelectorAll("#stylePillsWrap .subcard-pill-btn").forEach(btn => {
+    // Pills de Tonalidad & Estilo (soporte multi-selección interactiva)
+    document.querySelectorAll("#stylePillsWrap button").forEach(btn => {
         btn.addEventListener("click", (e) => {
-            if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                // Alternar en multiselección
-                btn.classList.toggle("active");
-            } else {
-                // Selección simple o toggle si ya está activo
-                const wasActive = btn.classList.contains("active");
-                const allActive = document.querySelectorAll("#stylePillsWrap .subcard-pill-btn.active");
-                if (allActive.length > 1) {
-                    document.querySelectorAll("#stylePillsWrap .subcard-pill-btn").forEach(b => b.classList.remove("active"));
-                    btn.classList.add("active");
-                } else {
-                    btn.classList.toggle("active");
-                }
-            }
+            btn.classList.toggle("active");
             // Asegurar que al menos uno esté seleccionado
-            const activeBtns = Array.from(document.querySelectorAll("#stylePillsWrap .subcard-pill-btn.active"));
+            const activeBtns = Array.from(document.querySelectorAll("#stylePillsWrap button.active"));
             if (activeBtns.length === 0) {
                 btn.classList.add("active");
                 activeBtns.push(btn);
@@ -2005,7 +2828,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const combinedVal = selectedStyles.join(",");
             const styleSelect = $("streamerStyle");
             if (styleSelect) {
-                // Verificar si existe la opción exacta, si no, crear o actualizar opción híbrida
                 let opt = Array.from(styleSelect.options).find(o => o.value === combinedVal);
                 if (!opt) {
                     opt = new Option(combinedVal, combinedVal, true, true);
@@ -2014,6 +2836,120 @@ document.addEventListener("DOMContentLoaded", () => {
                 styleSelect.value = combinedVal;
             }
         });
+    });
+
+    // Selector de Estilos de Subtítulos (.kai-sub-card)
+    document.querySelectorAll("#subStylesWrap .kai-sub-card").forEach(card => {
+        card.addEventListener("click", () => {
+            document.querySelectorAll("#subStylesWrap .kai-sub-card").forEach(c => c.classList.remove("active"));
+            card.classList.add("active");
+        });
+    });
+
+    // =========================================================================
+    // CONTROLES DE PRODUCCIÓN PROFESIONAL
+    // =========================================================================
+
+    // Pills de Color Grading (exclusivo: solo uno activo a la vez)
+    document.querySelectorAll("#colorGradePillsWrap button").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll("#colorGradePillsWrap button").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            if ($("kaiColorGrade")) $("kaiColorGrade").value = btn.dataset.grade;
+        });
+    });
+
+    // Pills de FPS (exclusivo)
+    document.querySelectorAll("#fpsPillsWrap button").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll("#fpsPillsWrap button").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            if ($("kaiVideoFps")) $("kaiVideoFps").value = btn.dataset.fps;
+        });
+    });
+
+    // Slider de volumen BGM con label reactivo
+    $("kaiBgmVolume")?.addEventListener("input", (e) => {
+        const pct = Math.round(parseFloat(e.target.value) * 100);
+        if ($("bgmVolLabel")) $("bgmVolLabel").textContent = pct === 0 ? "🔇 Silenciado" : `${pct}%`;
+    });
+
+    // Slider CRF con label descriptivo reactivo
+    $("kaiCrfQuality")?.addEventListener("input", (e) => {
+        const crf = parseInt(e.target.value, 10);
+        let lbl = "";
+        if (crf <= 15) lbl = "Máxima (archivo grande)";
+        else if (crf <= 18) lbl = "Alta";
+        else if (crf <= 21) lbl = "Buena";
+        else if (crf <= 24) lbl = "Media";
+        else lbl = "Comprimida";
+        if ($("crfLabel")) $("crfLabel").textContent = `${crf} — ${lbl}`;
+    });
+
+    // Reproductor Inline rápido de audio para escuchar voces en el compositor
+    const btnInlineVoicePreview = $("btnInlineVoicePreview");
+    if (btnInlineVoicePreview) {
+        btnInlineVoicePreview.addEventListener("click", async () => {
+            const voice = $("streamerVoice")?.value || "es-MX-JorgeNeural";
+            const sampleText = "¡Hola! Soy KAI. Esta es una muestra de audio para tu video. El ritmo, la dicción y la entonación se adaptarán perfectamente a tu contenido.";
+            const audioEl = $("inlineVoiceAudioPlayer");
+            const wrapEl = $("inlineVoiceAudioPlayerWrap");
+            const statusEl = $("inlineVoiceStatus");
+            const iconEl = $("btnInlineVoicePreviewIcon");
+
+            btnInlineVoicePreview.disabled = true;
+            if (iconEl) iconEl.textContent = "⏳";
+            if (wrapEl) wrapEl.style.display = "block";
+            if (statusEl) statusEl.textContent = "Sintetizando muestra de voz...";
+
+            try {
+                const resp = await fetch("/api/tts-preview", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ voice, text: sampleText })
+                });
+                if (!resp.ok) throw new Error("Error generando audio.");
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                if (audioEl) {
+                    audioEl.src = url;
+                    audioEl.play().catch(() => {});
+                }
+                if (statusEl) statusEl.textContent = `✓ Reproduciendo muestra de voz: ${voice}`;
+            } catch (err) {
+                if (statusEl) statusEl.textContent = "No se pudo generar la muestra de voz.";
+            } finally {
+                btnInlineVoicePreview.disabled = false;
+                if (iconEl) iconEl.textContent = "▶";
+            }
+        });
+    }
+
+    // Botón desplegable de Ajustes Creativos & Tonalidad
+    const btnToggleSettings = $("btnToggleCreativeSettings");
+    const settingsPanel = $("creativeSettingsPanel");
+    const settingsChevron = $("creativeSettingsChevron");
+    if (btnToggleSettings && settingsPanel) {
+        btnToggleSettings.addEventListener("click", () => {
+            const isHidden = settingsPanel.style.display === "none";
+            settingsPanel.style.display = isHidden ? "block" : "none";
+            btnToggleSettings.classList.toggle("active", isHidden);
+            if (settingsChevron) {
+                settingsChevron.textContent = isHidden ? "▴" : "▾";
+            }
+        });
+    }
+
+    $("btnCloseAudioPreview")?.addEventListener("click", () => {
+        const wrapEl = $("inlineVoiceAudioPlayerWrap");
+        const audioEl = $("inlineVoiceAudioPlayer");
+        if (audioEl) audioEl.pause();
+        if (wrapEl) wrapEl.style.display = "none";
+    });
+
+    // Botón directo para el Laboratorio de Voces
+    $("btnComposerVoiceTester")?.addEventListener("click", () => {
+        $("btnOpenVoiceTester")?.click();
     });
 
     // Chips dinámicos de tendencias web reales
@@ -2176,18 +3112,52 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    const studioCancelBtn = $("studioCancelBtn");
+    if (studioCancelBtn) {
+        studioCancelBtn.addEventListener("click", () => {
+            const cancelBtn = $("cancelTaskBtn");
+            if (cancelBtn) cancelBtn.click();
+        });
+    }
+
     // Manejo de Cola de Emisiones (Queue)
     window.__aetherQueue = window.__aetherQueue || [];
     function updateQueueBadge() {
-        const badge = $("queueBadgeInfo");
-        if (!badge) return;
         const count = (window.__aetherQueue || []).length;
-        if (count > 0) {
-            badge.style.display = "block";
-            badge.textContent = `📋 ${count} tema(s) restante(s) en la cola automática.`;
-        } else {
-            badge.style.display = "none";
+        const badge = $("queueBadgeInfo");
+        if (badge) {
+            if (count > 0) {
+                badge.style.display = "block";
+                badge.textContent = `📋 ${count} tema(s) restante(s) en la cola automática.`;
+            } else {
+                badge.style.display = "none";
+            }
         }
+        const studioBadge = $("studioQueueBadge");
+        if (studioBadge) {
+            if (count > 0) {
+                studioBadge.style.display = "inline-flex";
+                studioBadge.textContent = `📋 Cola: ${count}`;
+            } else {
+                studioBadge.style.display = "none";
+            }
+        }
+    }
+
+    const studioQueueBadge = $("studioQueueBadge");
+    if (studioQueueBadge) {
+        studioQueueBadge.addEventListener("click", () => {
+            const currentList = (window.__aetherQueue || []).join("\n• ");
+            const promptText = (window.__aetherQueue && window.__aetherQueue.length > 0)
+                ? `Temas actualmente en cola:\n• ${currentList}\n\nIngresa un nuevo tema para añadirlo a la cola (o cancela para salir):`
+                : "La cola está vacía.\n\nIngresa un tema para añadirlo a la cola automática:";
+            const newTopic = prompt(promptText);
+            if (newTopic && newTopic.trim()) {
+                window.__aetherQueue.push(newTopic.trim());
+                updateQueueBadge();
+                alert(`«${newTopic.trim()}» añadido a la cola de emisión (${window.__aetherQueue.length} en espera).`);
+            }
+        });
     }
 
     const btnToggleQueue = $("btnToggleQueue");
@@ -2263,14 +3233,47 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (custom) rtmpUrl = custom;
             }
 
+            // Opciones creativas del nuevo compositor KAI
+            const visualModeRadio = document.querySelector('input[name="kaiVisualModeRadio"]:checked');
+            const visualMode = visualModeRadio ? visualModeRadio.value : "mixed";
+            const subActiveCard = document.querySelector("#subStylesWrap .kai-sub-card.active");
+            const subStyle = subActiveCard ? subActiveCard.dataset.sub : "classic";
+            const subsEnabled = $("kaiToggleSubs") ? $("kaiToggleSubs").checked : true;
+            const enableBroll = $("kaiToggleBRoll") ? $("kaiToggleBRoll").checked : true;
+            const enableCards = $("kaiToggleBentoCards") ? $("kaiToggleBentoCards").checked : true;
+            const flashAudit = $("kaiToggleFlashAudit") ? $("kaiToggleFlashAudit").checked : true;
+
+            // Parámetros de producción profesional
+            const colorGrade = $("kaiColorGrade")?.value || "cinema";
+            const videoFps = parseInt($("kaiVideoFps")?.value || "30", 10);
+            const bgmVolume = parseFloat($("kaiBgmVolume")?.value || "0.06");
+            const bgmTrack = $("kaiBgmTrack")?.value || "default";
+            const audioNormalize = $("kaiAudioNormalize") ? $("kaiAudioNormalize").checked : true;
+            const outroEnabled = $("kaiOutroEnabled") ? $("kaiOutroEnabled").checked : true;
+            const crfQuality = parseInt($("kaiCrfQuality")?.value || "18", 10);
+
             const payload = {
                 topic: topic,
                 style: $("streamerStyle")?.value || "divulgacion",
                 duration_sec: parseInt($("streamerDuration")?.value || "300", 10),
-                aspect_ratio: $("streamerFormat")?.value || "16:9",
+                aspect_ratio: $("streamerFormat")?.value || "9:16",
                 card_theme: $("streamerCardTheme")?.value || "dark",
-                voice: $("streamerVoice")?.value || "es-ES-AlvaroNeural",
+                voice: $("streamerVoice")?.value || "es-MX-JorgeNeural",
                 rtmp_url: rtmpUrl,
+                sub_style: subStyle,
+                subs_enabled: subsEnabled,
+                visual_mode: visualMode,
+                enable_broll: enableBroll,
+                enable_cards: enableCards,
+                flash_audit: flashAudit,
+                // Parámetros profesionales
+                color_grade: colorGrade,
+                fps: videoFps,
+                bgm_volume: bgmVolume,
+                bgm_track: bgmTrack,
+                audio_normalize: audioNormalize,
+                outro_enabled: outroEnabled,
+                crf: crfQuality,
             };
 
             try {
@@ -2287,6 +3290,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 curUrl.searchParams.set("task", data.task_id);
                 curUrl.searchParams.delete("project");
                 window.history.replaceState({}, "", curUrl);
+
+                // Trasladar automáticamente la vista a Mesa & Timeline para monitorear en vivo
+                if (typeof switchMode === "function") {
+                    switchMode("studio");
+                }
+                setStudioAspectRatio(payload.aspect_ratio || "16:9");
+                if ($("topbarProjectTitle")) $("topbarProjectTitle").textContent = topic;
+                if ($("topbarSaveStatus")) {
+                    $("topbarSaveStatus").innerHTML = `<span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#ef4444; box-shadow:0 0 8px #ef4444; margin-right:4px;"></span> EN EMISIÓN`;
+                    $("topbarSaveStatus").style.color = "#ef4444";
+                    $("topbarSaveStatus").style.borderColor = "rgba(239, 68, 68, 0.4)";
+                    $("topbarSaveStatus").style.background = "rgba(239, 68, 68, 0.12)";
+                }
+
                 listen(data.task_id);
             } catch (error) {
                 console.error("Error al iniciar streamer:", error);
@@ -2478,6 +3495,87 @@ document.addEventListener("DOMContentLoaded", () => {
         downloadBtn: "masterDownloadHudBtn"
     });
 
+    // ── Botones de modo de preview: 16:9 (YouTube) / 9:16 (Shorts) ──
+    const previewMode169 = $("previewMode169");
+    const previewMode916 = $("previewMode916");
+    const masterStageWrap = $("masterStageWrap");
+    if (previewMode169 && previewMode916 && masterStageWrap) {
+        previewMode169.addEventListener("click", () => {
+            masterStageWrap.classList.remove("preview-vertical");
+            previewMode169.classList.add("active");
+            previewMode916.classList.remove("active");
+        });
+        previewMode916.addEventListener("click", () => {
+            masterStageWrap.classList.add("preview-vertical");
+            previewMode916.classList.add("active");
+            previewMode169.classList.remove("active");
+        });
+    }
+
+    // ── Botones de modo de relación de aspecto en Studio (16:9 / 9:16) ──
+    const btnStudioAspect169 = $("btnStudioAspect169");
+    const btnStudioAspect916 = $("btnStudioAspect916");
+    if (btnStudioAspect169) {
+        btnStudioAspect169.addEventListener("click", () => setStudioAspectRatio("16:9", true));
+    }
+    if (btnStudioAspect916) {
+        btnStudioAspect916.addEventListener("click", () => setStudioAspectRatio("9:16", true));
+    }
+    const monitorAspectBadge = $("monitorAspectBadge");
+    if (monitorAspectBadge) {
+        monitorAspectBadge.addEventListener("click", () => {
+            const wrap = $("viewportScreenWrap");
+            const is169 = wrap ? wrap.classList.contains("aspect-16-9") : true;
+            setStudioAspectRatio(is169 ? "9:16" : "16:9", true);
+        });
+    }
+
+    // Sincronizar dimensiones reales si el video carga metadatos
+    const studioPreviewVid = $("projectPreview");
+    if (studioPreviewVid) {
+        studioPreviewVid.addEventListener("loadedmetadata", () => {
+            if (!window._studioAspectManuallySet && studioPreviewVid.videoWidth && studioPreviewVid.videoHeight) {
+                const isWide = studioPreviewVid.videoWidth >= studioPreviewVid.videoHeight;
+                setStudioAspectRatio(isWide ? "16:9" : "9:16");
+            }
+        });
+    }
+
+    // Interactividad de pestañas del tablero de telemetría en la Mesa
+    const btnSbTabScenes = $("btnSbTabScenes");
+    const btnSbTabCards = $("btnSbTabCards");
+    const btnSbTabFacts = $("btnSbTabFacts");
+    const studioSbPaneScenes = $("studioSbPaneScenes");
+    const studioSbPaneCards = $("studioSbPaneCards");
+    const studioSbPaneFacts = $("studioSbPaneFacts");
+
+    if (btnSbTabScenes && btnSbTabCards && btnSbTabFacts) {
+        btnSbTabScenes.addEventListener("click", () => {
+            btnSbTabScenes.classList.add("active");
+            btnSbTabCards.classList.remove("active");
+            btnSbTabFacts.classList.remove("active");
+            if (studioSbPaneScenes) { studioSbPaneScenes.hidden = false; studioSbPaneScenes.classList.add("active"); }
+            if (studioSbPaneCards) { studioSbPaneCards.hidden = true; studioSbPaneCards.classList.remove("active"); }
+            if (studioSbPaneFacts) { studioSbPaneFacts.hidden = true; studioSbPaneFacts.classList.remove("active"); }
+        });
+        btnSbTabCards.addEventListener("click", () => {
+            btnSbTabCards.classList.add("active");
+            btnSbTabScenes.classList.remove("active");
+            btnSbTabFacts.classList.remove("active");
+            if (studioSbPaneCards) { studioSbPaneCards.hidden = false; studioSbPaneCards.classList.add("active"); }
+            if (studioSbPaneScenes) { studioSbPaneScenes.hidden = true; studioSbPaneScenes.classList.remove("active"); }
+            if (studioSbPaneFacts) { studioSbPaneFacts.hidden = true; studioSbPaneFacts.classList.remove("active"); }
+        });
+        btnSbTabFacts.addEventListener("click", () => {
+            btnSbTabFacts.classList.add("active");
+            btnSbTabScenes.classList.remove("active");
+            btnSbTabCards.classList.remove("active");
+            if (studioSbPaneFacts) { studioSbPaneFacts.hidden = false; studioSbPaneFacts.classList.add("active"); }
+            if (studioSbPaneScenes) { studioSbPaneScenes.hidden = true; studioSbPaneScenes.classList.remove("active"); }
+            if (studioSbPaneCards) { studioSbPaneCards.hidden = true; studioSbPaneCards.classList.remove("active"); }
+        });
+    }
+
     // Framer Motion Micro-Animations
     if (window.Motion) {
         try {
@@ -2620,6 +3718,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 closeVoiceTester();
             });
         }
+    }
+
+    // Exponer funciones globales para que el Agente Copilot pueda controlar la app
+    window.switchMode = switchMode;
+    window.openProject = openProject;
+    window.listen = listen;
+
+    // Inicializar Agente Copilot Autónomo (Clon ChatGPT Multi-Modelo)
+    try {
+        window.agentCopilot = new AgentCopilot();
+    } catch (e) {
+        console.error("Error inicializando AgentCopilot:", e);
     }
 
     // Auto-abrir proyecto o tarea si está presente en la URL o en localStorage

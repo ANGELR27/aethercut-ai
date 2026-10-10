@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .vs-wrap {
+    width: 780px;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.9), 0 0 50px rgba(56, 189, 248, 0.15);
+    border-radius: 16px;
+    padding: 28px 36px;
+    color: #ffffff;
+    position: relative;
+    overflow: hidden;
+  }
+  .vs-badge {
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #38bdf8;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+  }
+  .vs-columns {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+  }
+  .vs-divider {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 16px;
+  }
+  .divider-line {
+    width: 1px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .vs-pill {
+    background: linear-gradient(135deg, #ef4444, #f59e0b);
+    color: #ffffff;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 900;
+    font-size: 14px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.6);
+    letter-spacing: 1px;
+  }
+  .col-side {
+    flex: 1;
+    text-align: center;
+  }
+  .col-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: #ffffff;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+  .col-stat-left {
+    font-family: 'Outfit', sans-serif;
+    font-size: 52px;
+    font-weight: 900;
+    line-height: 1;
+    color: #38bdf8;
+    filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.5));
+    margin-bottom: 8px;
+  }
+  .col-stat-right {
+    font-family: 'Outfit', sans-serif;
+    font-size: 52px;
+    font-weight: 900;
+    line-height: 1;
+    color: #f59e0b;
+    filter: drop-shadow(0 0 20px rgba(245, 158, 11, 0.5));
+    margin-bottom: 8px;
+  }
+  .col-sub {
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+  <div class="vs-wrap">
+    <div class="vs-badge">● COMPARATIVA DIRECTA</div>
+    <div class="vs-columns">
+      <div class="col-side">
+        <div class="col-name">ESTADOS UNIDOS</div>
+        <div class="col-stat-left">USD 886B</div>
+        <div class="col-sub">Presupuesto Defensa e Iniciativa Replicator</div>
+      </div>
+      <div class="vs-divider">
+        <div class="divider-line"></div>
+        <div class="vs-pill">VS</div>
+        <div class="divider-line"></div>
+      </div>
+      <div class="col-side">
+        <div class="col-name">CHINA</div>
+        <div class="col-stat-right">USD 296B</div>
+        <div class="col-sub">Inversión Tecnológica en Enjambres IA</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

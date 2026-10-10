@@ -59,9 +59,14 @@ class ProjectStore:
         doc.update(extra)
         return self.write(doc)
 
-    def save_plan(self, plan: VideoEditingPlan, **extra: Any) -> Dict[str, Any]:
+    def save_plan(self, plan: Any, **extra: Any) -> Dict[str, Any]:
         doc = self.read()
-        doc["plan"] = plan.model_dump(mode="json")
+        if hasattr(plan, "model_dump"):
+            doc["plan"] = plan.model_dump(mode="json")
+        elif isinstance(plan, dict):
+            doc["plan"] = plan
+        else:
+            doc["plan"] = getattr(plan, "to_dict", lambda: plan)()
         doc.update(extra)
         return self.write(doc)
 

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .card {
+    width: 600px;
+    background: rgba(13, 17, 23, 0.95);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(245, 158, 11, 0.08);
+    border-radius: 8px;
+    padding: 26px;
+    color: #f8fafc;
+    position: relative;
+  }
+  .corner-tl { position: absolute; top: 4px; left: 4px; width: 10px; height: 10px; border-top: 2px solid #f59e0b; border-left: 2px solid #f59e0b; }
+  .corner-br { position: absolute; bottom: 4px; right: 4px; width: 10px; height: 10px; border-bottom: 2px solid #f59e0b; border-right: 2px solid #f59e0b; }
+  .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding-bottom: 12px;
+  }
+  .badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: #f59e0b;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-transform: uppercase;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 10px #f59e0b; }
+  .source { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #64748b; }
+  .split-metric {
+    display: flex;
+    align-items: stretch;
+    gap: 24px;
+    margin-bottom: 20px;
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 20px 24px;
+  }
+  .metric-badge-box {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 150px;
+    max-width: 220px;
+    padding-right: 22px;
+    border-right: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .stat-val {
+    font-family: 'Outfit', sans-serif;
+    font-size: 34px;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #fbbf24;
+    text-shadow: 0 0 20px rgba(245, 158, 11, 0.35);
+    letter-spacing: -0.5px;
+  }
+  .stat-lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 6px;
+    font-weight: 600;
+  }
+  .metric-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .metric-info h3 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    color: #ffffff;
+    font-weight: 700;
+    line-height: 1.25;
+    margin-bottom: 6px;
+  }
+  .metric-info p {
+    font-size: 14px;
+    color: #cbd5e1;
+    line-height: 1.5;
+  }
+  .footer-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #94a3b8;
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="corner-tl"></div>
+    <div class="corner-br"></div>
+    <div class="top-row">
+      <div class="badge"><span class="dot"></span>DATO CLAVE: 4,300 AÑOS</div>
+      <div class="source">Registro Oficial 2026</div>
+    </div>
+    <div class="split-metric">
+      <div class="metric-badge-box">
+        <div class="stat-val">4,300 Años</div>
+        <div class="stat-lbl">Cifra Verificada</div>
+      </div>
+      <div class="metric-info">
+        <h3>Antigüedad Geológica</h3>
+        <p>Los análisis de muestras de suelo y roca en el sitio sugieren actividad humana y sedimentación de la Edad del Bronce Antiguo.</p>
+      </div>
+    </div>
+    <div class="footer-row">
+      <span>REF: EVIDENCIA ARQUEOLÓGICA & TÉCNICA</span>
+      <span>ESTATUS: AUDITADO</span>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .map-card {
+    width: 820px;
+    background: rgba(10, 15, 26, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.9), 0 0 50px rgba(56, 189, 248, 0.12);
+    border-radius: 16px;
+    padding: 26px 32px;
+    color: #ffffff;
+    position: relative;
+    overflow: hidden;
+  }
+  .top-hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+  }
+  .hud-badge {
+    color: #38bdf8;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hud-badge::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 10px #38bdf8;
+  }
+  .coords {
+    color: #94a3b8;
+    letter-spacing: 1px;
+  }
+  .map-stage {
+    position: relative;
+    height: 270px;
+    border-radius: 10px;
+    background: radial-gradient(circle at 60% 45%, rgba(15, 23, 42, 0.8) 0%, rgba(2, 6, 23, 0.95) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+  /* Rejilla de coordenadas satelitales */
+  .grid-pattern {
+    position: absolute;
+    inset: 0;
+    background-image: 
+      linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .hud-info-panel {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 16px 20px;
+    max-width: 340px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  }
+  .loc-country {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: #38bdf8;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .loc-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.2;
+    margin-bottom: 8px;
+  }
+  .loc-notes {
+    font-size: 12.5px;
+    color: #cbd5e1;
+    line-height: 1.45;
+  }
+  .footer-hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 14px;
+  }
+</style>
+</head>
+<body>
+  <div class="map-card">
+    <div class="top-hud">
+      <div class="hud-badge">RECONOCIMIENTO GEOGRÁFICO</div>
+      <div class="coords">TARGET: 39.70° N, 44.30° E</div>
+    </div>
+    <div class="map-stage">
+      <div class="grid-pattern"></div>
+      
+      <!-- Vector World Contours SVG -->
+      <svg viewBox="0 0 800 270" style="position: absolute; inset: 0; width: 100%; height: 100%;">
+        <!-- Continentes simplificados en líneas vectoriales técnicas -->
+        <path d="M 80,40 Q 140,25 210,50 T 260,110 T 210,180 T 130,220 T 70,160 Z" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)" stroke-width="1.5" stroke-dasharray="4,2" />
+        <path d="M 340,30 Q 420,20 480,45 T 530,90 T 470,140 T 380,130 Z" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)" stroke-width="1.5" />
+        <path d="M 370,140 Q 440,150 460,200 T 410,250 T 360,210 Z" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.10)" stroke-width="1.5" />
+        <path d="M 520,40 Q 640,30 720,60 T 760,140 T 680,180 T 570,130 Z" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)" stroke-width="1.5" />
+        
+        <!-- Línea de escaneo satelital / meridiano táctico -->
+        <line x1="560" y1="0" x2="560" y2="270" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1" stroke-dasharray="2,4" />
+        <line x1="0" y1="125" x2="800" y2="125" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1" stroke-dasharray="2,4" />
+
+        <!-- Anillos de Radar Pulsante en el Objetivo -->
+        <circle cx="560" cy="125" r="45" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0.3" stroke-dasharray="4,4" />
+        <circle cx="560" cy="125" r="28" fill="none" stroke="#38bdf8" stroke-width="1.5" opacity="0.6" />
+        <circle cx="560" cy="125" r="14" fill="none" stroke="#38bdf8" stroke-width="2" opacity="0.9" />
+        <circle cx="560" cy="125" r="4" fill="#38bdf8" />
+
+        <!-- Retícula del objetivo [+] -->
+        <line x1="545" y1="125" x2="575" y2="125" stroke="#38bdf8" stroke-width="2" />
+        <line x1="560" y1="110" x2="560" y2="140" stroke="#38bdf8" stroke-width="2" />
+
+        <!-- Línea conectora hacia el panel de datos -->
+        <polyline points="360,100 480,100 560,125" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3,3" />
+      </svg>
+
+      <!-- Panel de Inteligencia Geográfica -->
+      <div class="hud-info-panel">
+        <div class="loc-country">📍 TURQUÍA</div>
+        <div class="loc-title">MONTE ARARAT / MESETA DE ARMENIA</div>
+        <div class="loc-notes">Análisis geológico de sedimentación marina y registros en roca volcánica a 5,137 metros.</div>
+      </div>
+    </div>
+    <div class="footer-hud">
+      <span>● GEO-INTELLIGENCE PROTOCOL // NIVEL 1</span>
+      <span>TELEMETRÍA SATELITAL VERIFICADA</span>
+    </div>
+  </div>
+</body>
+</html>

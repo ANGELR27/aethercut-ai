@@ -163,6 +163,42 @@ class StreamerOptions:
     aspect_ratio: str = "16:9"  # "16:9" o "9:16"
     card_theme: str = "dark"    # "dark" o "light"
     rtmp_url: Optional[str] = None # RTMP stream key URL para YouTube, Twitch o Kick
+    # --- Opciones definidas en el compositor (todas con default retrocompatible) ---
+    sub_style: str = "classic"     # classic, outline, viral, neon, minimal, cinema
+    subs_enabled: bool = True
+    visual_mode: str = "mixed"     # mixed | svg (animaciones vectoriales propias) | stock (b-roll)
+    enable_broll: bool = True
+    enable_cards: bool = True
+    extra_notes: str = ""          # Indicaciones libres del usuario para el director
+    flash_audit: bool = True       # Auditoría editorial con GLM-5.3-flash
+    # === PARÁMETROS DE PRODUCCIÓN PROFESIONAL (nuevos) ===
+    audio_normalize: bool = True   # Normalización loudnorm EBU R128 (-16 LUFS broadcast)
+    color_grade: str = "cinema"    # raw | cinema | broadcast | neon | warm | cool
+    fps: int = 30                  # 24 (cine) | 30 (web/YT) | 60 (gaming)
+    crf: int = 18                  # Calidad H.264: 16=máxima, 18=alta, 20=buena, 23=media
+    bgm_volume: float = 0.06       # Volumen de música de fondo (0.0 = sin BGM, 0.12 = notable)
+    intro_style: str = "kai"       # none | kai | minimal | broadcast
+    outro_enabled: bool = True     # Agregar segmento de cierre con pantalla de like/sub
+    bgm_track: str = "default"     # default | tension | upbeat | ambient | silent
+
+
+def build_creative_hints(options: "StreamerOptions") -> str:
+    """Traduce las opciones del compositor a instrucciones para el AI Director."""
+    hints = []
+    mode = (options.visual_mode or "mixed").lower()
+    if mode == "svg":
+        hints.append("PRIORIZA escenas de tipo 'vector_motion' (animaciones SVG/vectoriales propias) sobre B-Roll de stock.")
+    elif mode == "stock":
+        hints.append("PRIORIZA B-Roll de video real (video_reaction); usa vector_motion solo si es imprescindible.")
+    if not options.enable_broll:
+        hints.append("NO uses escenas 'video_reaction' con B-Roll de stock.")
+    if not options.enable_cards:
+        hints.append("NO uses escenas 'card_focus' (tarjetas Bento); apoya los datos con la voz y los gráficos vectoriales.")
+    if (options.extra_notes or "").strip():
+        hints.append(f"INDICACIONES DEL USUARIO (obligatorias): {options.extra_notes.strip()[:600]}")
+    if not hints:
+        return ""
+    return "\n\nPREFERENCIAS DE PRODUCCIÓN:\n- " + "\n- ".join(hints)
 
 
 class StreamerPipeline:
@@ -198,34 +234,29 @@ class StreamerPipeline:
         """Ejecuta la transmisión completa y genera el video final."""
         safe_log(f"[Streamer] Iniciando transmisión autónoma para: «{self.options.topic}»")
         
-        # 1. Investigación Web
-        self._state("research", 10.0, f"Investigando en internet sobre «{self.options.topic}»...")
-        evidence = await self._gather_web_facts(self.options.topic)
-
-        if self.cancel_event.is_set():
-            raise asyncio.CancelledError()
-
-        # 2. Planificación con el Director de IA
-        self._state("script", 25.0, "Director de IA planificando escenas, emociones y encuadres...")
-        style_instructions = resolve_style_instructions(self.options.style)
-        
         plan_cache_path = self.workdir / "broadcast_plan.json"
+        is_resumed_plan = False
+        plan = None
         if plan_cache_path.exists():
             try:
                 cached_dict = json.loads(plan_cache_path.read_text(encoding="utf-8"))
-                plan = DirectorPlan.from_dict(cached_dict)
+                plan = DirectorBroadcastPlan.from_dict(cached_dict)
+                is_resumed_plan = True
                 safe_log(f"[Streamer] Plan de emisión recuperado de disco: {len(plan.scenes)} escenas.")
             except Exception as _e:
                 safe_log(f"[Streamer] No se pudo leer plan cacheado, regenerando: {_e}")
-                director = AIDirector(self.llm)
-                plan = await director.direct_broadcast(
-                    topic=self.options.topic,
-                    style=self.options.style,
-                    evidence=evidence,
-                    duration_target=self.options.duration_sec,
-                    style_instructions=style_instructions,
-                )
-        else:
+
+        if not plan:
+            # 1. Investigación Web
+            self._state("research", 10.0, f"Investigando en internet sobre «{self.options.topic}»...")
+            evidence = await self._gather_web_facts(self.options.topic)
+
+            if self.cancel_event.is_set():
+                raise asyncio.CancelledError()
+
+            # 2. Planificación con el Director de IA
+            self._state("script", 25.0, "Director de IA planificando escenas, emociones y encuadres...")
+            style_instructions = resolve_style_instructions(self.options.style) + build_creative_hints(self.options)
             director = AIDirector(self.llm)
             plan = await director.direct_broadcast(
                 topic=self.options.topic,
@@ -234,6 +265,18 @@ class StreamerPipeline:
                 duration_target=self.options.duration_sec,
                 style_instructions=style_instructions,
             )
+
+        # Auditoría editorial y optimización de escenas con GLM-5.3-flash (solo para producciones nuevas)
+        if not is_resumed_plan:
+            try:
+                from core.review_critic import FlashContentReviewer
+                reviewer = FlashContentReviewer()
+                if reviewer.available and getattr(self.options, "flash_audit", True):
+                    self._state("script", 32.0, "⚡ GLM-5.3-flash auditando guión, locución y recursos visuales...")
+                    plan_dict = reviewer.review_and_optimize_plan(plan.to_dict(), self.options.topic)
+                    plan = DirectorBroadcastPlan.from_dict(plan_dict)
+            except Exception as _rev_err:
+                safe_log(f"[Streamer] Aviso en auditoría GLM-5.3-flash: {_rev_err}")
 
         # Guardar plan en workdir y en project_store inmediatamente
         try:
@@ -247,14 +290,17 @@ class StreamerPipeline:
             raise asyncio.CancelledError()
 
         # 3. Renderizado del Avatar Animado (Loop dinámico fluido con transparencia alfa perfecta)
-        self._state("avatar", 45.0, "Animando expresiones, respiración y lip-sync de KAI...")
         avatar_clip = self.workdir / "kai_avatar.mov"
-        await asyncio.to_thread(
-            self.avatar_rnd.render_reaction_clip,
-            6.0,
-            avatar_clip,
-            fps=24
-        )
+        if not (avatar_clip.exists() and avatar_clip.stat().st_size > 50000):
+            self._state("avatar", 45.0, "Animando expresiones, respiración y lip-sync de KAI...")
+            await asyncio.to_thread(
+                self.avatar_rnd.render_reaction_clip,
+                6.0,
+                avatar_clip,
+                fps=24
+            )
+        else:
+            safe_log("[Streamer] Reusando loop dinámico de avatar KAI existente.")
 
         if self.cancel_event.is_set():
             raise asyncio.CancelledError()
@@ -284,6 +330,14 @@ class StreamerPipeline:
             voice=self.options.voice,
             card_theme=self.options.card_theme,
             cancel_event=self.cancel_event,
+            sub_style=self.options.sub_style,
+            subs_enabled=self.options.subs_enabled,
+            fps=getattr(self.options, 'fps', 30),
+            crf=getattr(self.options, 'crf', 18),
+            audio_normalize=getattr(self.options, 'audio_normalize', True),
+            color_grade=getattr(self.options, 'color_grade', 'cinema'),
+            bgm_volume=getattr(self.options, 'bgm_volume', 0.06),
+            bgm_track=getattr(self.options, 'bgm_track', 'default'),
         )
 
         def scene_progress(pct: float, msg: str):

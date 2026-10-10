@@ -19,9 +19,9 @@ FALLBACK_MODELS = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-
 def safe_log(msg: str) -> None:
     """Imprime sin romper la consola de Windows con emojis u otros caracteres Unicode."""
     try:
-        print(msg)
+        print(msg, flush=True)
     except UnicodeEncodeError:
-        print(msg.encode("ascii", errors="replace").decode("ascii"))
+        print(msg.encode("ascii", errors="replace").decode("ascii"), flush=True)
 
 
 import itertools
@@ -125,7 +125,8 @@ class LLMClient:
 
     def generate(self, contents: Any, json_mode: bool = False, attempts_per_model: int = 1,
                  use_search: bool = False, progress: Optional[Callable[[str], None]] = None,
-                 client=None, cancel_event=None, max_models: Optional[int] = None) -> str:
+                 client=None, cancel_event=None, max_models: Optional[int] = None,
+                 deadline_sec: Optional[float] = None) -> str:
         def report(message: str) -> None:
             if progress:
                 try:
@@ -138,7 +139,8 @@ class LLMClient:
             tools=[{"google_search": {}}] if use_search else None
         )
         last_exc: Optional[Exception] = None
-        deadline = time.monotonic() + self.REQUEST_DEADLINE_SEC
+        req_deadline = deadline_sec if deadline_sec is not None else self.REQUEST_DEADLINE_SEC
+        deadline = time.monotonic() + req_deadline
 
         models = self.models[:max_models] if max_models else self.models
 
@@ -217,8 +219,9 @@ class LLMClient:
             raise ValueError("NVIDIA_API_KEY no configurada")
 
         candidate_models = [
-            getattr(settings, "NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct"),
-            "meta/llama-3.2-90b-vision-instruct",
+            getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3"),
+            "moonshotai/kimi-k3",
+            "nvidia/nemotron-3.5-lightning-30b-a3b",
             "meta/llama-3.2-11b-vision-instruct",
         ]
         # Quitar duplicados conservando orden
@@ -231,7 +234,7 @@ class LLMClient:
         )
 
         system_instruction = (
-            "Eres un asistente de producción y redacción audiovisual de élite. "
+            "Eres un asistente de producción, diseño visual y redacción audiovisual de élite. "
             "Responde estrictamente con la información solicitada."
         )
         if json_mode:
@@ -241,17 +244,25 @@ class LLMClient:
         for m in models:
             try:
                 if report:
-                    report(f"Generando con NVIDIA ({m})...")
+                    model_display = "Kimi-k3" if "kimi" in m.lower() else ("Nemotron" if "nemotron" in m.lower() else m)
+                    report(f"Razonando con {model_display} ({m})...")
                 safe_log(f"[LLM] Enviando petición a NVIDIA model={m}...")
-                response = client.chat.completions.create(
-                    model=m,
-                    messages=[
+                create_kwargs = {
+                    "model": m,
+                    "messages": [
                         {"role": "system", "content": system_instruction},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.3,
-                    max_tokens=3000,
-                )
+                    "temperature": 0.4,
+                    "max_tokens": 12000,
+                }
+                if "nemotron" in m.lower():
+                    create_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+                elif "kimi" in m.lower():
+                    # Parámetros optimizados para Moonshot Kimi-k3
+                    create_kwargs["temperature"] = 0.7
+
+                response = client.chat.completions.create(**create_kwargs)
                 text = response.choices[0].message.content or ""
                 if text.strip():
                     self.last_model_used = f"nvidia:{m}"

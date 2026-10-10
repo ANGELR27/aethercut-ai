@@ -1,0 +1,269 @@
+<!-- APARTADO FLOTANTE OCULTO EXPANDIBLE DEL AGENTE COPILOT (CLON CHATGPT CON MULTI-MODELOS) -->
+<div id="agentChatDeck" class="agent-chat-deck agent-hidden" aria-hidden="true" role="dialog" aria-label="Agente Copilot Multi-Modelo">
+    <div class="agent-deck-glass">
+        
+        <!-- COLUMNA 1: LISTA LATERAL DE MODELOS Y ATAJOS (ESTILO SIDEBAR CHATGPT) -->
+        <aside class="agent-models-sidebar">
+            <div class="agent-sb-top">
+                <button type="button" class="agent-btn-new-chat" id="agentBtnNewChat" title="Nuevo Chat">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/>
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    <span>Nuevo Chat</span>
+                </button>
+            </div>
+
+            <!-- SELECTOR DE MODELOS DISPONIBLES -->
+            <div class="agent-sb-section">
+                <div class="agent-sb-heading">MODELOS DISPONIBLES</div>
+                <div class="agent-models-list" id="agentModelsList">
+                    <!-- MODELO 1: GLM 5.3 Senior -->
+                    <button type="button" class="agent-model-card" data-model="glm-5.3">
+                        <div class="agent-model-card-top">
+                            <span class="agent-model-dot" style="background:#38bdf8;"></span>
+                            <span class="agent-model-name">GLM-5.3</span>
+                            <span class="agent-model-badge">Senior</span>
+                        </div>
+                        <span class="agent-model-desc">Arquitecto y razonamiento profundo</span>
+                    </button>
+
+                    <!-- MODELO 2: GLM 5.3 Flash -->
+                    <button type="button" class="agent-model-card" data-model="glm-5.3-flash">
+                        <div class="agent-model-card-top">
+                            <span class="agent-model-dot" style="background:#a855f7;"></span>
+                            <span class="agent-model-name">GLM-5.3 Flash</span>
+                            <span class="agent-model-badge" style="background:rgba(168,85,247,0.2); color:#c084fc;">Ultra Rápido</span>
+                        </div>
+                        <span class="agent-model-desc">Acciones en vivo y UI inmediata</span>
+                    </button>
+
+                    <!-- MODELO 3: Kimi-k3 -->
+                    <button type="button" class="agent-model-card" data-model="kimi-k3">
+                        <div class="agent-model-card-top">
+                            <span class="agent-model-dot" style="background:#10b981;"></span>
+                            <span class="agent-model-name">Kimi-k3</span>
+                            <span class="agent-model-badge" style="background:rgba(16,185,129,0.2); color:#34d399;">Auditor</span>
+                        </div>
+                        <span class="agent-model-desc">Auditoría lógica y consistencia</span>
+                    </button>
+
+                    <!-- MODELO 4: Gemini 2.5 Flash (ACTIVO POR DEFECTO — más rápido y multimodal) -->
+                    <button type="button" class="agent-model-card active" data-model="gemini">
+                        <div class="agent-model-card-top">
+                            <span class="agent-model-dot" style="background:#f59e0b;"></span>
+                            <span class="agent-model-name">Gemini 2.5 Flash</span>
+                            <span class="agent-model-badge" style="background:rgba(245,158,11,0.2); color:#fbbf24;">⚡ Recomendado</span>
+                        </div>
+                        <span class="agent-model-desc">Multimodal, editorial y más rápido</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- ACCIONES RÁPIDAS DE LA APP -->
+            <div class="agent-sb-section" style="margin-top:auto;">
+                <div class="agent-sb-heading">ACCIONES DIRECTAS</div>
+                <div class="agent-quick-actions">
+                    <button type="button" class="agent-quick-btn" data-prompt="Crea una miniatura para YouTube de alta calidad y buena retención para el video actual">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                        <span>Crear Miniatura YouTube</span>
+                    </button>
+                    <button type="button" class="agent-quick-btn" data-prompt="Pon a hacer este proyecto: Agencias internacionales advierten sobre peligro de 'robots asesinos' con duracion de 3 minutos en formato horizontal 16:9 y llévame a la mesa para monitorear">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        <span>Emitir Video (3 min)</span>
+                    </button>
+                    <button type="button" class="agent-quick-btn" data-prompt="Llévame a la mesa de edición y timeline para ver las tarjetas, escenas e investigaciones en tiempo real">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <span>Ir a Mesa &amp; Timeline</span>
+                    </button>
+                    <button type="button" class="agent-quick-btn" data-prompt="Ajusta el estilo de los popups a modo Broadcast de alta fidelidad para que se vean grandes, elegantes y legibles">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 20h9"/>
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        </svg>
+                        <span>Mejorar Pop-ups</span>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- COLUMNA 2: ÁREA PRINCIPAL DEL CHAT (CLON CHATGPT) -->
+        <main class="agent-chat-main">
+            <!-- HEADER DEL CHAT -->
+            <header class="agent-chat-header">
+                <div class="agent-header-left">
+                    <div class="agent-model-indicator-pill" id="agentHeaderModelPill">
+                        <span class="agent-pill-dot" id="agentHeaderDot" style="background:#f59e0b;"></span>
+                        <span class="agent-pill-name" id="agentHeaderModelName">Gemini 2.5 Flash</span>
+                    </div>
+                    <span class="agent-header-status">
+                        <span class="agent-live-beacon"></span> Control de la App Activo
+                    </span>
+                </div>
+                <div class="agent-header-actions">
+                    <!-- BOTÓN MODO REN: MODIFICADOR DE LA APLICACIÓN -->
+                    <button type="button" class="agent-ren-toggle-btn" id="agentBtnToggleRen" title="Activar/Desactivar Modo REN (Modificar elementos y diseño de la app)">
+                        <span class="agent-ren-toggle-icon">🛠️</span>
+                        <span class="agent-ren-toggle-label">Modo REN</span>
+                        <span class="agent-ren-toggle-dot" id="agentRenToggleDot"></span>
+                    </button>
+                    <button type="button" class="agent-head-btn" id="agentBtnExpand" title="Expandir/Reducir">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 3 21 3 21 9"/>
+                            <polyline points="9 21 3 21 3 15"/>
+                            <line x1="21" y1="3" x2="14" y2="10"/>
+                            <line x1="3" y1="21" x2="10" y2="14"/>
+                        </svg>
+                    </button>
+                    <button type="button" class="agent-head-btn" id="agentBtnMinimize" title="Minimizar">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                    </button>
+                    <button type="button" class="agent-head-btn agent-head-close" id="agentBtnClose" title="Cerrar">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- BARRA DE HERRAMIENTAS Y SELECTOR DEL MODO REN (OCULTA POR DEFECTO HASTA ACTIVAR MODO REN) -->
+            <div class="agent-ren-toolbar" id="agentRenToolbar" style="display: none;">
+                <div class="agent-ren-toolbar-header">
+                    <div class="agent-ren-badge-title">
+                        <span class="agent-ren-pulse"></span>
+                        <span>MODO REN ACTIVO: Editor Visual de la Plataforma</span>
+                    </div>
+                    <div class="agent-ren-target-box">
+                        <button type="button" class="agent-btn-pick-element" id="agentBtnPickElement" title="Activar puntero para seleccionar cualquier elemento en pantalla">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="22" y1="12" x2="18" y2="12"/>
+                                <line x1="6" y1="12" x2="2" y2="12"/>
+                                <line x1="12" y1="6" x2="12" y2="2"/>
+                                <line x1="12" y1="22" x2="12" y2="18"/>
+                            </svg>
+                            <span>🎯 Seleccionar Elemento</span>
+                        </button>
+                        <div class="agent-ren-target-pill" id="agentRenTargetPill" style="display: none;">
+                            <span class="agent-ren-target-badge">Objetivo:</span>
+                            <code class="agent-ren-target-sel" id="agentRenTargetSelText">#elemento</code>
+                            <button type="button" class="agent-ren-target-clear" id="agentBtnClearTarget" title="Desmarcar elemento">✕</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="agent-ren-actions-bar">
+                    <span class="agent-ren-actions-label">Acciones directas:</span>
+                    <button type="button" class="agent-ren-chip" data-ren-action="color_cyan">🎨 Cian</button>
+                    <button type="button" class="agent-ren-chip" data-ren-action="color_emerald">💚 Verde</button>
+                    <button type="button" class="agent-ren-chip" data-ren-action="color_purple">💜 Púrpura</button>
+                    <button type="button" class="agent-ren-chip" data-ren-action="color_amber">💛 Ámbar</button>
+                    <button type="button" class="agent-ren-chip" data-ren-action="glow">✨ Neón</button>
+                    <button type="button" class="agent-ren-chip" data-ren-action="scale_up">🔍 +10%</button>
+                    <button type="button" class="agent-ren-chip" data-ren-action="hide">👁️ Ocultar</button>
+                    <button type="button" class="agent-ren-chip agent-ren-chip-danger" data-ren-action="remove">🗑️ Eliminar</button>
+                    <button type="button" class="agent-ren-chip agent-ren-chip-reset" id="agentBtnResetRen" title="Restaurar toda la interfaz original">🔄 Resetear App</button>
+                </div>
+            </div>
+
+            <!-- FEED DE MENSAJES SCROLLABLE -->
+            <div class="agent-messages-container" id="agentMessagesContainer">
+                <!-- MENSAJE INICIAL DE BIENVENIDA -->
+                <div class="agent-message agent-msg-bot">
+                    <div class="agent-msg-avatar">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+                            <path d="M4 11a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v7a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-7z"/>
+                            <circle cx="9" cy="15" r="1"/>
+                            <circle cx="15" cy="15" r="1"/>
+                        </svg>
+                    </div>
+                    <div class="agent-msg-body">
+                        <div class="agent-msg-author">AetherCopilot <span>Gemini 2.5 Flash</span></div>
+                        <div class="agent-msg-content">
+                            <p>¡Hola! Soy tu <strong>Agente Autónomo de AetherCut Studio</strong>. Tengo control total sobre la aplicación:</p>
+                            <ul>
+                                <li>🎬 <strong>Lanzar producciones:</strong> <em>"Pon a hacer este proyecto sobre robots asesinos de 3 minutos en horizontal"</em></li>
+                                <li>🖼️ <strong>Miniaturas YouTube:</strong> <em>"Crea una miniatura de alta retención para YouTube"</em></li>
+                                <li>🧭 <strong>Navegación en vivo:</strong> <em>"Llévame a la mesa de edición y timeline"</em></li>
+                                <li>🎨 <strong>Control de UI:</strong> <em>"Cambia el color de los botones a cian o ajusta los pop-ups"</em></li>
+                            </ul>
+                            <p>Puedes cambiar entre los modelos de <strong>GLM, Kimi y Gemini</strong> en cualquier momento desde la lista lateral.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BARRA DE SUGERENCIAS Y CONTEXTO RÁPIDO ESTILO ANTIGRAVITY -->
+            <div class="agent-suggestions-bar" id="agentSuggestionsBar">
+                <button type="button" class="agent-sugg-chip" data-prompt="mejora el diseño del sidebard lateral.. estilo mas profesional, negro mate con sombras sutiles azul oscuro y blanco e iconos profesionales">🎨 Sidebar Matte Dark Pro</button>
+                <button type="button" class="agent-sugg-chip" data-prompt="Inspecciona el archivo @sidebar y muestra su estructura de código">📁 @sidebar</button>
+                <button type="button" class="agent-sugg-chip" data-prompt="Inspecciona los estilos en @css theme matte-dark.css">🎨 @css</button>
+                <button type="button" class="agent-sugg-chip" data-prompt="Crea una miniatura para YouTube de alta calidad y buena retención para el video">🖼️ Miniatura YouTube Pro</button>
+                <button type="button" class="agent-sugg-chip" data-prompt="Pon a hacer este proyecto con el tema Agencias internacionales advierten sobre peligro de 'robots asesinos' con duracion de 3 minutos y formato 16:9 horizontal">🚀 Emitir 3 min Robots</button>
+                <button type="button" class="agent-sugg-chip" data-prompt="Llévame a la mesa de edición y timeline">🎬 Ver Mesa &amp; Timeline</button>
+            </div>
+
+            <!-- ÁREA DE ENTRADA PROMPT (ESTILO ANTIGRAVITY PAIR PROGRAMMER) -->
+            <div class="agent-input-wrapper">
+                <div class="agent-context-toolbar" style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
+                    <span style="font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Contexto @:</span>
+                    <button type="button" class="agent-context-tag-btn" onclick="const inp=document.getElementById('agentPromptInput'); if(inp){inp.value+=' @sidebar '; inp.focus();}" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); color:#38bdf8; font-size:11px; padding:2px 7px; border-radius:6px; cursor:pointer; font-family:'Geist Mono', monospace;">@sidebar</button>
+                    <button type="button" class="agent-context-tag-btn" onclick="const inp=document.getElementById('agentPromptInput'); if(inp){inp.value+=' @timeline '; inp.focus();}" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); color:#38bdf8; font-size:11px; padding:2px 7px; border-radius:6px; cursor:pointer; font-family:'Geist Mono', monospace;">@timeline</button>
+                    <button type="button" class="agent-context-tag-btn" onclick="const inp=document.getElementById('agentPromptInput'); if(inp){inp.value+=' @css '; inp.focus();}" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); color:#38bdf8; font-size:11px; padding:2px 7px; border-radius:6px; cursor:pointer; font-family:'Geist Mono', monospace;">@css</button>
+                    <button type="button" class="agent-context-tag-btn" onclick="const inp=document.getElementById('agentPromptInput'); if(inp){inp.value+=' @player '; inp.focus();}" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); color:#38bdf8; font-size:11px; padding:2px 7px; border-radius:6px; cursor:pointer; font-family:'Geist Mono', monospace;">@player</button>
+                </div>
+                <form class="agent-prompt-box" id="agentPromptForm" onsubmit="return false;">
+                    <textarea id="agentPromptInput" class="agent-prompt-textarea" rows="1" placeholder="Pídele al agente editar código, diseñar UI o controlar el estudio... (Enter para enviar)"></textarea>
+                    <div class="agent-prompt-tools">
+                        <span class="agent-prompt-model-tag" id="agentInputModelTag">Gemini 2.5 Flash</span>
+                        <button type="submit" class="agent-btn-send" id="agentBtnSend" title="Enviar mensaje">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+                <div class="agent-input-footer">
+                    AetherCopilot tiene control directo sobre la mesa, timelines, renders y diseño de la interfaz.
+                </div>
+            </div>
+        </main>
+
+    </div>
+</div>
+
+<!-- OVERLAY VISUAL DEL SELECTOR DE ELEMENTOS MODO REN -->
+<div id="agentRenInspectorOverlay" class="agent-ren-inspector-overlay" style="display:none;" aria-hidden="true">
+    <div id="agentRenInspectorBadge" class="agent-ren-inspector-badge">
+        <span class="agent-ren-tag-name" id="agentRenHoverTag">div</span>
+        <span class="agent-ren-tag-id" id="agentRenHoverSel">#id</span>
+    </div>
+</div>
+
+<!-- BOTÓN FLOTANTE TRIGGER (FAB) EN LA ESQUINA INFERIOR DERECHA -->
+<button type="button" class="agent-fab-launcher" id="agentFabLauncher" title="Abrir Agente Copilot">
+    <span class="agent-fab-glow"></span>
+    <div class="agent-fab-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+            <path d="M4 11a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v7a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-7z"/>
+            <circle cx="9" cy="15" r="1.2"/>
+            <circle cx="15" cy="15" r="1.2"/>
+        </svg>
+    </div>
+    <span class="agent-fab-label">Agente IA</span>
+    <span class="agent-fab-model-pill" id="agentFabModelPill">Gemini 2.5</span>
+</button>

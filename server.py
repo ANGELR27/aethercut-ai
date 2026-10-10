@@ -9,12 +9,12 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     except Exception:
         pass
 
@@ -40,6 +40,13 @@ app = FastAPI(title="AetherCut AI Video Editor")
 WEB_DIR = Path(__file__).resolve().parent / "web"
 TEMPLATES_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
+
+import jinja2
+jinja_env = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
+    autoescape=True,
+    auto_reload=True
+)
 
 ALLOWED_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 MAX_UPLOAD_MB = 2048
@@ -168,8 +175,8 @@ def cleanup_cancelled_task_files(task_id: str, input_file: Path) -> None:
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
-    async with aiofiles.open(TEMPLATES_DIR / "index.html", mode="r", encoding="utf-8") as f:
-        return HTMLResponse(content=await f.read())
+    template = jinja_env.get_template("index.html")
+    return HTMLResponse(content=template.render())
 
 
 async def run_pipeline_task(task_id: str, input_file: Path, options: PipelineOptions) -> None:
@@ -411,6 +418,24 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
     voice = str(payload.get("voice", DEFAULT_VOICE)).strip()
     raw_rtmp = payload.get("rtmp_url")
     rtmp_url = str(raw_rtmp).strip() if (raw_rtmp and str(raw_rtmp).strip() not in ("None", "null", "")) else None
+    extra_opts = {
+        "sub_style": str(payload.get("sub_style", "classic")).strip().lower() or "classic",
+        "subs_enabled": bool(payload.get("subs_enabled", True)),
+        "visual_mode": str(payload.get("visual_mode", "mixed")).strip().lower() or "mixed",
+        "enable_broll": bool(payload.get("enable_broll", True)),
+        "enable_cards": bool(payload.get("enable_cards", True)),
+        "extra_notes": str(payload.get("extra_notes", "") or "")[:600],
+        "flash_audit": bool(payload.get("flash_audit", True)),
+        # === Parámetros de producción profesional ===
+        "audio_normalize": bool(payload.get("audio_normalize", True)),
+        "color_grade": str(payload.get("color_grade", "cinema")).strip().lower() or "cinema",
+        "fps": max(24, min(60, int(payload.get("fps", 30)))),
+        "crf": max(14, min(28, int(payload.get("crf", 18)))),
+        "bgm_volume": max(0.0, min(0.25, float(payload.get("bgm_volume", 0.06)))),
+        "intro_style": str(payload.get("intro_style", "kai")).strip().lower() or "kai",
+        "outro_enabled": bool(payload.get("outro_enabled", True)),
+        "bgm_track": str(payload.get("bgm_track", "default")).strip().lower() or "default",
+    }
 
     task_id = uuid.uuid4().hex[:8]
     now = datetime.now(timezone.utc).isoformat()
@@ -429,12 +454,14 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
         card_theme=card_theme,
         voice=voice,
         rtmp_url=rtmp_url,
+        **extra_opts,
     )
     store = ProjectStore(task_id)
     store.create(
         source_file=settings.OUTPUTS_DIR / f"{task_id}_master.mp4",
         original_name=f"KAI Stream: {topic}",
-        options={"topic": topic, "style": style, "duration_sec": duration_sec, "mode": "streamer"}
+        options={"topic": topic, "style": style, "duration_sec": duration_sec, "mode": "streamer",
+                 "aspect_ratio": aspect_ratio, "card_theme": card_theme, "voice": voice, **extra_opts}
     )
     task_cancel_events[task_id] = threading.Event()
     task_jobs[task_id] = asyncio.create_task(run_streamer_task(task_id, options))
@@ -466,6 +493,21 @@ async def resume_project(task_id: str):
             card_theme=raw_options.get("card_theme", "dark"),
             voice=raw_options.get("voice", DEFAULT_VOICE),
             rtmp_url=raw_options.get("rtmp_url"),
+            sub_style=raw_options.get("sub_style", "classic"),
+            subs_enabled=bool(raw_options.get("subs_enabled", True)),
+            visual_mode=raw_options.get("visual_mode", "mixed"),
+            enable_broll=bool(raw_options.get("enable_broll", True)),
+            enable_cards=bool(raw_options.get("enable_cards", True)),
+            extra_notes=str(raw_options.get("extra_notes", "") or ""),
+            flash_audit=bool(raw_options.get("flash_audit", True)),
+            audio_normalize=bool(raw_options.get("audio_normalize", True)),
+            color_grade=str(raw_options.get("color_grade", "cinema")),
+            fps=int(raw_options.get("fps", 30)),
+            crf=int(raw_options.get("crf", 18)),
+            bgm_volume=float(raw_options.get("bgm_volume", 0.06)),
+            intro_style=str(raw_options.get("intro_style", "kai")),
+            outro_enabled=bool(raw_options.get("outro_enabled", True)),
+            bgm_track=str(raw_options.get("bgm_track", "default")),
         )
         tasks_progress[task_id] = {
             "step": "render", "progress": 50.0, "message": f"Reanudando transmisión de «{topic}»...",
@@ -499,14 +541,142 @@ async def resume_project(task_id: str):
     return {"task_id": task_id, "message": "El proyecto se reanudó con el archivo ya guardado."}
 
 
+def build_broadcast_editor_snapshot(task_id: str, document: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Genera un editor snapshot completo y sincronizado para proyectos KAI Streamer."""
+    proj_dir = settings.PROJECTS_DIR / task_id
+    plan_path = proj_dir / "work" / "broadcast_plan.json"
+    if not plan_path.exists():
+        return None
+    try:
+        raw_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    scenes_raw = raw_plan.get("scenes", [])
+    if not scenes_raw:
+        return None
+
+    master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+    master_dur = 0.0
+    if master_file.exists():
+        try:
+            master_dur = FileManager.get_media_metadata(master_file).get("duration", 0.0)
+        except Exception:
+            pass
+
+    cum_time = 0.0
+    scenes_list = []
+    cards_list = []
+    brolls_list = []
+    speech_list = []
+
+    for sc in scenes_raw:
+        sid = sc.get("scene_id")
+        mp4_file = proj_dir / "work" / f"scene_{sid}" / f"scene_{sid}.mp4"
+        dur = 0.0
+        if mp4_file.exists():
+            try:
+                dur = FileManager.get_media_metadata(mp4_file).get("duration", 0.0)
+            except Exception:
+                pass
+        if dur <= 0:
+            dur = float(sc.get("duration_est", 20.0))
+
+        sc_start = round(cum_time, 2)
+        sc_end = round(cum_time + dur, 2)
+        cum_time += dur
+
+        card = sc.get("card")
+        sc_thumb = f"/storage/projects/{task_id}/work/scene_{sid}/scene_thumb.jpg"
+        sc_card_url = f"/storage/projects/{task_id}/work/scene_{sid}/card_{sid}.png" if card else None
+
+        scenes_list.append({
+            "id": f"scene-{sid}",
+            "scene_id": sid,
+            "title": f"E{sid}: {sc.get('name', f'Escena {sid}')}",
+            "name": sc.get("name", f"Escena {sid}"),
+            "type": sc.get("type", "avatar_cam"),
+            "emotion": sc.get("emotion", "serious"),
+            "camera": sc.get("camera", "hero_center"),
+            "start": sc_start,
+            "end": sc_end,
+            "duration": round(dur, 2),
+            "speech": sc.get("speech", ""),
+            "headline": card.get("headline", "") if card else "",
+            "stat": card.get("stat", "") if card else "",
+            "thumb_url": sc_thumb,
+            "card_url": sc_card_url,
+            "enabled": True,
+        })
+
+        if card and isinstance(card, dict) and card.get("headline"):
+            cards_list.append({
+                "id": f"card-{sid}",
+                "scene_id": sid,
+                "headline": card.get("headline", ""),
+                "title": card.get("headline", ""),
+                "stat_value": card.get("stat", ""),
+                "body": card.get("body", ""),
+                "badge": card.get("badge", ""),
+                "start": sc_start,
+                "end": sc_end,
+                "duration": round(dur, 2),
+                "card_url": sc_card_url,
+                "enabled": True,
+            })
+
+        broll_concept = sc.get("visual_query") or (sc.get("visual_queries", [None])[0] if sc.get("visual_queries") else None)
+        if broll_concept or sc.get("type") in ["vector_motion", "card_focus", "video_reaction", "chat_debate", "breaking_news"]:
+            brolls_list.append({
+                "id": f"broll-{sid}",
+                "scene_id": sid,
+                "concept": (broll_concept or sc.get("name", f"Clip B-Roll E{sid}"))[:45],
+                "title": (broll_concept or sc.get("name", f"Clip B-Roll E{sid}"))[:45],
+                "start": sc_start,
+                "end": sc_end,
+                "status": "ready",
+                "enabled": True,
+            })
+
+        if sc.get("speech"):
+            speech_list.append({
+                "id": f"speech-{sid}",
+                "scene_id": sid,
+                "title": sc.get("speech", "")[:35] + "...",
+                "text": sc.get("speech", ""),
+                "start": sc_start,
+                "end": sc_end,
+                "duration": round(dur, 2),
+                "enabled": True,
+            })
+
+    total_dur = round(master_dur if master_dur > 0 else cum_time, 2)
+    return {
+        "summary": raw_plan.get("title") or document.get("original_name") or "Producción KAI Streamer",
+        "topic": raw_plan.get("topic") or (document.get("options") or {}).get("topic", ""),
+        "duration": total_dur,
+        "scenes": scenes_list,
+        "cards": cards_list,
+        "brolls": brolls_list,
+        "speech": speech_list,
+        "cuts": [],
+        "shorts": [],
+    }
+
+
 @app.get("/api/projects/{task_id}")
 async def get_project(task_id: str):
     try:
         document = ProjectStore(task_id).read()
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
-    plan_data = document.get("plan")
-    editor = editor_snapshot(VideoEditingPlan.model_validate(plan_data)) if plan_data else None
+
+    broadcast_editor = build_broadcast_editor_snapshot(task_id, document)
+    if broadcast_editor:
+        editor = broadcast_editor
+    else:
+        plan_data = document.get("plan")
+        editor = editor_snapshot(VideoEditingPlan.model_validate(plan_data)) if plan_data else None
 
     # Asegurar compatibilidad de URLs del video editado
     if document.get("result") and isinstance(document["result"], dict):
@@ -519,6 +689,31 @@ async def get_project(task_id: str):
     # No se exponen rutas del equipo local a la interfaz.
     public = {key: value for key, value in document.items() if key not in {"source_file", "preview_file", "plan"}}
     return {"project": public, "editor": editor}
+
+
+@app.get("/api/projects/{task_id}/broadcast-plan")
+async def get_broadcast_plan(task_id: str):
+    """Escenas dirigidas por la IA (guion, emoción, tipo) para la Mesa & Timeline."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id):
+        raise HTTPException(status_code=400, detail="Identificador no válido.")
+    plan_path = settings.PROJECTS_DIR / task_id / "work" / "broadcast_plan.json"
+    if not plan_path.exists():
+        return {"scenes": [], "title": "", "available": False}
+    try:
+        raw = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"scenes": [], "title": "", "available": False}
+    scenes = []
+    for sc in raw.get("scenes", []):
+        card = sc.get("card") or {}
+        scenes.append({
+            "scene_id": sc.get("scene_id"), "name": sc.get("name"), "type": sc.get("type"),
+            "emotion": sc.get("emotion"), "camera": sc.get("camera"),
+            "duration": sc.get("duration_est", 0), "speech": sc.get("speech", ""),
+            "headline": card.get("headline", ""), "stat": card.get("stat", ""),
+            "thumb_url": f"/storage/projects/{task_id}/work/scene_{sc.get('scene_id')}/scene_thumb.jpg",
+        })
+    return {"scenes": scenes, "title": raw.get("title", ""), "available": True}
 
 
 @app.get("/api/projects")
@@ -579,11 +774,6 @@ async def delete_project(task_id: str):
     return {"message": "Proyecto eliminado.", "freed_mb": round(report["freed_bytes"] / 1024 / 1024, 2)}
 
 
-@app.post("/api/cleanup")
-async def trigger_storage_cleanup():
-    """Limpia archivos temporales, duplicados de uploads antiguos y libera espacio en disco."""
-    report = FileManager.cleanup_storage()
-    return {"message": "Limpieza completada con éxito.", **report}
 
 
 @app.get("/api/projects/{task_id}/preview")
@@ -1368,7 +1558,419 @@ async def tts_preview_endpoint(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ==============================================================================
+# MULTI-AGENT DEV STUDIO ENDPOINTS (GLM-5.3, GLM-5.3-flash, Kimi-k3)
+# ==============================================================================
+
+_multiagent_sessions: dict = {}
+
+
+@app.post("/api/multiagent/run")
+async def run_multiagent_project(payload: dict = Body(...)):
+    """Inicia un ciclo autónomo de desarrollo coordinado entre GLM-5.3, GLM-5.3-flash y Kimi-k3."""
+    requirement = payload.get("requirement", "").strip()
+    audit_mode = payload.get("audit_mode", "analysis").strip().lower()
+    if audit_mode not in ["analysis", "admin"]:
+        audit_mode = "analysis"
+
+    if not requirement:
+        raise HTTPException(status_code=400, detail="Requerimiento no especificado.")
+
+    import time
+    from core.multiagent.orchestrator import MultiAgentOrchestrator
+
+    session_id = f"dev_{int(time.time())}"
+    orch = MultiAgentOrchestrator(workspace_root=settings.BASE_DIR, audit_mode=audit_mode)
+    _multiagent_sessions[session_id] = {
+        "status": "running",
+        "progress": 5.0,
+        "message": f"Iniciando orquestación ({'Modo Análisis' if audit_mode == 'analysis' else 'Modo Administrador'})...",
+        "audit_mode": audit_mode,
+        "result": None,
+        "logs": [],
+        "agents": {
+            "planner": {
+                "name": "GLM-5.3-flash",
+                "role": "Delegador & Planificador Ágil",
+                "model": "z-ai/glm-5.3-flash",
+                "status": "Esperando inicio",
+                "action": "Listo para delegar tareas",
+                "reasoning": "Esperando requerimiento para crear plan...",
+            },
+            "implementer": {
+                "name": "GLM-5.3",
+                "role": "Ingeniero Senior (Tareas Pesadas)",
+                "model": "z-ai/glm-5.3",
+                "status": "En espera de tareas pesadas",
+                "action": "Esperando tareas asignadas",
+                "reasoning": "Listo para construir arquitectura y código pesado...",
+            },
+            "auditor": {
+                "name": "Kimi-k3",
+                "role": f"Auditor ({'Modo Análisis' if audit_mode == 'analysis' else 'Modo Administrador'})",
+                "model": "moonshotai/kimi-k3",
+                "status": "En espera de revisión",
+                "action": "Esperando código para auditar",
+                "reasoning": "Listo para observar justificaciones técnicas y validar sintaxis..." if audit_mode == "analysis" else "Listo para auditoría estricta, bloqueos y sintaxis...",
+            },
+        },
+    }
+
+    def _on_progress(msg: str, pct: float, extra: dict = None):
+        if session_id in _multiagent_sessions:
+            sess = _multiagent_sessions[session_id]
+            sess["progress"] = round(pct, 1)
+            sess["message"] = msg
+            sess["logs"].append({"pct": pct, "msg": msg})
+
+            if extra and isinstance(extra, dict):
+                ag_key = extra.get("agent")
+                if ag_key == "architect":
+                    ag_key = "planner"
+                if ag_key and ag_key in sess["agents"]:
+                    ag_info = sess["agents"][ag_key]
+                    ag_info["status"] = "Activo"
+                    if "action" in extra:
+                        ag_info["action"] = extra["action"]
+                    if "reasoning" in extra and extra["reasoning"]:
+                        ag_info["reasoning"] = extra["reasoning"]
+
+    async def _runner():
+        try:
+            res = await orch.execute_project(
+                project_description=requirement,
+                max_attempts_per_task=3,
+                progress_cb=_on_progress,
+            )
+            _multiagent_sessions[session_id]["status"] = "done"
+            _multiagent_sessions[session_id]["progress"] = 100.0
+            _multiagent_sessions[session_id]["message"] = "Proyecto completado y auditado con éxito."
+            _multiagent_sessions[session_id]["result"] = res
+        except Exception as exc:
+            safe_log(f"[MultiAgent] Error en proyecto: {exc}")
+            _multiagent_sessions[session_id]["status"] = "error"
+            _multiagent_sessions[session_id]["message"] = f"Error: {exc}"
+
+    asyncio.create_task(_runner())
+    return {"session_id": session_id, "status": "running", "message": "Sesión multi-agente iniciada."}
+
+
+@app.get("/api/multiagent/status/{session_id}")
+async def get_multiagent_status(session_id: str):
+    """Consulta el progreso en vivo y bitácora del desarrollo multi-agente."""
+    sess = _multiagent_sessions.get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada.")
+    return sess
+
+
+# ==============================================================================
+# AGENTE COPILOT MULTI-MODELO (CHATGPT CLONE & CONTROL TOTAL DE APP)
+# ==============================================================================
+
+@app.get("/api/agent/models")
+async def get_agent_models():
+    """Retorna la lista de modelos de IA disponibles para el Agente Copilot."""
+    from core.app_agent import AppAgentController
+    controller = AppAgentController()
+    return {"models": controller.get_models_list()}
+
+
+@app.post("/api/agent/chat")
+def agent_chat_endpoint(payload: dict = Body(...)):
+    """Procesa una consulta u orden del usuario con el modelo seleccionado y ejecuta acciones."""
+    message = payload.get("message", "").strip()
+    model_id = payload.get("model_id", "gemini").strip()
+    app_context = payload.get("app_context", {})
+    history = payload.get("history", [])
+
+    if not message:
+        raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío.")
+
+    from core.app_agent import AppAgentController
+    controller = AppAgentController()
+
+    try:
+        res = controller.process_message(
+            message=message,
+            model_id=model_id,
+            app_context=app_context,
+            history=history if isinstance(history, list) else [],
+        )
+        return res
+    except Exception as exc:
+        safe_log(f"[Server] Error en chat del agente: {exc}")
+        import traceback; safe_log(traceback.format_exc())
+        return {
+            "model_used": model_id,
+            "reply": f"⚠️ Ocurrió un error al procesar la solicitud. Intenta de nuevo.",
+            "reasoning": str(exc),
+            "actions": [],
+            "extra": {},
+        }
+
+
+@app.get("/api/agent/wait/{job_id}")
+def agent_wait_nim_job(job_id: str):
+    """El usuario eligió 'Esperar' — espera hasta 90s más por el resultado del job NIM pendiente."""
+    import time, concurrent.futures, json, re
+    from core.app_agent import AppAgentController
+
+    job = AppAgentController._pending_nim_jobs.pop(job_id, None)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job no encontrado o ya expirado.")
+
+    future  = job["future"]
+    executor = job["executor"]
+    conn    = job["conn"]
+    elapsed = time.time() - job["started_at"]
+    remaining = max(5.0, job["hard_timeout"] - elapsed)
+
+    try:
+        raw_resp = future.result(timeout=remaining)
+        executor.shutdown(wait=False)
+        clean = (raw_resp or "").strip()
+        m = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", clean)
+        if m:
+            clean = m.group(1).strip()
+        else:
+            s, e = clean.find("{"), clean.rfind("}")
+            if s != -1 and e > s:
+                clean = clean[s:e+1].strip()
+        parsed_data = None
+        try:
+            parsed_data = json.loads(clean, strict=False)
+        except Exception:
+            pass
+
+        controller = AppAgentController()
+        parsed_actions = parsed_data.get("actions", []) if isinstance(parsed_data, dict) else []
+        if not parsed_data or not isinstance(parsed_data, dict) or not parsed_actions:
+            css_data = controller._extract_and_apply_css_if_present(job.get("user_message", ""), raw_resp or clean, {})
+            if css_data:
+                parsed_data = css_data
+            elif not parsed_data or not isinstance(parsed_data, dict):
+                parsed_data = {"reply": clean or "Listo.", "actions": []}
+
+        reply   = parsed_data.get("reply", "Tarea completada.")
+        actions = parsed_data.get("actions", [])
+        if not isinstance(actions, list):
+            actions = []
+
+        # Ejecutar cualquier edit_file si no fue auto-aplicado
+        for act in actions:
+            if isinstance(act, dict) and act.get("type") == "edit_file" and not act.get("file_written"):
+                rel_p = act.get("path", "")
+                content = act.get("content", "")
+                try:
+                    target_f = _resolve_safe_path(rel_p)
+                    target_f.parent.mkdir(parents=True, exist_ok=True)
+                    if target_f.exists():
+                        import shutil
+                        shutil.copy2(str(target_f), str(target_f) + ".bak")
+                        existing = target_f.read_text(encoding="utf-8")
+                    else:
+                        existing = ""
+                    target_f.write_text(existing + "\n" + content, encoding="utf-8")
+                    act["file_written"] = str(rel_p)
+                    if target_f.suffix == ".css":
+                        act["css_code"] = content
+                        act["reload"] = False
+                    else:
+                        act["reload"] = True
+                except Exception as ef_err:
+                    safe_log(f"[Server] Error en edit_file durante wait: {ef_err}")
+
+        extra = parsed_data.get("extra", {})
+
+        return {
+            "status": "ok",
+            "model_used": conn.role_title,
+            "reply": reply,
+            "reasoning": f"✅ {conn.role_title} respondió tras la espera.",
+            "actions": actions,
+            "extra": extra,
+        }
+    except concurrent.futures.TimeoutError:
+        executor.shutdown(wait=False)
+        return {
+            "status": "timeout",
+            "model_used": "none",
+            "reply": "⚠️ El modelo no respondió. Por favor usa Gemini.",
+            "reasoning": "Hard timeout alcanzado.",
+            "actions": [],
+            "extra": {},
+        }
+    except Exception as exc:
+        executor.shutdown(wait=False)
+        safe_log(f"[Server] Error esperando job {job_id}: {exc}")
+        return {
+            "status": "error",
+            "model_used": "none",
+            "reply": f"⚠️ Error al obtener respuesta: {exc}",
+            "reasoning": str(exc),
+            "actions": [],
+            "extra": {},
+        }
+
+
+@app.delete("/api/agent/wait/{job_id}")
+def agent_cancel_nim_job(job_id: str):
+    """El usuario eligió Gemini — cancela el job NIM pendiente y libera recursos."""
+    from core.app_agent import AppAgentController
+    job = AppAgentController._pending_nim_jobs.pop(job_id, None)
+    if job:
+        job["executor"].shutdown(wait=False)
+    return {"cancelled": True, "job_id": job_id}
+
+
+@app.post("/api/agent/generate-thumbnail")
+def agent_generate_thumbnail(payload: dict = Body(...)):
+    """Genera una miniatura para YouTube de alta conversión."""
+    title = payload.get("title", "BROADCAST EXCLUSIVO").strip()
+    badge = payload.get("badge", "🔴 BROADCAST URGENTE").strip()
+    subtitle = payload.get("subtitle")
+    project_id = payload.get("project_id")
+
+    from core.thumbnail_maker import YouTubeThumbnailMaker
+    maker = YouTubeThumbnailMaker()
+    try:
+        res = maker.generate(
+            title=title,
+            badge_text=badge,
+            subtitle=subtitle,
+            project_id=project_id,
+        )
+        return res
+    except Exception as exc:
+        safe_log(f"[Server] Error generando miniatura: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================================
+# EDITOR DE ARCHIVOS REAL — El agente puede escribir/parchear archivos reales
+# ============================================================================
+
+_PROJECT_ROOT = Path(__file__).resolve().parent
+
+# Directorios permitidos para que el agente edite
+_ALLOWED_EDIT_DIRS = [
+    _PROJECT_ROOT / "web" / "static" / "css",
+    _PROJECT_ROOT / "web" / "static" / "js",
+    _PROJECT_ROOT / "web" / "templates",
+]
+
+def _resolve_safe_path(rel_path: str) -> Path:
+    """Resuelve un path relativo y verifica que esté dentro de un directorio permitido."""
+    target = (_PROJECT_ROOT / rel_path.lstrip("/\\")).resolve()
+    for allowed in _ALLOWED_EDIT_DIRS:
+        try:
+            target.relative_to(allowed.resolve())
+            return target
+        except ValueError:
+            continue
+    raise PermissionError(f"Ruta no permitida: {rel_path}")
+
+
+@app.post("/api/agent/edit-files")
+def agent_edit_files(payload: dict = Body(...)):
+    """
+    Permite al agente modificar archivos REALES del proyecto en disco.
+    Acepta una lista de operaciones:
+      - { "op": "write",      "path": "web/static/css/...", "content": "..." }
+      - { "op": "append",     "path": "web/static/css/...", "content": "..." }
+      - { "op": "replace",    "path": "...", "old": "...", "new": "..." }
+    Retorna { "ok": true, "files_written": [...], "reload": true }
+    """
+    import shutil, time
+
+    ops = payload.get("ops", [])
+    if not ops or not isinstance(ops, list):
+        raise HTTPException(status_code=400, detail="Se requiere lista de operaciones 'ops'.")
+
+    files_written = []
+    errors = []
+
+    for op in ops:
+        op_type = op.get("op", "write")
+        rel_path = op.get("path", "")
+        if not rel_path:
+            errors.append("Operación sin 'path'.")
+            continue
+
+        try:
+            target = _resolve_safe_path(rel_path)
+        except PermissionError as pe:
+            errors.append(str(pe))
+            continue
+
+        # Crear directorios si no existen
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Backup automático antes de modificar
+        if target.exists():
+            backup = target.with_suffix(target.suffix + f".bak")
+            shutil.copy2(str(target), str(backup))
+
+        try:
+            if op_type == "write":
+                content = op.get("content", "")
+                target.write_text(content, encoding="utf-8")
+                files_written.append(str(rel_path))
+
+            elif op_type == "append":
+                content = op.get("content", "")
+                existing = target.read_text(encoding="utf-8") if target.exists() else ""
+                target.write_text(existing + "\n" + content, encoding="utf-8")
+                files_written.append(str(rel_path))
+
+            elif op_type == "replace":
+                old_str = op.get("old", "")
+                new_str = op.get("new", "")
+                if not old_str:
+                    errors.append(f"Operación 'replace' en {rel_path} sin 'old'.")
+                    continue
+                existing = target.read_text(encoding="utf-8") if target.exists() else ""
+                if old_str not in existing:
+                    errors.append(f"Texto 'old' no encontrado en {rel_path}.")
+                    continue
+                updated = existing.replace(old_str, new_str, 1)
+                target.write_text(updated, encoding="utf-8")
+                files_written.append(str(rel_path))
+
+            else:
+                errors.append(f"Operación desconocida: {op_type}")
+
+        except Exception as write_err:
+            safe_log(f"[FileEditor] Error escribiendo {rel_path}: {write_err}")
+            errors.append(f"Error en {rel_path}: {write_err}")
+
+    if not files_written and errors:
+        raise HTTPException(status_code=500, detail="; ".join(errors))
+
+    return {
+        "ok": True,
+        "files_written": files_written,
+        "errors": errors,
+        "reload": True,  # El frontend recarga la página para aplicar cambios reales
+    }
+
+
+@app.get("/api/agent/read-file")
+def agent_read_file(path: str):
+    """Permite al agente leer un archivo del proyecto para inspeccionarlo antes de editar."""
+    try:
+        target = _resolve_safe_path(path)
+        if not target.exists():
+            raise HTTPException(status_code=404, detail=f"Archivo no encontrado: {path}")
+        content = target.read_text(encoding="utf-8", errors="replace")
+        return {"path": path, "content": content, "lines": content.count("\n") + 1}
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+
+
 if __name__ == "__main__":
     import uvicorn
     safe_log("[Server] AetherCut AI en http://127.0.0.1:8000")
     uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=False)
+

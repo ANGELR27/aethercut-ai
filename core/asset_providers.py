@@ -330,7 +330,7 @@ class YouTubeReactionAssetProvider(AssetProvider):
             return None
 
         query = cue.search_query_en or cue.concept
-        print(f"[YouTubeReactionProvider] Buscando clip de video para '{query}'...")
+        print(f"[YouTubeReactionProvider] Buscando clip de video para '{query}'...", flush=True)
 
         def _fetch_slice() -> Optional[Path]:
             target_path = target_dir / f"{cue.cue_id}_yt.mp4"
@@ -344,7 +344,7 @@ class YouTubeReactionAssetProvider(AssetProvider):
                     'format': 'bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
                     'outtmpl': str(target_path.with_suffix('')) + '.%(ext)s',
                     'download_ranges': yt_dlp.utils.download_range_func(None, [(start_slice, end_slice)]),
-                    'force_keyframes_at_cuts': True,
+                    'force_keyframes_at_cuts': False,
                     'quiet': True,
                     'no_warnings': True,
                     'socket_timeout': 18,
@@ -359,8 +359,15 @@ class YouTubeReactionAssetProvider(AssetProvider):
                     try:
                         ydl.download([search_query])
                     except Exception:
-                        # Fallback a búsqueda sin año si fue muy restrictivo
-                        ydl.download([f"ytsearch1:{query} 4k 1080p video"])
+                        try:
+                            # Fallback 1: búsqueda más amplia
+                            ydl.download([f"ytsearch1:{query} 4k 1080p video"])
+                        except Exception:
+                            try:
+                                # Fallback 2: búsqueda genérica sin restricciones
+                                ydl.download([f"ytsearch1:{query} video"])
+                            except Exception:
+                                pass
 
                 matches = list(target_dir.glob(f"{cue.cue_id}_yt.*"))
                 if matches and matches[0].exists() and matches[0].stat().st_size > 50000:
@@ -370,10 +377,10 @@ class YouTubeReactionAssetProvider(AssetProvider):
                         chosen.replace(final_mp4)
                         chosen = final_mp4
 
-                    print(f"[YouTubeReactionProvider] Clip H.264 limpio obtenido: {chosen.name} ({chosen.stat().st_size // 1024} KB)")
+                    print(f"[YouTubeReactionProvider] Clip H.264 limpio obtenido: {chosen.name} ({chosen.stat().st_size // 1024} KB)", flush=True)
                     return chosen
             except Exception as e:
-                print(f"[YouTubeReactionProvider] Falló descarga de clip para '{query}': {e}")
+                print(f"[YouTubeReactionProvider] Falló descarga de clip para '{query}': {e}", flush=True)
             return None
 
         return await asyncio.to_thread(_fetch_slice)

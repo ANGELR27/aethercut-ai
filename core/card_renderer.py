@@ -184,17 +184,17 @@ class InfoCardRenderer:
         has_photo = bool(image_path and Path(image_path).exists())
 
         # Dimensiones de alto impacto visual y legibilidad óptima en Full HD
-        card_w = 680 if not has_photo else 760
+        card_w = 840 if not has_photo else 920
         if self.portrait:
-            card_w = min(card_w, int(self.frame_w * 0.90))
+            card_w = min(card_w, int(self.frame_w * 0.92))
 
-        pad_x = 24
-        pad_y = 22
-        radius = 18
+        pad_x = 32
+        pad_y = 28
+        radius = 24
 
         # Layout horizontal si hay foto (Bento split)
-        photo_w = 160 if has_photo else 0
-        photo_gap = 20 if has_photo else 0
+        photo_w = 210 if has_photo else 0
+        photo_gap = 26 if has_photo else 0
 
         text_avail_w = card_w - (pad_x * 2) - photo_w - photo_gap
 
@@ -202,23 +202,23 @@ class InfoCardRenderer:
         title_lines = self._wrap(probe, headline, f_title, text_avail_w * scale, max_lines=2)
         body_lines = self._wrap(probe, body, f_body, text_avail_w * scale, max_lines=4)
 
-        title_lh = int(28 * scale)
-        body_lh = int(22 * scale)
-        badge_h = int(24 * scale)
+        title_lh = int(32 * scale)
+        body_lh = int(24 * scale)
+        badge_h = int(28 * scale)
 
         content_h_px = (
             badge_h
-            + int(10 * scale)
+            + int(12 * scale)
             + (len(title_lines) * title_lh)
-            + int(6 * scale)
+            + int(8 * scale)
             + (len(body_lines) * body_lh)
-            + int(10 * scale)
-            + int(14 * scale)
+            + int(12 * scale)
+            + int(16 * scale)
         )
         content_h = content_h_px // scale
 
         if has_photo:
-            photo_h = max(content_h, 115)
+            photo_h = max(content_h, 140)
             card_h = max(content_h + (pad_y * 2), photo_h + (pad_y * 2))
         else:
             card_h = content_h + (pad_y * 2)
@@ -367,11 +367,11 @@ class InfoCardRenderer:
         scale = 2  # Super-sampling para máxima nitidez
 
         # Fuentes calibradas de gran escala para legibilidad en Full HD
-        f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], 12 * scale)
-        f_stat = _font(["segoeuib.ttf", "arialbd.ttf"], 34 * scale)   # Cifra masiva de alto impacto
-        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], 20 * scale)  # Titular nítido
-        f_body = _font(["segoeui.ttf", "arial.ttf"], 14 * scale)      # Síntesis
-        f_src = _font(["segoeuib.ttf", "segoeui.ttf"], 11 * scale)    # Pie
+        f_badge = _font(["segoeuib.ttf", "arialbd.ttf"], 13 * scale)
+        f_stat = _font(["segoeuib.ttf", "arialbd.ttf"], 44 * scale)   # Cifra masiva de alto impacto
+        f_title = _font(["segoeuib.ttf", "arialbd.ttf"], 25 * scale)  # Titular nítido
+        f_body = _font(["segoeui.ttf", "arial.ttf"], 16 * scale)      # Síntesis
+        f_src = _font(["segoeuib.ttf", "segoeui.ttf"], 12 * scale)    # Pie
 
         # Colores Obsidian Glass Pro / Neon Studio
         # Fondo translúcido con gradiente de cristal ahumado profundo (sin opacar el video de fondo como bloque negro tosco)
@@ -390,9 +390,9 @@ class InfoCardRenderer:
         badge_txt_col = (255, 255, 255, 255)
         pip_col = (56, 189, 248, 255) if badge_tone != "amber" else (251, 191, 36, 255)
 
-        # 1. Renderizar gráfico infográfico profesional o mapa geopolítico
-        chart_w_logical = 205
-        chart_h_logical = 160
+        # 1. Renderizar gráfico infográfico profesional o mapa geopolítico (mayor tamaño y legibilidad)
+        chart_w_logical = 340
+        chart_h_logical = 260
         chart_img: Optional[Image.Image] = None
         try:
             from core.chart_generator import BroadcastChartGenerator
@@ -411,17 +411,17 @@ class InfoCardRenderer:
         has_chart = chart_img is not None
         has_photo = bool(image_path and Path(image_path).exists()) and not has_chart
 
-        # Proporción Bento áurea calibrada para video (~2.1:1 en Full HD 1920x1080)
-        card_w = 710
+        # Proporción Bento heroica centrada calibrada para Full HD 1920x1080 (1060px de presencia cinematográfica)
+        card_w = 1060
         if self.portrait:
-            card_w = min(card_w, int(self.frame_w * 0.92))
+            card_w = min(card_w, int(self.frame_w * 0.94))
 
-        pad_x = 28
-        pad_y = 26
-        radius = 22
+        pad_x = 36
+        pad_y = 32
+        radius = 28
 
-        visual_w = chart_w_logical if has_chart else (150 if has_photo else 0)
-        visual_gap = 24 if (has_chart or has_photo) else 0
+        visual_w = chart_w_logical if has_chart else (260 if has_photo else 0)
+        visual_gap = 36 if (has_chart or has_photo) else 0
 
         text_avail_w = card_w - (pad_x * 2) - visual_w - visual_gap
 
@@ -436,28 +436,28 @@ class InfoCardRenderer:
         title_lines = self._wrap(probe, headline, f_title, text_avail_w * scale, max_lines=2)
         body_lines = self._wrap(probe, clean_body or body, f_body, text_avail_w * scale, max_lines=3)
 
-        badge_h = int(24 * scale)
-        stat_h = int(40 * scale)
-        title_lh = int(25 * scale)
-        body_lh = int(19 * scale)
-        src_lh = int(15 * scale)
+        badge_h = int(28 * scale)
+        stat_h = int(52 * scale)
+        title_lh = int(34 * scale)
+        body_lh = int(24 * scale)
+        src_lh = int(18 * scale)
 
         # Altura calculada para textos con espaciado respirable
         text_content_h_px = (
             badge_h
-            + int(12 * scale)
+            + int(14 * scale)
             + stat_h
-            + int(8 * scale)
+            + int(10 * scale)
             + (len(title_lines) * title_lh)
-            + (int(6 * scale) if body_lines else 0)
+            + (int(10 * scale) if body_lines else 0)
             + (len(body_lines) * body_lh)
-            + int(12 * scale)
+            + int(16 * scale)
             + src_lh
         )
         text_content_h = text_content_h_px // scale
 
         if has_chart or has_photo:
-            visual_h = chart_h_logical if has_chart else 150
+            visual_h = chart_h_logical if has_chart else 240
             card_h = max(text_content_h + (pad_y * 2), visual_h + (pad_y * 2) + 16)
         else:
             card_h = text_content_h + (pad_y * 2)
@@ -804,8 +804,8 @@ class InfoCardRenderer:
         - Tipografía de alta fidelidad, padding respirable y sombra difusa suave
         """
         scale = 2
-        pad_x = 18 * scale
-        h_logical = 44
+        pad_x = 26 * scale
+        h_logical = 64
         H = h_logical * scale
         radius = (h_logical // 2) * scale
 
@@ -817,16 +817,16 @@ class InfoCardRenderer:
         }
         pip_col, tag_label = palette.get(kind.lower(), ((56, 189, 248, 255), "CLAVE"))
 
-        f_txt = _font(["segoeuib.ttf", "arialbd.ttf"], 14 * scale)
-        f_tag = _font(["segoeuib.ttf", "arialbd.ttf"], 10 * scale)
+        f_txt = _font(["segoeuib.ttf", "arialbd.ttf"], 20 * scale)
+        f_tag = _font(["segoeuib.ttf", "arialbd.ttf"], 13 * scale)
 
         probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
         clean_text = text.strip()
         txt_w = int(probe.textlength(clean_text, font=f_txt))
         tag_w = int(probe.textlength(tag_label, font=f_tag))
 
-        W = pad_x * 2 + tag_w + (22 * scale) + txt_w
-        W = max(int(220 * scale), W)
+        W = pad_x * 2 + tag_w + (28 * scale) + txt_w
+        W = max(int(280 * scale), W)
 
         im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         d = ImageDraw.Draw(im)

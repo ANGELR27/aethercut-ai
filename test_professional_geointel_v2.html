@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="file:///C:/Users/angel/.gemini/antigravity-ide/scratch/ai-video-editor/storage/cache/maplibre/maplibre-gl.css" />
+<script src="file:///C:/Users/angel/.gemini/antigravity-ide/scratch/ai-video-editor/storage/cache/maplibre/maplibre-gl.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .map-card {
+    width: 960px;
+    height: 540px;
+    position: relative;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 40px 100px rgba(0,0,0,0.98);
+    background: #04080f;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  #map {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  /* Subtle geospatial coordinate grid */
+  .grid-overlay {
+    position: absolute;
+    inset: 0;
+    background-image: 
+      linear-gradient(to right, rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 64px 64px;
+    pointer-events: none;
+    z-index: 3;
+  }
+  /* Left-side dark panel overlay */
+  .side-panel {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    width: 340px;
+    background: linear-gradient(to right, rgba(4,8,15,0.97) 72%, rgba(4,8,15,0.0) 100%);
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 0 28px 28px;
+    pointer-events: none;
+  }
+  .accent-bar {
+    position: absolute;
+    top: 0; left: 0;
+    width: 340px; height: 3px;
+    background: linear-gradient(to right, #0284c7, transparent);
+    z-index: 20;
+  }
+  /* Top-right status row */
+  .status-row {
+    position: absolute;
+    top: 22px; right: 22px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 10;
+  }
+  .status-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: #0284c7;
+    background: rgba(4,8,15,0.85);
+    border: 1px solid rgba(56,189,248,0.3);
+    border-radius: 2px;
+    padding: 5px 12px;
+    backdrop-filter: blur(8px);
+  }
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #0284c7;
+    box-shadow: 0 0 8px #0284c7;
+    flex-shrink: 0;
+  }
+  /* Coordinate readout top-right */
+  .coord-readout {
+    position: absolute;
+    top: 56px; right: 22px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: rgba(255,255,255,0.45);
+    letter-spacing: 0.8px;
+    z-index: 10;
+    text-align: right;
+    line-height: 1.6;
+    background: rgba(4,8,15,0.6);
+    padding: 4px 8px;
+    border-radius: 2px;
+    backdrop-filter: blur(6px);
+  }
+  /* Cartographic scale bar bottom-right */
+  .scale-bar {
+    position: absolute;
+    bottom: 22px; right: 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    z-index: 10;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 1.2px;
+  }
+  .scale-ticks {
+    width: 60px;
+    height: 4px;
+    border-left: 1.5px solid rgba(56,189,248,0.6);
+    border-right: 1.5px solid rgba(56,189,248,0.6);
+    border-bottom: 1.5px solid rgba(56,189,248,0.6);
+  }
+  /* Corner brackets */
+  .corner {
+    position: absolute;
+    width: 18px; height: 18px;
+    border-color: rgba(56,189,248,0.45);
+    border-style: solid;
+    z-index: 12;
+  }
+  .corner-tl { top: 14px; left: 14px; border-width: 1.5px 0 0 1.5px; }
+  .corner-tr { top: 14px; right: 14px; border-width: 1.5px 1.5px 0 0; }
+  .corner-bl { bottom: 14px; left: 14px; border-width: 0 0 1.5px 1.5px; }
+  .corner-br { bottom: 14px; right: 14px; border-width: 0 1.5px 1.5px 0; }
+  /* Side panel typography */
+  .panel-region {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #0284c7;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 10px;
+  }
+  .panel-region svg { flex-shrink: 0; }
+  .region-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, rgba(56,189,248,0.4), transparent);
+  }
+  .panel-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: #f0f4f8;
+    line-height: 1.15;
+    letter-spacing: -0.5px;
+    margin-bottom: 12px;
+  }
+  .panel-divider {
+    width: 100%;
+    height: 1px;
+    background: rgba(255,255,255,0.08);
+    margin-bottom: 12px;
+  }
+  .panel-desc {
+    font-size: 12px;
+    color: rgba(203,213,225,0.8);
+    line-height: 1.55;
+    margin-bottom: 16px;
+  }
+  .telemetry-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .tele-label {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    color: rgba(255,255,255,0.35);
+    text-transform: uppercase;
+  }
+  .tele-value {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+  }
+  /* MapLibre custom target reticle marker */
+  .target-marker {
+    width: 80px;
+    height: 80px;
+    position: relative;
+    pointer-events: none;
+  }
+  .radar-sweep {
+    position: absolute;
+    left: -40px; top: -40px;
+    width: 160px; height: 160px;
+    border-radius: 50%;
+    background: conic-gradient(from 40deg at 50% 50%, rgba(56,189,248,0.25) 0deg, rgba(56,189,248,0.04) 35deg, transparent 55deg);
+    pointer-events: none;
+  }
+  .ping-ring {
+    position: absolute;
+    left: -20px; top: -20px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    border: 1px solid rgba(56,189,248,0.25);
+  }
+  .ring-outer {
+    position: absolute;
+    left: 4px; top: 4px;
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    border: 1px dashed rgba(56,189,248,0.6);
+  }
+  .ring-inner {
+    position: absolute;
+    left: 22px; top: 22px;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(56,189,248,0.9);
+  }
+  .dot-core {
+    position: absolute;
+    left: 37px; top: 37px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #0284c7;
+    box-shadow: 0 0 12px #0284c7;
+  }
+  .hair-h {
+    position: absolute;
+    left: 12px; top: 40px;
+    width: 56px; height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(56,189,248,0.8) 40%, rgba(56,189,248,0.8) 60%, transparent 100%);
+  }
+  .hair-v {
+    position: absolute;
+    left: 40px; top: 12px;
+    width: 1px; height: 56px;
+    background: linear-gradient(180deg, transparent 0%, rgba(56,189,248,0.8) 40%, rgba(56,189,248,0.8) 60%, transparent 100%);
+  }
+</style>
+</head>
+<body>
+  <div class="map-card">
+    <div id="map"></div>
+    <div class="accent-bar"></div>
+    <div class="grid-overlay"></div>
+
+    <div class="corner corner-tl"></div>
+    <div class="corner corner-tr"></div>
+    <div class="corner corner-bl"></div>
+    <div class="corner corner-br"></div>
+
+    <div class="status-row">
+      <div class="status-dot"></div>
+      <div class="status-chip active">ORBITAL RECON // SAR-X SATELLITE</div>
+    </div>
+    <div class="coord-readout">
+      39.702° N, 44.299° E<br>
+      MAPLIBRE GL // ESRI IMAGERY
+    </div>
+
+    <div class="scale-bar">
+      <div class="scale-ticks"></div>
+      <span>50 KM</span>
+    </div>
+
+    <div class="side-panel">
+      <div class="panel-region">
+        <svg width="12" height="14" viewBox="0 0 12 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 0C3.24 0 1 2.24 1 5c0 3.75 5 9 5 9s5-5.25 5-9c0-2.76-2.24-5-5-5Zm0 6.75A1.75 1.75 0 1 1 6 3.25a1.75 1.75 0 0 1 0 3.5Z" fill="currentColor"/></svg>
+        Turquía / Región Oriental
+        <div class="region-line"></div>
+      </div>
+      <div class="panel-title">Formación Geológica Monte Ararat</div>
+      <div class="panel-divider"></div>
+      <div class="panel-desc">Estructura petrificada con simetría náutica y registros anómalos de magnetometría.</div>
+      <div class="telemetry-row">
+        <span class="tele-label">COORD</span>
+        <span class="tele-value">39.702° N, 44.299° E</span>
+      </div>
+      <div class="telemetry-row" style="margin-top: 6px;">
+        <span class="tele-label">ENGINE</span>
+        <span class="tele-value">MAPLIBRE GL 3D ORBITAL</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {
+          'esri-satellite': {
+            'type': 'raster',
+            'tiles': ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            'tileSize': 256
+          }
+        },
+        layers: [{
+          id: 'satellite-layer',
+          type: 'raster',
+          source: 'esri-satellite'
+        }]
+      },
+      center: [44.299, 39.702],
+      zoom: 7.2,
+      pitch: 38.0,
+      bearing: -14.0,
+      interactive: false,
+      attributionControl: false
+    });
+
+    const el = document.createElement('div');
+    el.className = 'target-marker';
+    el.innerHTML = `
+      <div class="radar-sweep"></div>
+      <div class="ping-ring"></div>
+      <div class="ring-outer"></div>
+      <div class="ring-inner"></div>
+      <div class="hair-h"></div>
+      <div class="hair-v"></div>
+      <div class="dot-core"></div>
+    `;
+
+    new maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([44.299, 39.702])
+      .addTo(map);
+  </script>
+</body>
+</html>

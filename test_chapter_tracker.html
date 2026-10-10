@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .tracker-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(15, 23, 42, 0.90);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    border-radius: 999px;
+    padding: 8px 24px;
+    color: #ffffff;
+  }
+  .ch-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+  .ch-pill.active {
+    color: #38bdf8;
+    text-shadow: 0 0 12px rgba(56, 189, 248, 0.6);
+  }
+  .ch-pill.past {
+    color: #94a3b8;
+  }
+  .ch-pill.future {
+    color: #64748b;
+  }
+  .pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 10px #38bdf8;
+  }
+  .divider-dot {
+    color: rgba(255, 255, 255, 0.2);
+    font-size: 10px;
+  }
+</style>
+</head>
+<body>
+  <div class="tracker-bar">
+    <div class="ch-pill past"><span>✓ 01 ENIGMA MILITAR</span></div><div class="divider-dot">───</div><div class="ch-pill active"><span class="pulse-dot"></span><span>02 DOCTRINA ENJAMBRE</span></div><div class="divider-dot">───</div><div class="ch-pill future"><span>03 IMPACTO 2026</span></div><div class="divider-dot">───</div><div class="ch-pill future"><span>04 CONCLUSIÓN</span></div>
+  </div>
+</body>
+</html>

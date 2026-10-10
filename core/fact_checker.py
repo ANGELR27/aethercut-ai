@@ -201,7 +201,7 @@ class FactChecker:
         )
         prompt = JUDGE_PROMPT.format(mode=mode, headline=card.headline, claim=card.claim, evidence=numbered)
 
-        # 1. Intentar con NVIDIA Nemotron 3.5 Lightning (Razonamiento profundo ultra-preciso)
+        # 1. Intentar con NVIDIA Kimi-k3 / Nemotron (Razonamiento profundo ultra-preciso)
         from config.settings import settings
         if settings.NVIDIA_API_KEY:
             try:
@@ -211,24 +211,29 @@ class FactChecker:
                     api_key=settings.NVIDIA_API_KEY,
                     timeout=30.0,
                 )
-                safe_log(f"[FactChecker] Auditando «{card.headline}» con NVIDIA Nemotron 3.5 Lightning...")
-                response = nv_client.chat.completions.create(
-                    model=settings.NVIDIA_MODEL,
-                    messages=[
+                active_model = getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
+                model_name = "Kimi-k3" if "kimi" in active_model.lower() else "Nemotron"
+                safe_log(f"[FactChecker] Auditando «{card.headline}» con {model_name} ({active_model})...")
+                call_kwargs = {
+                    "model": active_model,
+                    "messages": [
                         {"role": "system", "content": "Eres un auditor y verificador de hechos estricto. Responde siempre con JSON puro sin markdown ni explicaciones previas."},
                         {"role": "user", "content": prompt}
                     ],
-                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-                    temperature=0.1,
-                    max_tokens=1024,
-                )
+                    "temperature": 0.2,
+                    "max_tokens": 1024,
+                }
+                if "nemotron" in active_model.lower():
+                    call_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+
+                response = nv_client.chat.completions.create(**call_kwargs)
                 raw_text = response.choices[0].message.content or ""
                 parsed = JSONValidator.extract_and_parse(raw_text)
                 if parsed and isinstance(parsed, dict) and "verdict" in parsed:
-                    safe_log(f"[FactChecker] Veredicto exitoso de NVIDIA Nemotron: {parsed.get('verdict')}")
+                    safe_log(f"[FactChecker] Veredicto exitoso de {model_name}: {parsed.get('verdict')}")
                     return parsed
             except Exception as exc:
-                safe_log(f"[FactChecker] NVIDIA Nemotron no disponible ({exc}). Continuando con Gemini...")
+                safe_log(f"[FactChecker] Proveedor NVIDIA no disponible ({exc}). Continuando con Gemini...")
 
         # 2. Respaldo transparente en Gemini
         return JSONValidator.extract_and_parse(

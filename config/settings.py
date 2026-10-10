@@ -11,12 +11,20 @@ load_dotenv(BASE_DIR / ".env")
 class Settings:
     """Configuración global del sistema con inicialización de rutas y variables."""
 
+    BASE_DIR: Path = BASE_DIR
+
     # API Keys
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
     PIXABAY_API_KEY: str = os.getenv("PIXABAY_API_KEY", "")
     NVIDIA_API_KEY: str = os.getenv("NVIDIA_API_KEY", "")
-    NVIDIA_MODEL: str = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
+    NVIDIA_MODEL: str = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3")
+
+    # Multi-Agent Specialized Triad
+    GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
+    GLM_FLASH_API_KEY: str = os.getenv("GLM_FLASH_API_KEY", "")
+    KIMI_API_KEY: str = os.getenv("KIMI_API_KEY", "")
+
     # Modelo principal activo de Gemini para análisis y redacción
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 

@@ -175,16 +175,16 @@ class BroadcastChartGenerator:
         norm_vals = [v / max_v for v in vals]
 
         # Barras de fondo (pistas oscuras)
-        ax.barh(y_pos, [1.0, 1.0], height=0.36, color="#222222", alpha=0.6, edgecolor="#333333", linewidth=1)
+        ax.barh(y_pos, [1.0, 1.0], height=0.42, color="#1e293b", alpha=0.7, edgecolor="#334155", linewidth=1.2)
         # Barras de valor real
-        bars = ax.barh(y_pos, norm_vals, height=0.36, color=colors, edgecolor="none")
+        bars = ax.barh(y_pos, norm_vals, height=0.42, color=colors, edgecolor="none")
 
-        # Texto sobre las barras
+        # Texto sobre las barras nítido y legible
         for y, orig_val, col in zip(y_pos, labels, colors):
             ax.text(
-                0.04, y, f" {orig_val}",
+                0.05, y, f" {orig_val}",
                 va="center", ha="left",
-                color="#ffffff", fontsize=11, fontweight="bold",
+                color="#ffffff", fontsize=13, fontweight="bold",
                 fontfamily="sans-serif"
             )
 
@@ -223,9 +223,9 @@ class BroadcastChartGenerator:
         clamped_pct = min(100.0, max(0.0, pct if pct <= 100 else 100.0))
         fraction = clamped_pct / 100.0
 
-        # Fondo del anillo completo
+        # Fondo del anillo completo con trazo grueso y nítido
         theta_full = np.linspace(0, 2 * np.pi, 120)
-        ax.plot(np.cos(theta_full), np.sin(theta_full), color="#242426", lw=11, solid_capstyle="round")
+        ax.plot(np.cos(theta_full), np.sin(theta_full), color="#1e293b", lw=15, solid_capstyle="round")
 
         # Arco de progreso activo (desde arriba en sentido horario)
         start_angle = np.pi / 2
@@ -234,20 +234,20 @@ class BroadcastChartGenerator:
 
         # Color: Ámbar si es moderado, verde esmeralda si es alto, cian si es neutro
         prog_color = "#f59e0b" if pct < 50 else "#10b981"
-        ax.plot(np.cos(theta_prog), np.sin(theta_prog), color=prog_color, lw=11, solid_capstyle="round")
+        ax.plot(np.cos(theta_prog), np.sin(theta_prog), color=prog_color, lw=15, solid_capstyle="round")
 
         # Cifra central destacada
         display_text = f"{pct:g}%" if len(f"{pct:g}%") <= 6 else f"{pct:.1f}%"
         ax.text(
             0, 0.08, display_text,
             va="center", ha="center",
-            color="#ffffff", fontsize=17, fontweight="bold",
+            color="#ffffff", fontsize=22, fontweight="bold",
             fontfamily="sans-serif"
         )
         ax.text(
             0, -0.32, "MÉTRICA",
             va="center", ha="center",
-            color="#94a3b8", fontsize=8, fontweight="bold",
+            color="#cbd5e1", fontsize=10, fontweight="bold",
             fontfamily="sans-serif"
         )
 
@@ -304,48 +304,76 @@ class BroadcastChartGenerator:
         height_px: int,
         dpi: int,
     ) -> Optional[Image.Image]:
-        """Renderiza un indicador de datos visual futurista con anillo de cristal neón y métricas dinámicas."""
+        """
+        Renderiza un diagrama infográfico dinámico y contextual:
+        - Si es cuántica/superposición/binario ('0 y 1', 'qubit', 'nodo', 'simultáneo'): Dos estados entrelazados con ondas de probabilidad.
+        - Si es ciencia/átomo/energía: Diagrama orbital o espectrograma.
+        - De lo contrario: Ecualizador HUD de espectro dinámico multicapa.
+        """
         fig_w = width_px / dpi
         fig_h = height_px / dpi
 
         fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi, facecolor="none")
         ax.set_facecolor("none")
 
-        # 1. Indicador de 5 segmentos con gradiente luminoso y pistas de cristal
-        segments = 5
-        angles = np.linspace(0.85 * np.pi, 0.15 * np.pi, segments)
-        radii = np.linspace(0.65, 0.95, segments)
+        low_lbl = (stat_label or "").lower()
 
-        # Barra de progreso estilizada en arco
-        t = np.linspace(np.pi, 0, 100)
-        # Pista oscura de fondo
-        ax.plot(np.cos(t), np.sin(t), color="#1e293b", lw=8, alpha=0.7, solid_capstyle="round")
-        
-        # Pista activa en gradiente neón
-        t_active = np.linspace(np.pi, 0.25 * np.pi, 75)
-        ax.plot(np.cos(t_active), np.sin(t_active), color="#38bdf8", lw=8, solid_capstyle="round")
-        
-        # Segmento culmen en esmeralda
-        t_peak = np.linspace(0.40 * np.pi, 0.25 * np.pi, 20)
-        ax.plot(np.cos(t_peak), np.sin(t_peak), color="#10b981", lw=8, solid_capstyle="round")
+        # CASO 1: Mecánica Cuántica, Superposición o Dualidad ("0 y 1", "qubit", "simultáneo", "spin", "paradoja")
+        if any(k in low_lbl for k in ["0 y 1", "0 y 1 simultáneo", "cuántic", "qubit", "superposic", "estado", "nodo", "onda"]):
+            # Dibujar dos polos cuánticos entrelazados |0> y |1> con túnel de interferencia
+            # 1. Ondas de probabilidad resonantes en el fondo
+            x_wave = np.linspace(-1.3, 1.3, 200)
+            y_wave1 = 0.22 * np.sin(x_wave * 5.0)
+            y_wave2 = 0.22 * np.cos(x_wave * 5.0)
+            ax.plot(x_wave, y_wave1, color="#38bdf8", lw=2.2, alpha=0.55, ls="--")
+            ax.plot(x_wave, y_wave2, color="#10b981", lw=2.2, alpha=0.55)
+            ax.fill_between(x_wave, y_wave1, y_wave2, color="#38bdf8", alpha=0.10)
 
-        # Icono / Tag numérico en el centro
-        ax.text(
-            0, 0.18, "HUD METRIC",
-            va="center", ha="center",
-            color="#38bdf8", fontsize=7.5, fontweight="bold",
-            fontfamily="sans-serif"
-        )
-        ax.text(
-            0, -0.05, "VERIFICADO",
-            va="center", ha="center",
-            color="#94a3b8", fontsize=6, fontweight="bold",
-            fontfamily="sans-serif"
-        )
+            # 2. Nodo Estado |0> (Izquierda)
+            ax.scatter([-0.85], [0.0], color="#38bdf8", s=380, alpha=0.25, zorder=4)
+            ax.scatter([-0.85], [0.0], color="#0284c7", s=180, alpha=0.8, zorder=5)
+            ax.scatter([-0.85], [0.0], color="#ffffff", s=60, zorder=6)
+            ax.text(-0.85, 0.42, "|0⟩", color="#38bdf8", fontsize=15, fontweight="bold", ha="center", va="center")
 
-        ax.set_xlim(-1.15, 1.15)
-        ax.set_ylim(-0.25, 1.15)
-        ax.axis("off")
+            # 3. Nodo Estado |1> (Derecha)
+            ax.scatter([0.85], [0.0], color="#10b981", s=380, alpha=0.25, zorder=4)
+            ax.scatter([0.85], [0.0], color="#059669", s=180, alpha=0.8, zorder=5)
+            ax.scatter([0.85], [0.0], color="#ffffff", s=60, zorder=6)
+            ax.text(0.85, 0.42, "|1⟩", color="#10b981", fontsize=15, fontweight="bold", ha="center", va="center")
+
+            # 4. Estado de Superposición en el Núcleo Central
+            ax.scatter([0.0], [0.0], color="#f59e0b", s=220, alpha=0.35, zorder=7)
+            ax.scatter([0.0], [0.0], color="#ffffff", edgecolors="#f59e0b", lw=2.5, s=80, zorder=8)
+            ax.text(0.0, -0.42, "Ψ = α|0⟩ + β|1⟩", color="#ffffff", fontsize=11, fontweight="bold", ha="center", va="center")
+            ax.text(0.0, -0.72, "SUPERPOSICIÓN", color="#cbd5e1", fontsize=8.5, fontweight="bold", ha="center", va="center")
+
+            ax.set_xlim(-1.4, 1.4)
+            ax.set_ylim(-0.95, 0.95)
+            ax.axis("off")
+
+        else:
+            # CASO 2: Ecualizador HUD de espectro dinámico moderno con barras de actividad tecnológica
+            n_bars = 7
+            x_bars = np.linspace(-0.9, 0.9, n_bars)
+            # Alturas rítmicas con patrón estético
+            heights = [0.45, 0.75, 0.95, 1.15, 0.85, 0.60, 0.40]
+            colors = ["#0284c7", "#38bdf8", "#38bdf8", "#10b981", "#34d399", "#f59e0b", "#fbbf24"]
+
+            for x_b, h_b, col in zip(x_bars, heights, colors):
+                # Pista de fondo
+                ax.plot([x_b, x_b], [-0.7, 0.7], color="#1e293b", lw=12, solid_capstyle="round", alpha=0.7)
+                # Barra de señal activa
+                ax.plot([x_b, x_b], [-0.7, -0.7 + h_b], color=col, lw=12, solid_capstyle="round")
+                # Punto luminoso pico
+                ax.scatter([x_b], [-0.7 + h_b], color="#ffffff", s=28, zorder=5)
+
+            # Línea de umbral analítico
+            ax.plot([-1.1, 1.1], [0.25, 0.25], color="#f59e0b", lw=1.5, ls=":", alpha=0.85)
+
+            ax.text(0.0, -0.92, "HUD TELEMETRY // VERIFICADO", color="#cbd5e1", fontsize=8.5, fontweight="bold", ha="center", va="center")
+            ax.set_xlim(-1.25, 1.25)
+            ax.set_ylim(-1.15, 0.85)
+            ax.axis("off")
 
         buf = io.BytesIO()
         plt.tight_layout(pad=0.1)
@@ -438,18 +466,18 @@ class BroadcastChartGenerator:
         # 4. Pines y etiquetas de los países localizados
         for lon, lat, code in geo_nodes:
             # Radar pulse rings (anillos concéntricos luminosos)
-            ax.scatter([lon], [lat], color="#38bdf8", s=140, alpha=0.25, zorder=5)
-            ax.scatter([lon], [lat], color="#38bdf8", s=60, alpha=0.5, zorder=5)
+            ax.scatter([lon], [lat], color="#38bdf8", s=190, alpha=0.3, zorder=5)
+            ax.scatter([lon], [lat], color="#38bdf8", s=80, alpha=0.6, zorder=5)
             # Centro blanco brillante
-            ax.scatter([lon], [lat], color="#ffffff", edgecolors="#0284c7", lw=1.8, s=32, zorder=6)
+            ax.scatter([lon], [lat], color="#ffffff", edgecolors="#0284c7", lw=2.2, s=44, zorder=6)
             # Etiqueta con badge
-            y_offset = 7 if lat >= -30 else -12
+            y_offset = 8 if lat >= -30 else -14
             ax.text(
                 lon, lat + y_offset, code,
-                color="#ffffff", fontsize=8.5, fontweight="bold",
+                color="#ffffff", fontsize=11, fontweight="bold",
                 ha="center", va="center",
                 fontfamily="sans-serif",
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="#0f172a", edgecolor="#38bdf8", alpha=0.95, lw=1.0),
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#0f172a", edgecolor="#38bdf8", alpha=0.95, lw=1.2),
                 zorder=7,
             )
 
@@ -483,16 +511,18 @@ class BroadcastChartGenerator:
             return None
 
         from openai import OpenAI
+        active_model = getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
         prompt = (
-            f"Escribe un script de Python usando matplotlib (backend Agg, plt.subplots, facecolor='#0b0f19') "
-            f"para crear una infografía cinematográfica premium sobre:\n"
+            f"Eres un diseñador y desarrollador frontend/UI/UX senior de élite. Escribe un script de Python usando matplotlib (backend Agg, plt.subplots) "
+            f"para crear una infografía cinematográfica premium, moderna y pulida con estilo Bento Obsidian Glass y Dark Mode sobre:\n"
             f"Tema: {topic}\n"
             f"Dato clave: {stat_value}\n"
             f"Titular: {headline}\n\n"
-            f"Requisitos estrictos:\n"
+            f"Requisitos de diseño estricto:\n"
             f"- Dimensiones: {width_px}x{height_px} px (dpi=150, figsize=({width_px/150:.1f}, {height_px/150:.1f})).\n"
-            f"- Fondo oscuro profesional '#0b0f19', texto blanco '#f8fafc', detalles en cian '#38bdf8' y esmeralda '#10b981'.\n"
-            f"- Incluye barras, métricas o visualización de datos limpia y moderna.\n"
+            f"- Fondo negro mate puro '#08090d', curvas y barras con gradientes sutiles en cian '#38bdf8', esmeralda '#10b981' o ámbar '#f59e0b'.\n"
+            f"- Tipografía limpia, textos contrastados en blanco '#f8fafc' y gris azulado '#94a3b8'.\n"
+            f"- Incluye visualización de datos de alto impacto (barras redondeadas, anillos o tarjetas de métrica).\n"
             f"- El script debe asignar la figura a la variable 'fig'.\n"
             f"- Responde ÚNICAMENTE con el código Python dentro de un bloque ```python ... ``` sin comentarios ni explicaciones adicionales."
         )
@@ -501,16 +531,16 @@ class BroadcastChartGenerator:
             client = OpenAI(
                 base_url="https://integrate.api.nvidia.com/v1",
                 api_key=settings.NVIDIA_API_KEY,
-                timeout=25.0,
+                timeout=35.0,
             )
             resp = client.chat.completions.create(
-                model=getattr(settings, "NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct"),
+                model=active_model,
                 messages=[
-                    {"role": "system", "content": "Eres un programador experto en visualización de datos con Matplotlib."},
+                    {"role": "system", "content": "Eres un programador experto en diseño visual e infografías con Matplotlib en Python."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2,
-                max_tokens=1500,
+                temperature=0.3,
+                max_tokens=2500,
             )
             raw_code = resp.choices[0].message.content or ""
             # Extraer bloque de código
