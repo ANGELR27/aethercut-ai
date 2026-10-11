@@ -48,11 +48,11 @@
                         <span class="agent-model-desc">Auditoría lógica y consistencia</span>
                     </button>
 
-                    <!-- MODELO 4: Gemini 2.5 Flash (ACTIVO POR DEFECTO — más rápido y multimodal) -->
+                    <!-- MODELO 4: Gemini Flash (ACTIVO POR DEFECTO — el nombre real se carga desde el servidor) -->
                     <button type="button" class="agent-model-card active" data-model="gemini">
                         <div class="agent-model-card-top">
                             <span class="agent-model-dot" style="background:#f59e0b;"></span>
-                            <span class="agent-model-name">Gemini 2.5 Flash</span>
+                            <span class="agent-model-name">Gemini 3.6 Flash</span>
                             <span class="agent-model-badge" style="background:rgba(245,158,11,0.2); color:#fbbf24;">⚡ Recomendado</span>
                         </div>
                         <span class="agent-model-desc">Multimodal, editorial y más rápido</span>
@@ -60,8 +60,16 @@
                 </div>
             </div>
 
+            <!-- CHATS GUARDADOS (persistencia: hasta 20 conversaciones) -->
+            <div class="agent-sb-section agent-sb-chats">
+                <div class="agent-sb-heading">CHATS GUARDADOS</div>
+                <div class="agent-saved-chats" id="agentSavedChatsList">
+                    <span class="agent-chats-empty">Sin chats guardados todavía</span>
+                </div>
+            </div>
+
             <!-- ACCIONES RÁPIDAS DE LA APP -->
-            <div class="agent-sb-section" style="margin-top:auto;">
+            <div class="agent-sb-section">
                 <div class="agent-sb-heading">ACCIONES DIRECTAS</div>
                 <div class="agent-quick-actions">
                     <button type="button" class="agent-quick-btn" data-prompt="Crea una miniatura para YouTube de alta calidad y buena retención para el video actual">
@@ -103,7 +111,7 @@
                 <div class="agent-header-left">
                     <div class="agent-model-indicator-pill" id="agentHeaderModelPill">
                         <span class="agent-pill-dot" id="agentHeaderDot" style="background:#f59e0b;"></span>
-                        <span class="agent-pill-name" id="agentHeaderModelName">Gemini 2.5 Flash</span>
+                        <span class="agent-pill-name" id="agentHeaderModelName">Gemini 3.6 Flash</span>
                     </div>
                     <span class="agent-header-status">
                         <span class="agent-live-beacon"></span> Control de la App Activo
@@ -191,44 +199,20 @@
                         </svg>
                     </div>
                     <div class="agent-msg-body">
-                        <div class="agent-msg-author">AetherCopilot <span>Gemini 2.5 Flash</span></div>
-                        <div class="agent-msg-content">
-                            <p>¡Hola! Soy tu <strong>Agente Autónomo de AetherCut Studio</strong>. Tengo control total sobre la aplicación:</p>
-                            <ul>
-                                <li>🎬 <strong>Lanzar producciones:</strong> <em>"Pon a hacer este proyecto sobre robots asesinos de 3 minutos en horizontal"</em></li>
-                                <li>🖼️ <strong>Miniaturas YouTube:</strong> <em>"Crea una miniatura de alta retención para YouTube"</em></li>
-                                <li>🧭 <strong>Navegación en vivo:</strong> <em>"Llévame a la mesa de edición y timeline"</em></li>
-                                <li>🎨 <strong>Control de UI:</strong> <em>"Cambia el color de los botones a cian o ajusta los pop-ups"</em></li>
-                            </ul>
-                            <p>Puedes cambiar entre los modelos de <strong>GLM, Kimi y Gemini</strong> en cualquier momento desde la lista lateral.</p>
-                        </div>
+                        <div class="agent-msg-author">AetherCopilot <span>Gemini 3.6 Flash</span></div>
+                    <div class="agent-msg-content">
+                        <p>¡Hola! Soy <strong>AetherCopilot</strong>, el agente de AetherCut Studio. Puedo <strong>crear videos con datos reales</strong>, generar miniaturas, controlar la interfaz y editar mi propio código en vivo. Selecciona un modelo y pídeme lo que necesites.</p>
+                    </div>
                     </div>
                 </div>
             </div>
 
-            <!-- BARRA DE SUGERENCIAS Y CONTEXTO RÁPIDO ESTILO ANTIGRAVITY -->
-            <div class="agent-suggestions-bar" id="agentSuggestionsBar">
-                <button type="button" class="agent-sugg-chip" data-prompt="mejora el diseño del sidebard lateral.. estilo mas profesional, negro mate con sombras sutiles azul oscuro y blanco e iconos profesionales">🎨 Sidebar Matte Dark Pro</button>
-                <button type="button" class="agent-sugg-chip" data-prompt="Inspecciona el archivo @sidebar y muestra su estructura de código">📁 @sidebar</button>
-                <button type="button" class="agent-sugg-chip" data-prompt="Inspecciona los estilos en @css theme matte-dark.css">🎨 @css</button>
-                <button type="button" class="agent-sugg-chip" data-prompt="Crea una miniatura para YouTube de alta calidad y buena retención para el video">🖼️ Miniatura YouTube Pro</button>
-                <button type="button" class="agent-sugg-chip" data-prompt="Pon a hacer este proyecto con el tema Agencias internacionales advierten sobre peligro de 'robots asesinos' con duracion de 3 minutos y formato 16:9 horizontal">🚀 Emitir 3 min Robots</button>
-                <button type="button" class="agent-sugg-chip" data-prompt="Llévame a la mesa de edición y timeline">🎬 Ver Mesa &amp; Timeline</button>
-            </div>
-
-            <!-- ÁREA DE ENTRADA PROMPT (ESTILO ANTIGRAVITY PAIR PROGRAMMER) -->
+            <!-- ÁREA DE ENTRADA PROMPT -->
             <div class="agent-input-wrapper">
-                <div class="agent-context-toolbar" style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
-                    <span style="font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Contexto @:</span>
-                    <button type="button" class="agent-context-tag-btn" onclick="const inp=document.getElementById('agentPromptInput'); if(inp){inp.value+=' @sidebar '; inp.focus();}" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); color:#38bdf8; font-size:11px; padding:2px 7px; border-radius:6px; cursor:pointer; font-family:'Geist Mono', monospace;">@sidebar</button>
-                    <button type="button" class="agent-context-tag-btn" onclick="const inp=document.getElementById('agentPromptInput'); if(inp){inp.value+=' @timeline '; inp.focus();}" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); color:#38bdf8; font-size:11px; padding:2px 7px; border-radius:6px; cursor:pointer; font-family:'Geist Mono', monospace;">@timeline</button>
-                    <button type="button" class="agent-context-tag-btn" onclick="const inp=document.getElementById('agentPromptInput'); if(inp){inp.value+=' @css '; inp.focus();}" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); color:#38bdf8; font-size:11px; padding:2px 7px; border-radius:6px; cursor:pointer; font-family:'Geist Mono', monospace;">@css</button>
-                    <button type="button" class="agent-context-tag-btn" onclick="const inp=document.getElementById('agentPromptInput'); if(inp){inp.value+=' @player '; inp.focus();}" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); color:#38bdf8; font-size:11px; padding:2px 7px; border-radius:6px; cursor:pointer; font-family:'Geist Mono', monospace;">@player</button>
-                </div>
                 <form class="agent-prompt-box" id="agentPromptForm" onsubmit="return false;">
                     <textarea id="agentPromptInput" class="agent-prompt-textarea" rows="1" placeholder="Pídele al agente editar código, diseñar UI o controlar el estudio... (Enter para enviar)"></textarea>
                     <div class="agent-prompt-tools">
-                        <span class="agent-prompt-model-tag" id="agentInputModelTag">Gemini 2.5 Flash</span>
+                        <span class="agent-prompt-model-tag" id="agentInputModelTag">Gemini 3.6 Flash</span>
                         <button type="submit" class="agent-btn-send" id="agentBtnSend" title="Enviar mensaje">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                                 <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -237,7 +221,7 @@
                     </div>
                 </form>
                 <div class="agent-input-footer">
-                    AetherCopilot tiene control directo sobre la mesa, timelines, renders y diseño de la interfaz.
+                    Los chats se guardan automáticamente (se conservan los últimos 20).
                 </div>
             </div>
         </main>
@@ -265,5 +249,5 @@
         </svg>
     </div>
     <span class="agent-fab-label">Agente IA</span>
-    <span class="agent-fab-model-pill" id="agentFabModelPill">Gemini 2.5</span>
+    <span class="agent-fab-model-pill" id="agentFabModelPill">Gemini 3.6</span>
 </button>

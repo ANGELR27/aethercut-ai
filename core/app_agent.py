@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +15,67 @@ from config.settings import settings
 from core.llm import LLMClient, safe_log
 from core.multiagent.models import AgentModelConnector
 from core.thumbnail_maker import YouTubeThumbnailMaker
+
+# Raíz del proyecto para resolver rutas de lectura/edición de forma segura.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Directorios donde el agente puede LEER código (conocimiento total de la plataforma).
+_ALLOWED_READ_DIRS = ["web", "core", "config", "utils", "tests"]
+_ALLOWED_READ_FILES = ["server.py", "cancellation.py", "process_runner.py"]
+# Patrones prohibidos: secretos, backups y datos del usuario nunca salen al chat.
+_FORBIDDEN_READ_PARTS = (".env", ".git", "__pycache__", "storage", "node_modules", ".bak")
+
+
+def _safe_read_target(rel_path: str) -> Optional[Path]:
+    """Resuelve una ruta de lectura del agente y la valida contra directorios permitidos.
+
+    Impide que el modelo lea secretos (.env), backups o datos del usuario (storage).
+    Devuelve None si la ruta no está permitida.
+    """
+    if not rel_path:
+        return None
+    clean = rel_path.strip().replace("\\", "/").lstrip("/")
+    low = clean.lower()
+    if any(part in low for part in _FORBIDDEN_READ_PARTS):
+        return None
+    target = (_PROJECT_ROOT / clean).resolve()
+    try:
+        target.relative_to(_PROJECT_ROOT.resolve())
+    except ValueError:
+        return None
+    allowed_roots = [_PROJECT_ROOT / d for d in _ALLOWED_READ_DIRS]
+    if not any(
+        True for root in allowed_roots
+        if root.exists() and (target == root or root in target.parents)
+    ) and clean not in _ALLOWED_READ_FILES:
+        return None
+    return target
+
+
+def _iter_readable_code_files(max_files: int = 500) -> List[Path]:
+    """Devuelve los archivos de código legibles del proyecto para lectura/búsqueda."""
+    files: List[Path] = []
+    for name in _ALLOWED_READ_FILES:
+        candidate = _PROJECT_ROOT / name
+        if candidate.is_file():
+            files.append(candidate)
+    for dirname in _ALLOWED_READ_DIRS:
+        root = _PROJECT_ROOT / dirname
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if len(files) >= max_files:
+                return files
+            if not path.is_file():
+                continue
+            low = str(path).lower()
+            if any(part in low for part in _FORBIDDEN_READ_PARTS):
+                continue
+            if path.suffix.lower() not in {".py", ".js", ".html", ".css", ".json", ".md"}:
+                continue
+            if path.stat().st_size > 400_000:
+                continue
+            files.append(path)
+    return files
 
 
 SYSTEM_PROMPT_AGENT = """Eres AetherCopilot, el agente inteligente autónomo de AetherCut AI Video Studio.
@@ -61,7 +123,11 @@ Tienes acceso total a la plataforma y a sus archivos de código: puedes controla
 13. highlight_element → { "type": "highlight_element", "selector": "...", "color"?: "#hex" }
 14. set_playback → { "type": "set_playback", "action": "play"|"pause"|"seek", "time"?: 30 }
 15. modify_timeline_card → { "type": "modify_timeline_card", "card_id"?: "card-2", "headline": "...", "stat_value"?: "...", "body"?: "...", "style"?: "obsidian_bento"|"tactical_amber"|"square_emerald"|"quote"|"flag", "badge"?: "..." }
-   Modifica la tarjeta Bento / Cita / Bandera de la línea de tiempo seleccionada o indicada (cambia titular, cifra, estilo gráfico o insignia).
+    Modifica la tarjeta Bento / Cita / Bandera de la línea de tiempo seleccionada o indicada (cambia titular, cifra, estilo gráfico o insignia).
+16. search_code → { "type": "search_code", "pattern": "regex", "glob"?: "*.py" }
+    Busca un patrón (expresión regular) en TODO el código de la plataforma (server.py, core/, web/, config/, utils/, tests/).
+    Úsala ANTES de edit_file cuando no sepas en qué archivo está algo: localiza IDs, clases CSS, funciones o endpoints.
+    Devuelve archivo:linea con el texto que coincide. Ejemplo: buscar "agentBtnSend" o "def streamer" o "prism-sidebar".
 
 ━━━ REGLAS CRÍTICAS DE AUTONOMÍA Y EDICIÓN (ESTILO ANTIGRAVITY) ━━━
 • EDICIÓN DIRECTA EN DISCO: Cuando el usuario pida mejorar o cambiar el diseño (por ejemplo el sidebar lateral, colores, sombras, fuentes, componentes o diseño):
@@ -69,9 +135,10 @@ Tienes acceso total a la plataforma y a sus archivos de código: puedes controla
   DEBES GENERAR SIEMPRE la acción 'edit_file' en tu lista 'actions' apuntando a `web/static/css/theme/matte-dark.css` (o al template correspondiente).
   ⚠️ NUNCA escribas textos de borrador o planes humanos como "Plan: 1. edit_file...", "Voy a hacer: Replace...". Todo cambio debe ir como acción JSON ejecutable.
   De esta forma, la plataforma aplicará el cambio inmediatamente en el disco y en vivo en la pantalla del usuario.
-• LECTURA DE CONTEXTO: En el contexto se te proporcionarán fragmentos de código de los archivos relevantes para que conozcas las clases CSS e IDs existentes exactos.
+• LECTURA DE CONTEXTO: En el contexto se te proporcionarán fragmentos de código de los archivos relevantes para que conozcas las clases CSS e IDs existentes exactos. También verás las TAREAS ACTIVAS del servidor (ediciones/renderizaciones en curso) y los PROYECTOS guardados con su estado. Cítalos cuando el usuario pregunte por el estado de la plataforma.
 • MEMORIA: Recuerdas el historial de conversación. Úsalo para dar respuestas coherentes y continuas.
 • TRASLADO AUTÓNOMO: Al crear proyectos o modificar mesa/timeline, navega automáticamente a "studio".
+• MODO REN ACTIVO: Cuando el estado diga "Modo REN: ACTIVO" hay un "Elemento objetivo" seleccionado en pantalla por el usuario. Para CUALQUIER cambio visual sobre ese elemento DEBES incluir SIEMPRE una acción ren_mutate con ese selector EXACTO (operación "style" con el objeto "styles" de propiedades CSS → valor), además del edit_file que consolide el cambio en el tema. "styles" debe ser un OBJETO JSON ({"background": "#06b6d4"}), nunca un string. NUNCA respondas solo con texto describiendo un cambio visual: si no emites la acción, la pantalla no cambia.
 
 ━━━ FORMATO OBLIGATORIO (JSON puro, sin texto fuera del JSON) ━━━
 {
@@ -82,19 +149,8 @@ Tienes acceso total a la plataforma y a sus archivos de código: puedes controla
 
 
 
-class _NimSlowError(Exception):
-    """Excepción interna: el modelo NIM tarda >12s. Contiene job_id para reutilizar el future."""
-    def __init__(self, job_id: str, model_name: str):
-        self.job_id = job_id
-        self.model_name = model_name
-        super().__init__(f"NIM slow: {model_name} job_id={job_id}")
-
-
 class AppAgentController:
     """Controlador unificado del Agente — v2 con memoria, Gemini-first y 11 herramientas."""
-
-    # Jobs pendientes de NIM: {job_id: {future, executor, conn, started_at, hard_timeout}}
-    _pending_nim_jobs: Dict[str, Any] = {}
 
     AVAILABLE_MODELS = [
         {
@@ -135,7 +191,14 @@ class AppAgentController:
         self.thumbnail_maker = YouTubeThumbnailMaker()
 
     def get_models_list(self) -> List[Dict[str, Any]]:
-        return self.AVAILABLE_MODELS
+        """Lista dinámica: el nombre de Gemini refleja el modelo real configurado en .env."""
+        raw = (settings.GEMINI_MODEL or "gemini-3.6-flash").replace("gemini-", "")
+        gemini_name = f"Gemini {raw.replace('-', ' ').title()}"
+        models = [dict(m) for m in self.AVAILABLE_MODELS]
+        for m in models:
+            if m["id"] == "gemini":
+                m["name"] = gemini_name
+        return models
 
     def _format_history_for_prompt(self, history: List[Dict[str, Any]]) -> str:
         """Formatea el historial de conversación como contexto para el modelo."""
@@ -157,13 +220,16 @@ class AppAgentController:
                 doc = json.loads(manifest.read_text(encoding="utf-8"))
                 pid = doc.get("id")
                 res = doc.get("result") or {}
-                name = doc.get("original_name") or res.get("title") or (doc.get("options") or {}).get("topic") or "Video sin nombre"
+                opts = doc.get("options") or {}
+                name = doc.get("original_name") or res.get("title") or opts.get("topic") or "Video sin nombre"
                 projects.append({
                     "id": pid,
                     "name": name,
                     "status": doc.get("status", "desconocido"),
                     "updated_at": doc.get("updated_at") or doc.get("created_at") or "",
                     "duration": res.get("duration", 0),
+                    "aspect_ratio": opts.get("aspect_ratio") or res.get("aspect_ratio") or "16:9",
+                    "has_result": bool(doc.get("result")),
                 })
             except Exception:
                 continue
@@ -395,12 +461,26 @@ class AppAgentController:
             }
         }
 
-    def _call_model(self, model_id: str, prompt: str, system_prompt: str) -> tuple[str, str]:
-        """Invoca el conector adecuado. Gemini es la primera opción por velocidad y fiabilidad."""
+    def _call_model(self, model_id: str, prompt: str, system_prompt: str,
+                    on_event: Optional[Any] = None) -> tuple[str, str]:
+        """Invoca el conector adecuado. Gemini es la primera opción por velocidad y fiabilidad.
+
+        on_event permite emitir el razonamiento del modelo EN TIEMPO REAL mientras
+        piensa (streaming hacia la interfaz vía SSE).
+        """
+
+        def emit(payload: Dict[str, Any]) -> None:
+            if on_event:
+                try:
+                    on_event(payload)
+                except Exception:
+                    pass
+
         m_id = (model_id or "gemini").lower()
 
         if "gemini" in m_id:
             try:
+                emit({"type": "status", "message": "Razonando con Gemini…"})
                 client = LLMClient()
                 resp = client.generate(f"{system_prompt}\n\n{prompt}", json_mode=True)
                 return resp, ""
@@ -408,7 +488,7 @@ class AppAgentController:
                 safe_log(f"[AppAgent] Error con Gemini: {exc}. Fallback a NIM.")
                 m_id = "glm-5.3-flash"
 
-        # NIM: GLM / Kimi con timeout 6s y failover a Gemini
+        # NIM: GLM / Kimi con failover automático a Gemini
         if "kimi" in m_id:
             key = getattr(settings, "KIMI_API_KEY", "") or getattr(settings, "NVIDIA_API_KEY", "")
             conn = AgentModelConnector(model_name="moonshotai/kimi-k3", api_key=key, role_title="Kimi-k3")
@@ -420,10 +500,19 @@ class AppAgentController:
             conn = AgentModelConnector(model_name="z-ai/glm-5.3", api_key=key, role_title="GLM-5.3")
 
         import concurrent.futures
-        import concurrent.futures, threading, time
 
-        WARN_TIMEOUT = 45.0   # Segundos de espera para modelos profundos (GLM / Kimi)
-        HARD_TIMEOUT = 120.0  # Timeout máximo absoluto
+        # El modelo seleccionado corre hasta responder (sin tarjeta de
+        # "esperar / cambiar de modelo": si el usuario quiere otro, lo elige
+        # en la lista lateral). Tope de seguridad de 90 s; si lo agota o falla,
+        # failover automático a Gemini.
+        MODEL_TIMEOUT = 90.0
+
+        emit({"type": "status", "message": f"Razonando con {conn.role_title}…"})
+
+        def on_reasoning(accumulated: str) -> None:
+            # El conector entrega el texto acumulado: se reenvía tal cual y la
+            # interfaz lo pinta progresivamente (pensamiento en tiempo real).
+            emit({"type": "reasoning", "text": accumulated})
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = executor.submit(
@@ -432,30 +521,16 @@ class AppAgentController:
             user_prompt=prompt,
             max_tokens=1200,
             json_mode=True,
+            on_reasoning=on_reasoning if on_event else None,
         )
 
-        # Esperar 12s: si el modelo no responde, devolver nim_slow para que el usuario decida
         try:
-            resp = future.result(timeout=WARN_TIMEOUT)
+            resp = future.result(timeout=MODEL_TIMEOUT)
             executor.shutdown(wait=False)
             return resp, conn.last_reasoning or ""
-        except concurrent.futures.TimeoutError:
-            # El modelo NIM sigue procesando. Guardamos el future para reutilizarlo si el usuario elige esperar.
-            import uuid as _uuid
-            job_id = _uuid.uuid4().hex[:10]
-            AppAgentController._pending_nim_jobs[job_id] = {
-                "future": future,
-                "executor": executor,
-                "conn": conn,
-                "started_at": time.time(),
-                "hard_timeout": HARD_TIMEOUT,
-                "user_message": prompt,
-            }
-            safe_log(f"[AppAgent] {m_id} sigue pensando tras 12s → job_id={job_id}. Esperando decisión del usuario.")
-            raise _NimSlowError(job_id, conn.role_title)
         except Exception as exc:
             executor.shutdown(wait=False)
-            safe_log(f"[AppAgent] {m_id} falló: {exc}. Failover a Gemini.")
+            safe_log(f"[AppAgent] {m_id} falló o agotó el tiempo: {exc}. Failover a Gemini.")
             try:
                 client = LLMClient()
                 resp = client.generate(f"{system_prompt}\n\n{prompt}", json_mode=True)
@@ -553,14 +628,128 @@ class AppAgentController:
         # Permitir que el MODELO DE INTELIGENCIA ARTIFICIAL razone libremente.
         return None
 
+    # Paleta REN: palabras clave → estilos CSS listos para aplicar en vivo.
+    _REN_COLOR_KEYWORDS: List[tuple] = [
+        (("cian", "cyan", "turquesa", "azul claro"), "#06b6d4"),
+        (("verde", "esmeralda"), "#10b981"),
+        (("morado", "purpura", "púrpura", "violeta"), "#a855f7"),
+        (("amarillo", "ambar", "ámbar", "dorado"), "#f59e0b"),
+        (("rojo", "carmesi", "carmesí"), "#ef4444"),
+        (("rosa", "rosado", "fucsia"), "#f472b6"),
+        (("blanco", "claro"), "#f8fafc"),
+        (("negro", "oscuro", "mate"), "#0b0e14"),
+        (("azul", "blue"), "#3b82f6"),
+    ]
+
+    def _ren_styles_from_message(self, message: str) -> tuple:
+        """Extrae estilos CSS de una orden natural en Modo REN (garantía de ejecución).
+
+        Devuelve (styles_dict, operacion, detecto_algo). Se usa cuando el modelo
+        respondió con texto pero NO emitió la acción ren_mutate: sin esta garantía
+        el usuario ve "listo" en el chat pero la pantalla no cambia.
+        """
+        low = (message or "").lower()
+        # Normalizar acentos: "muéstralo" → "muestralo" para que las raíces coincidan.
+        import unicodedata
+        low = unicodedata.normalize("NFKD", low).encode("ascii", "ignore").decode()
+        styles: Dict[str, str] = {}
+        op = "style"
+        matched = False
+
+        # Color explícito en hexadecimal (#06b6d4)
+        hex_m = re.search(r"#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b", message or "")
+        color = None
+        if hex_m:
+            color = hex_m.group(0)
+            matched = True
+        else:
+            for keywords, value in self._REN_COLOR_KEYWORDS:
+                if any(k in low for k in keywords):
+                    color = value
+                    matched = True
+                    break
+        if color:
+            styles.update({
+                "color": color,
+                "border-color": color,
+                "box-shadow": f"0 0 18px {color}66",
+            })
+
+        # Operaciones especiales (raíces sin acentos: oculta, elimina, muestra…)
+        if any(k in low for k in ["oculta", "esconde", "hide"]):
+            op = "hide"
+            matched = True
+        elif any(k in low for k in ["elimina", "quita", "borra", "remove"]):
+            op = "remove"
+            matched = True
+        elif any(k in low for k in ["muestra", "ensena", "restaura", "show", "activa de nuevo", "reactiva"]):
+            op = "show"
+            matched = True
+        elif any(k in low for k in ["mas grande", "ampliar", "agrandar", "escala"]):
+            op = "style"
+            styles["transform"] = "scale(1.1)"
+            styles["transform-origin"] = "center"
+            matched = True
+        elif any(k in low for k in ["mas pequeno", "reducir", "encoger"]):
+            op = "style"
+            styles["transform"] = "scale(0.9)"
+            styles["transform-origin"] = "center"
+            matched = True
+        elif any(k in low for k in ["neon", "glow", "brillo", "brillante"]):
+            op = "style"
+            styles["box-shadow"] = "0 0 28px rgba(6,182,212,0.65)"
+            styles["border-color"] = "#38bdf8"
+            matched = True
+        elif any(k in low for k in ["redondea", "redondeado", "rounded"]):
+            op = "style"
+            styles["border-radius"] = "14px"
+            matched = True
+
+        return styles, op, matched
+
+    def _ensure_ren_guarantee(self, message: str, ctx: Dict[str, Any], final_actions: List[Any], reply: str) -> str:
+        """Garantía de cambio visual: si hay un elemento objetivo (seleccionado en
+        Modo REN o recordado de la última selección) y el modelo no emitió
+        ren_mutate ni edit_file, sintetizamos la acción con estilos extraídos de
+        la orden natural. Así el usuario puede iterar ("ahora en rojo", "más
+        grande") sin volver a seleccionar el elemento. Devuelve el reply ampliado.
+        """
+        if not ctx.get("target_selector"):
+            return reply
+        target_sel = str(ctx.get("target_selector"))
+        has_ren = any(
+            isinstance(a, dict) and a.get("type") == "ren_mutate"
+            and str(a.get("selector", "")) == target_sel
+            for a in final_actions
+        )
+        has_edit = any(isinstance(a, dict) and a.get("type") == "edit_file" for a in final_actions)
+        if has_ren or has_edit:
+            return reply
+        ren_styles, ren_op, ren_matched = self._ren_styles_from_message(message)
+        if not ren_matched:
+            return reply
+        final_actions.append({
+            "type": "ren_mutate",
+            "selector": target_sel,
+            "operation": ren_op,
+            "styles": ren_styles,
+        })
+        return reply + f"\n\n🛠️ **Modo REN:** cambio aplicado en vivo sobre `{target_sel}`."
+
     def process_message(
         self,
         message: str,
         model_id: str = "gemini",
         app_context: Optional[Dict[str, Any]] = None,
         history: Optional[List[Dict[str, Any]]] = None,
+        on_event: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Procesa una orden con memoria de conversación y conocimiento exacto del estudio."""
+        """Procesa una orden con memoria de conversación y conocimiento exacto del estudio.
+
+        on_event recibe eventos de streaming en tiempo real:
+          {"type": "status", "message": "..."}   — etapa actual del motor
+          {"type": "reasoning", "text": "..."}   — razonamiento acumulado del modelo
+        """
         ctx = app_context or {}
         history = history or []
         low_msg = message.lower()
@@ -593,6 +782,15 @@ class AppAgentController:
         ren_mode_str = "ACTIVO" if ctx.get("is_ren_mode") else "inactivo"
         target_sel = ctx.get("target_selector") or "ninguno"
 
+        server_tasks = ctx.get("server_tasks") or []
+        if server_tasks:
+            tasks_str = "\n".join(
+                f"  - Tarea {t.get('id')} · etapa {t.get('step')} · {t.get('progress')}% · {(t.get('message') or '')[:90]}"
+                for t in server_tasks
+            )
+        else:
+            tasks_str = "  (ninguna: el servidor está desocupado)"
+
         file_context_str, context_files = self._get_relevant_file_context(message, ctx)
 
         sel_card = ctx.get("selected_timeline_item")
@@ -612,6 +810,8 @@ class AppAgentController:
 • Formato: {ctx.get('aspect_ratio') or '16:9'}
 • Modo REN: {ren_mode_str} | Elemento objetivo: {target_sel}
 • Elemento/Tarjeta seleccionada en Línea de Tiempo: {sel_card_str}
+• Tareas activas en el servidor (ediciones/render en curso):
+{tasks_str}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {file_context_str}"""
 
@@ -619,16 +819,14 @@ class AppAgentController:
         full_prompt = f"{context_str}{history_str}\nMENSAJE ACTUAL: \"{message}\""
 
         try:
-            raw_resp, reasoning_text = self._call_model(effective_model, full_prompt, SYSTEM_PROMPT_AGENT)
-        except _NimSlowError as nim_err:
-            # El modelo NIM sigue procesando tras 12s — pedirle al usuario que decida
+            raw_resp, reasoning_text = self._call_model(effective_model, full_prompt, SYSTEM_PROMPT_AGENT,
+                                                        on_event=on_event)
+        except Exception as model_exc:
+            safe_log(f"[AppAgent] Error llamando al modelo {effective_model}: {model_exc}")
             return {
-                "status": "nim_slow",
-                "job_id": nim_err.job_id,
-                "model_name": nim_err.model_name,
-                "model_used": effective_model,
-                "reply": "",
-                "reasoning": "",
+                "model_used": model_id,
+                "reply": "⚠️ Ningún modelo respondió en este momento. Selecciona otro modelo en la lista lateral e inténtalo de nuevo.",
+                "reasoning": str(model_exc),
                 "actions": [],
                 "extra": {},
             }
@@ -679,6 +877,11 @@ class AppAgentController:
         model_thought = parsed_data.get("thought")
         if model_thought and isinstance(model_thought, str) and model_thought.strip():
             reasoning_text = model_thought.strip()
+
+        # Razonamiento filtrado por el fallback: visible solo en el panel de pensamiento.
+        leaked = parsed_data.get("leaked_reasoning")
+        if leaked and not (model_thought and str(model_thought).strip()):
+            reasoning_text = leaked
 
         if delegated_note:
             reply = f"{delegated_note}\n\n{reply}"
@@ -741,11 +944,14 @@ class AppAgentController:
                     safe_log(f"[AppAgent] Error generando miniatura: {th_err}")
 
             if act_type == "read_file":
-                _proj_root = Path(__file__).resolve().parent.parent
                 rel_path = act.get("path", "")
                 try:
-                    target = (_proj_root / rel_path.lstrip("/\\")).resolve()
-                    if target.exists() and target.is_file():
+                    target = _safe_read_target(rel_path)
+                    if target is None:
+                        act["error"] = "Ruta no permitida (solo código del proyecto; .env y storage están bloqueados)"
+                        act["ok"] = False
+                        reply += f"\n\n⚠️ No puedo leer `{rel_path}`: solo tengo acceso al código de la plataforma."
+                    elif target.exists() and target.is_file():
                         content = target.read_text(encoding="utf-8", errors="replace")
                         act["content"] = content[:3000]
                         act["lines"] = content.count("\n") + 1
@@ -759,39 +965,87 @@ class AppAgentController:
                     act["error"] = str(r_err)
 
             if act_type == "list_files":
-                _proj_root = Path(__file__).resolve().parent.parent
                 rel_dir = act.get("dir", "web")
                 try:
-                    target_d = (_proj_root / rel_dir.lstrip("/\\")).resolve()
-                    if target_d.exists() and target_d.is_dir():
-                        flist = [str(p.relative_to(_proj_root)).replace("\\", "/") for p in target_d.glob("**/*") if p.is_file()][:40]
+                    target_d = _safe_read_target(rel_dir if not rel_dir.endswith(("*", "/")) else rel_dir.rstrip("/\\*"))
+                    if target_d is not None and target_d.exists() and target_d.is_dir():
+                        flist = [str(p.relative_to(_PROJECT_ROOT)).replace("\\", "/")
+                                 for p in target_d.glob("**/*")
+                                 if p.is_file() and not any(part in str(p).lower() for part in _FORBIDDEN_READ_PARTS)][:40]
                         act["files"] = flist
                         act["ok"] = True
                         extra_data["listed_files"] = flist
                         reply += f"\n\n📁 **Archivos en `{rel_dir}`:** {len(flist)} archivos encontrados."
                     else:
-                        act["error"] = "Directorio no encontrado"
+                        act["error"] = "Directorio no encontrado o no permitido"
                 except Exception as l_err:
                     act["error"] = str(l_err)
+
+            if act_type == "search_code":
+                pattern = str(act.get("pattern", "")).strip()
+                glob_filter = str(act.get("glob", "")).strip().lstrip("*.")
+                try:
+                    if not pattern:
+                        act["error"] = "Falta 'pattern' de búsqueda"
+                    else:
+                        rx = re.compile(pattern, re.IGNORECASE)
+                        matches: List[Dict[str, Any]] = []
+                        scanned = 0
+                        for path in _iter_readable_code_files():
+                            scanned += 1
+                            if glob_filter and path.suffix.lower().lstrip(".") != glob_filter.lower():
+                                continue
+                            try:
+                                for line_no, line in enumerate(
+                                        path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+                                    if len(matches) >= 40:
+                                        break
+                                    if rx.search(line):
+                                        matches.append({
+                                            "file": str(path.relative_to(_PROJECT_ROOT)).replace("\\", "/"),
+                                            "line": line_no,
+                                            "text": line.strip()[:180],
+                                        })
+                            except Exception:
+                                continue
+                            if len(matches) >= 40:
+                                break
+                        act["matches"] = matches
+                        act["count"] = len(matches)
+                        act["scanned_files"] = scanned
+                        act["ok"] = True
+                        extra_data["search_matches"] = matches
+                        reply += f"\n\n🔍 **Búsqueda `{pattern}`:** {len(matches)} coincidencias en {scanned} archivos."
+                        if matches:
+                            preview = "\n".join(f"`{m['file']}:{m['line']}` {m['text'][:80]}" for m in matches[:8])
+                            reply += f"\n\n{preview}"
+                except re.error as re_err:
+                    act["error"] = f"Patrón regex inválido: {re_err}"
+                except Exception as s_err:
+                    act["error"] = str(s_err)
 
             if act_type == "edit_file":
                 # ── ACCIÓN REAL ESTILO ANTIGRAVITY: Escribe en archivos del proyecto en disco ──
                 import shutil
-                _proj_root = Path(__file__).resolve().parent.parent
                 _allowed = [
-                    _proj_root / "web" / "static" / "css",
-                    _proj_root / "web" / "static" / "js",
-                    _proj_root / "web" / "templates",
+                    _PROJECT_ROOT / "web" / "static" / "css",
+                    _PROJECT_ROOT / "web" / "static" / "js",
+                    _PROJECT_ROOT / "web" / "templates",
                 ]
                 rel_path = act.get("path", "")
                 op = act.get("op", "append")
                 try:
-                    target = (_proj_root / rel_path.lstrip("/\\")).resolve()
-                    # Validar path seguro
-                    is_safe = any(
-                        True for d in _allowed
-                        if str(target).startswith(str(d.resolve()))
-                    )
+                    target = (_PROJECT_ROOT / rel_path.lstrip("/\\")).resolve()
+                    # Validar path seguro con resolución real de rutas (sin startswith,
+                    # que admitía falsos positivos como "css-evil" bajo la misma raíz).
+                    is_safe = False
+                    for d in _allowed:
+                        try:
+                            target.relative_to(d.resolve())
+                            is_safe = True
+                            break
+                        except ValueError:
+                            continue
                     if not is_safe:
                         safe_log(f"[AppAgent] edit_file rechazado: ruta no permitida {rel_path}")
                         reply += f"\n\n⚠️ Ruta no permitida para edición: `{rel_path}`"
@@ -913,6 +1167,9 @@ class AppAgentController:
                             safe_log(f"[AppAgent] Error actualizando tarjeta en broadcast_plan: {bp_err}")
 
             final_actions.append(act)
+
+        # ── GARANTÍA MODO REN: ejecución asegurada aunque el modelo solo responda texto.
+        reply = self._ensure_ren_guarantee(message, ctx, final_actions, reply)
 
         if context_files:
             extra_data["context_files"] = context_files
@@ -1050,9 +1307,38 @@ class AppAgentController:
             )
 
         if not reply_lines:
+            # Anti-fuga: si el modelo devolvió su razonamiento interno (típico
+            # fallo de JSON en GLM/Kimi), NO se vuelca al chat: se muestra como
+            # pensamiento y el usuario recibe un mensaje limpio en español.
+            leaked = self._looks_like_reasoning_leak(raw_text)
+            if leaked:
+                return {
+                    "reply": (
+                        "⚠️ El modelo perdió el formato ejecutable y devolvió razonamiento suelto. "
+                        "Lo he registrado en el panel de pensamiento. Repite la orden (puedo ejecutarla "
+                        "igual con la garantía visual) o selecciona otro modelo de la lista."
+                    ),
+                    "actions": actions,
+                    "leaked_reasoning": (raw_text or "")[:4000],
+                }
             reply_lines.append(raw_text if len(raw_text) > 10 else "Entendido. Estoy a tu disposición para controlar proyectos, crear miniaturas, modificar estilos o guiarte en AetherCut AI.")
 
         return {
             "reply": "\n\n".join(reply_lines),
             "actions": actions,
         }
+
+    @staticmethod
+    def _looks_like_reasoning_leak(text: str) -> bool:
+        """Detecta cadenas de razonamiento interno (usualmente en inglés) que el
+        modelo filtró en lugar de la respuesta JSON estructurada."""
+        if not text:
+            return False
+        low = (text or "").lower()
+        markers = [
+            "wait,", "let me", "i should", "i'll ", "i will now",
+            "the user", "that's a good", "i need to", "maybe i",
+            "hmm,", "i think i", "looks like", "so the",
+        ]
+        hits = sum(1 for m in markers if m in low)
+        return hits >= 2

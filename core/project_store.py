@@ -56,6 +56,11 @@ class ProjectStore:
     def set_status(self, status: str, **extra: Any) -> Dict[str, Any]:
         doc = self.read()
         doc["status"] = status
+        # Un estado nuevo que no sea error limpia el error anterior: si una
+        # transmisión falló y luego se reanudó con éxito, project.json no debe
+        # seguir mostrando el mensaje de error viejo junto a "done".
+        if status != "error":
+            doc.pop("error", None)
         doc.update(extra)
         return self.write(doc)
 

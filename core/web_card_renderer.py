@@ -14,8 +14,15 @@ from typing import Optional, Dict, Any
 HTML_FONTS = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Playfair+Display:ital,wght@1,700;1,900&display=swap" rel="stylesheet">
 """
+
+# Paletas bicolor firma para la tipografía cinética viral (degradado de dos colores).
+KINETIC_DUOTONES = [
+    ("#F7C873", "#FF6B9D"),  # Oro → Coral (cálido, editorial)
+    ("#7DE3F4", "#A78BFA"),  # Cian → Violeta (tech, elegante)
+    ("#9BE15D", "#00B3A4"),  # Lima → Teal (energía, fresco)
+]
 
 
 def _get_browser_bin() -> str:
@@ -36,6 +43,27 @@ class WebCardRenderer:
     def __init__(self, browser_bin: Optional[str] = None):
         self.browser_bin = browser_bin or _get_browser_bin()
 
+    @staticmethod
+    def _bento_bar_heights(stat_value: str) -> list:
+        """Alturas de las barras del Bento a partir del dato real.
+
+        Con un porcentaje interpretable, la última barra (la activa) marca el
+        valor EXACTO y las anteriores suben hacia él. Sin porcentaje, las barras
+        se dibujan planas: textura visual neutra que no insinúa una tendencia
+        falsa. El gráfico decorativo hardcodeado (35-95%) ya no miente.
+        """
+        import re as _re
+        m = _re.search(r"(\d+(?:[.,]\d+)?)\s*%", str(stat_value or ""))
+        if not m:
+            return [42, 42, 42, 42, 42]
+        try:
+            val = float(m.group(1).replace(",", "."))
+        except ValueError:
+            return [42, 42, 42, 42, 42]
+        val = max(8.0, min(100.0, val))
+        factors = [0.55, 0.68, 0.80, 0.90, 1.0]
+        return [max(8, round(val * f)) for f in factors]
+
     def generate_html(
         self,
         headline: str,
@@ -55,6 +83,11 @@ class WebCardRenderer:
         body = body.replace("<", "&lt;").replace(">", "&gt;")
         badge = badge.replace("<", "&lt;").replace(">", "&gt;")
         source = source.replace("<", "&lt;").replace(">", "&gt;")
+
+        # Las barras del Bento representan el dato real: la ultima barra (activa)
+        # marca el valor exacto del porcentaje; sin porcentaje interpretable se
+        # dibujan planas (textura neutra), nunca una tendencia inventada.
+        bar_heights = self._bento_bar_heights(stat_value)
 
         if style in ("quote", "cita"):
             return self.generate_quote_html(
@@ -486,11 +519,11 @@ class WebCardRenderer:
         <div class="metric-label">{stat_label}</div>
       </div>
       <div class="chart-bars">
-        <div class="c-bar" style="height: 35%;"></div>
-        <div class="c-bar" style="height: 50%;"></div>
-        <div class="c-bar" style="height: 65%;"></div>
-        <div class="c-bar" style="height: 80%;"></div>
-        <div class="c-bar active" style="height: 95%;"></div>
+        <div class="c-bar" style="height: {bar_heights[0]}%;"></div>
+        <div class="c-bar" style="height: {bar_heights[1]}%;"></div>
+        <div class="c-bar" style="height: {bar_heights[2]}%;"></div>
+        <div class="c-bar" style="height: {bar_heights[3]}%;"></div>
+        <div class="c-bar active" style="height: {bar_heights[4]}%;"></div>
       </div>
     </div>
     <div class="headline">{headline}</div>
@@ -762,6 +795,11 @@ class WebCardRenderer:
         kind: str = "fact",
     ) -> str:
         """Micro Pop-up HUD reactivo estilo pastilla moderna."""
+        # Sanitizar SIEMPRE: el texto llega directo del LLM director. Sin esto,
+        # un "<" rompía el marcado y una etiqueta inyectada se ejecutaba en el
+        # Chromium headless que renderiza este HTML (file://).
+        text = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        tag_label = str(tag_label or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         kind_colors = {
             "stat": ("#f59e0b", "rgba(245, 158, 11, 0.15)", "rgba(245, 158, 11, 0.35)"),
             "fact": ("#38bdf8", "rgba(56, 189, 248, 0.15)", "rgba(56, 189, 248, 0.35)"),
@@ -841,6 +879,10 @@ class WebCardRenderer:
         tag: str = "INFORME ESPECIAL",
     ) -> str:
         """Rótulo Broadcast Lower Third panorámico de alta fidelidad."""
+        # Sanitizar SIEMPRE (texto del LLM: nombres de escena y extractos del guion).
+        title = str(title or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        subtitle = str(subtitle or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        tag = str(tag or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1121,9 +1163,22 @@ class WebCardRenderer:
             else:
                 low = raw.lower()
                 for k, code in COUNTRY_CODES.items():
-                    if k in low:
-                        c_code = code
-                        break
+                    # Solo coincidencia de PALABRA COMPLETA: "us" dentro de
+                    # "Museo" o "Discusión" jamás debe pintar la bandera de EE.UU.,
+                    # ni "rusia" dentro de "Prusia" la de Rusia.
+                    m_flag = re.search(rf"\b{re.escape(k)}\b", low)
+                    if not m_flag:
+                        continue
+                    # Claves cortas (us/usa/cn/ru...) solo valen como SIGLAS en
+                    # mayúsculas: "Usa energía" es el verbo español, no EE.UU.
+                    if len(k) <= 4 and not raw[m_flag.start():m_flag.end()].isupper():
+                        continue
+                    c_code = code
+                    break
+
+            # El texto del chip viene del LLM: escapar siempre (mismo criterio
+            # que las tarjetas y popups).
+            clean = clean.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
             if c_code:
                 flag_markup = f'<img src="https://flagcdn.com/w80/{c_code}.png" class="flag-thumb" alt="{c_code}">'
@@ -1162,32 +1217,35 @@ class WebCardRenderer:
   .glass-chip {{
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     background: rgba(9, 10, 13, 0.96);
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.90), 0 0 25px rgba(12, 24, 48, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    border-radius: 999px;
-    padding: 8px 18px;
+    border-radius: 10px;
+    padding: 12px 22px;
     color: #f8fafc;
   }}
   .flag-thumb {{
-    width: 22px;
-    height: 15px;
-    border-radius: 3px;
+    /* Bandera protagonista del chip (estilo tag de ubicación de noticiero):
+       grande, con borde y sombra propia. Antes era 22x15px — ilegible en 1080p. */
+    width: 46px;
+    height: 31px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.30);
     object-fit: cover;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.55);
   }}
   .chip-dot {{
-    width: 7px;
-    height: 7px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
     background: #38bdf8;
-    box-shadow: 0 0 8px #38bdf8;
+    box-shadow: 0 0 10px #38bdf8;
   }}
   .chip-text {{
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: -0.2px;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
     white-space: nowrap;
   }}
 </style>
@@ -1215,6 +1273,9 @@ class WebCardRenderer:
             "--no-sandbox",
             "--hide-scrollbars",
             "--default-background-color=00000000",
+            # Render a 2x de resolución nativa: el PNG sale nítido y el overlay
+            # puede reducirlo sin pixelado (banderas y texto grandes y legibles).
+            "--force-device-scale-factor=2",
             f"--screenshot={out_png.resolve()}",
             "--window-size=1200,300",
             file_uri,
@@ -1348,37 +1409,6 @@ class WebCardRenderer:
   </div>
 </body>
 </html>"""
-
-    def render_ranking_number_to_image(
-        self,
-        number: str,
-        title: str,
-        out_png: Path,
-        subtitle: str = "Análisis e Impacto Clave",
-        badge: str = "TOP RANKING",
-    ) -> Path:
-        """Renderiza una tarjeta de hito de cuenta regresiva (Puesto / Número de Top)."""
-        out_png = Path(out_png)
-        out_png.parent.mkdir(parents=True, exist_ok=True)
-        html_file = out_png.with_suffix(".html")
-        html_content = self.generate_ranking_number_html(number, title, subtitle, badge)
-        html_file.write_text(html_content, encoding="utf-8")
-        file_uri = html_file.resolve().as_uri()
-
-        args = [
-            self.browser_bin,
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--hide-scrollbars",
-            "--default-background-color=00000000",
-            f"--screenshot={out_png.resolve()}",
-            "--window-size=1100,500",
-            file_uri,
-        ]
-        subprocess.run(args, capture_output=True, check=True, timeout=15)
-        self._crop_transparent(out_png)
-        return out_png
 
     def generate_free_kinetic_text_html(
         self,
@@ -1528,6 +1558,98 @@ class WebCardRenderer:
         subprocess.run(args, capture_output=True, check=True, timeout=15)
         self._crop_transparent(out_png)
         return out_png
+
+    def generate_kinetic_word_html(self, word: str, duo_a: str = "#F7C873", duo_b: str = "#FF6B9D") -> str:
+        """Una palabra gigante estilo tipografía cinética viral.
+
+        - Serif elegante en itálica (Playfair Display 900): el contraste editorial
+          que domina los formatos virales de divulgación.
+        - Degradado BICOLOR de firma (background-clip:text): la mitad superior en
+          un tono y la inferior en otro, con brillo propio.
+        - Sin cajas ni fondos: flota sobre el video con sombra profunda.
+        """
+        w_clean = str(word or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+{HTML_FONTS}
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }}
+  .word {{
+    font-family: 'Playfair Display', Georgia, serif;
+    font-style: italic;
+    font-weight: 900;
+    font-size: 200px;
+    line-height: 0.95;
+    letter-spacing: -2px;
+    white-space: nowrap;
+    /* Degradado bicolor de firma */
+    background: linear-gradient(165deg, {duo_a} 12%, {duo_b} 88%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 10px 34px rgba(0,0,0,0.85)) drop-shadow(0 0 26px {duo_b}55);
+    padding: 0 30px;
+  }}
+</style>
+</head>
+<body>
+  <div class="word">{w_clean}</div>
+</body>
+</html>"""
+
+    def render_kinetic_word_series(
+        self,
+        title: str,
+        out_dir: Path,
+        duo: tuple = None,
+        max_words: int = 4,
+    ) -> list:
+        """Renderiza cada palabra del título como PNG individual bicolor.
+
+        El scene engine las estalla en pantalla una a una (pop con rise) al ritmo
+        de la locución: tipografía cinética viral palabra por palabra.
+        Devuelve la lista de rutas PNG (vacía si algo falla).
+        """
+        import re as _re
+        try:
+            words = _re.findall(r"[A-Za-zÁÉÍÓÚÑáéíóúñüÜ0-9']+", str(title or ""))[:max_words]
+            if not words:
+                return []
+            out_dir = Path(out_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            duo_a, duo_b = duo or KINETIC_DUOTONES[0]
+            paths = []
+            for i, word in enumerate(words):
+                out_png = out_dir / f"kinetic_word_{i}.png"
+                html_file = out_png.with_suffix(".html")
+                html_file.write_text(self.generate_kinetic_word_html(word, duo_a, duo_b), encoding="utf-8")
+                args = [
+                    self.browser_bin,
+                    "--headless",
+                    "--disable-gpu",
+                    "--no-sandbox",
+                    "--hide-scrollbars",
+                    "--default-background-color=00000000",
+                    "--force-device-scale-factor=2",
+                    f"--screenshot={out_png.resolve()}",
+                    "--window-size=1300,420",
+                    html_file.resolve().as_uri(),
+                ]
+                subprocess.run(args, capture_output=True, check=True, timeout=15)
+                self._crop_transparent(out_png)
+                paths.append(out_png)
+            return paths
+        except Exception:
+            return []
 
     def generate_document_citation_html(
         self,
@@ -2005,35 +2127,6 @@ class WebCardRenderer:
   </div>
 </body>
 </html>"""
-
-    def render_chapter_tracker_to_image(
-        self,
-        chapters: list,
-        current_index: int,
-        out_png: Path,
-    ) -> Path:
-        """Renderiza una barra de seguimiento de capítulos translúcida superior."""
-        out_png = Path(out_png)
-        out_png.parent.mkdir(parents=True, exist_ok=True)
-        html_file = out_png.with_suffix(".html")
-        html_content = self.generate_chapter_tracker_html(chapters, current_index)
-        html_file.write_text(html_content, encoding="utf-8")
-        file_uri = html_file.resolve().as_uri()
-
-        args = [
-            self.browser_bin,
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--hide-scrollbars",
-            "--default-background-color=00000000",
-            f"--screenshot={out_png.resolve()}",
-            "--window-size=1600,200",
-            file_uri,
-        ]
-        subprocess.run(args, capture_output=True, check=True, timeout=15)
-        self._crop_transparent(out_png)
-        return out_png
 
     def generate_geointel_map_html(
         self,
@@ -2516,7 +2609,11 @@ class WebCardRenderer:
                     matched = val
                     break
         if not matched:
-            matched = (39.702, 44.299, 7.2, "39.702° N, 44.299° E", "ZONA DE INVESTIGACIÓN")
+            # Sin entidad reconocida NO se fabrica un mapa. Mostrar el Monte
+            # Ararat por defecto rotulado "ZONA DE INVESTIGACIÓN" presentaba una
+            # ubicación inventada como real — desinformación en pantalla. La
+            # escena degrada a tarjeta Bento estándar (ver llamador en scene_engine).
+            return None
 
         lat, lon, zoom, default_coords, default_reg = matched
         coords_display = (
@@ -2525,21 +2622,29 @@ class WebCardRenderer:
             else default_coords
         )
 
-        # Cache local de MapLibre GL JS para carga instantánea
-        cache_dir = Path("storage/cache/maplibre").resolve()
+        # Cache local de MapLibre GL JS para carga instantánea.
+        # Ruta anclada a BASE_DIR (antes relativa al CWD: lanzar el servidor desde
+        # otro directorio duplicaba el cache) y descargas CON timeout (urlretrieve
+        # no admite timeout y con red degradada colgaba el render minutos).
+        from config.settings import settings as _settings
+        cache_dir = (_settings.BASE_DIR / "storage" / "cache" / "maplibre").resolve()
         cache_dir.mkdir(parents=True, exist_ok=True)
         js_path = cache_dir / "maplibre-gl.js"
         css_path = cache_dir / "maplibre-gl.css"
 
+        def _download_with_timeout(url: str, dest: Path) -> None:
+            with urllib.request.urlopen(url, timeout=20) as response, open(dest, "wb") as out_f:
+                out_f.write(response.read())
+
         if not js_path.exists():
             try:
-                urllib.request.urlretrieve("https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js", js_path)
+                _download_with_timeout("https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js", js_path)
             except Exception:
                 pass
 
         if not css_path.exists():
             try:
-                urllib.request.urlretrieve("https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css", css_path)
+                _download_with_timeout("https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css", css_path)
             except Exception:
                 pass
 

@@ -200,38 +200,6 @@ class OpenStockAssetProvider(AssetProvider):
         return None
 
 
-class FallbackSyntheticAssetProvider(AssetProvider):
-    """
-    Proveedor resiliente autónomo.
-    Genera un B-Roll cinematográfico estilizado mediante Pillow si las APIs externas
-    no tienen claves o están pausadas, garantizando que el pipeline de render NUNCA se rompa.
-    """
-
-    async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
-        from PIL import Image, ImageDraw
-
-        out_path = target_dir / f"{cue.cue_id}_fallback.jpg"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        print(f"[FallbackProvider] Generando asset sintético de alta resolución para '{cue.concept}'...")
-
-        width, height = 1920, 1080
-        img = Image.new("RGB", (width, height), color=(15, 23, 42))
-        draw = ImageDraw.Draw(img)
-
-        draw.rectangle([60, 60, width - 60, height - 60], outline=(56, 189, 248), width=3)
-
-        title = f"[B-ROLL: {cue.concept.upper()}]"
-        subtitle = f"Visual Cue: {cue.search_query_en} ({cue.asset_type})"
-        meta = f"Duración: {round(cue.end_sec - cue.start_sec, 2)}s | Motivo: {cue.reasoning}"
-
-        draw.text((120, height // 2 - 80), title, fill=(248, 250, 252))
-        draw.text((120, height // 2), subtitle, fill=(148, 163, 184))
-        draw.text((120, height // 2 + 60), meta, fill=(56, 189, 248))
-
-        img.save(out_path, "JPEG", quality=95)
-        return out_path
-
-
 class WebPhotoAssetProvider(AssetProvider):
     """Foto REAL desde la búsqueda de imágenes web (DuckDuckGo), filtrando marcas de agua comerciales y exigiendo alta resolución."""
 
@@ -295,7 +263,9 @@ class WebPhotoAssetProvider(AssetProvider):
                 return []
 
         client = WikiMediaClient()
-        urls = await asyncio.to_thread(search)
+        # wait_for: ddgs no tiene timeout propio — un DuckDuckGo colgado
+        # (rate-limit/CAPTCHA) congelaba el render de la escena indefinidamente.
+        urls = await asyncio.wait_for(asyncio.to_thread(search), timeout=12.0)
         for i, url in enumerate(urls[:8]):
             dest = target_dir / f"{cue.cue_id}_web{i}.jpg"
             if not await client.download_image(url, dest):

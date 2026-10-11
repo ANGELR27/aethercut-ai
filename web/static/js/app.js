@@ -1,6 +1,8 @@
 import { $, fmtDuration, ageLabel, eventTime, esc, percent, waitForEvent } from "./modules/utils.js";
 import { setupHudPlayer } from "./modules/player.js";
 import { AgentCopilot } from "./modules/agent_copilot.js";
+import { initPublishStudio } from "./modules/publish_studio.js";
+import { initTrendRadar } from "./modules/trend_radar.js";
 
 document.addEventListener("DOMContentLoaded", () => {
     const form = $("uploadForm");
@@ -67,6 +69,12 @@ document.addEventListener("DOMContentLoaded", () => {
     let editorDirty = false;
     let thumbnailsKey = "";
     let activeMode = "streamer";
+
+    // Estudio de Publicación: preview + miniatura IA + subida directa a YouTube
+    const publishStudio = initPublishStudio();
+
+    // Radar de Viralidad: ranking de videos virales por región + temas urgentes
+    initTrendRadar();
 
 
     function percent(value, duration) {
@@ -567,6 +575,13 @@ document.addEventListener("DOMContentLoaded", () => {
             preview.dataset.source = previewUrl;
             preview.src = previewUrl;
             preview.load();
+            // Descubrir el reproductor: la telemetría en vivo oculta el video y
+            // muestra la miniatura de escena; al cargar el preview real hay que
+            // restaurar el video y ocultar esa imagen. Antes nadie lo hacía y el
+            // monitor quedaba congelado en la última miniatura ("no se muestra").
+            preview.style.display = "block";
+            const fallbackStage = $("telemetryStageImgStudio");
+            if (fallbackStage) fallbackStage.style.display = "none";
             $("previewEmpty").hidden = true;
             preview.addEventListener("loadedmetadata", () => buildTimelineThumbnails(previewUrl, Number(preview.duration || duration)), { once: true });
         }
@@ -629,8 +644,14 @@ document.addEventListener("DOMContentLoaded", () => {
             preview.muted = false;
             if (preview.src !== previewUrl && !preview.src.endsWith(previewUrl)) {
                 preview.src = previewUrl;
+                // Marcar la fuente cargada: la telemetría en vivo usa este marcador
+                // para no volver a ocultar el reproductor una vez el video existe.
+                preview.dataset.source = previewUrl;
                 preview.load();
             }
+            // Ocultar la imagen de escena en vivo: el monitor muestra el video real.
+            const stageImgStudio = $("telemetryStageImgStudio");
+            if (stageImgStudio) stageImgStudio.style.display = "none";
         }
         const monitorBar = $("monitorDownloadBar");
         if (monitorBar) {
@@ -929,16 +950,9 @@ document.addEventListener("DOMContentLoaded", () => {
             `;
             ytPublishBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
-                // Copia el título al portapapeles y abre YouTube Studio Upload
-                if (navigator.clipboard && project.name) {
-                    navigator.clipboard.writeText(project.name).catch(() => {});
-                }
-                // Si hay video master, descargar o notificar
-                if (project.master_video_url) {
-                    window.open(`https://studio.youtube.com/channel/UC/videos/upload?d=pt`, "_blank");
-                } else {
-                    window.open(`https://studio.youtube.com/channel/UC/videos/upload?d=pt`, "_blank");
-                }
+                // Abre el Estudio de Publicación: ver qué se publica,
+                // miniatura con IA y subida directa/asistida a YouTube.
+                publishStudio.open(project);
             });
 
             // Botón Reanudar (Si el proyecto no está completado y se puede recuperar)
@@ -1291,10 +1305,19 @@ document.addEventListener("DOMContentLoaded", () => {
                     if (stageImg) stageImg.src = activeThumbUrl;
                 }
 
-                // Sincronizar también el monitor de la mesa si aún no hay video final cargado
+                // Sincronizar también el monitor de la mesa SOLO mientras no exista
+                // un video final cargado. Antes se usaba preview.src.endsWith(".mp4"),
+                // que jamás matchea la URL del preview (/api/projects/{id}/preview):
+                // la telemetría volvía a ocultar el reproductor en cada tick aunque
+                // el video ya estuviera disponible. El marcador dataset.source lo
+                // resuelve: una vez cargado el preview del proyecto activo, el
+                // monitor pertenece al reproductor.
                 const stageImgStudio = $("telemetryStageImgStudio");
                 const projectVideo = $("projectPreview");
-                if (stageImgStudio && (!projectVideo || !projectVideo.src || projectVideo.src.endsWith(".mp4") === false)) {
+                const loadedPreviewForTask = projectVideo
+                    && projectVideo.dataset.source
+                    && projectVideo.dataset.source.indexOf(`/api/projects/${activeTaskId}/preview`) !== -1;
+                if (stageImgStudio && !loadedPreviewForTask) {
                     stageImgStudio.src = activeThumbUrl;
                     stageImgStudio.style.display = "block";
                     if (projectVideo) projectVideo.style.display = "none";
@@ -1524,8 +1547,15 @@ document.addEventListener("DOMContentLoaded", () => {
             icon.classList.toggle("is-error", isError);
         }
         paintPhases(step === "cancelling" || step === "cancelled" ? state.cancelled_step : step, state.failed_step);
-        renderActivity(state.events, state.error);
-        renderStudio(state.editor, state.preview_url);
+        // El renderizado de actividad/estudio nunca debe impedir la rama "done":
+        // ahí se carga el reproductor de la Mesa (openProject). Un error aquí
+        // antes dejaba el monitor sin video para siempre.
+        try {
+            renderActivity(state.events, state.error);
+            renderStudio(state.editor, state.preview_url);
+        } catch (renderError) {
+            console.error("[applyState] Error renderizando estado:", renderError);
+        }
 
         if (isCancelled) {
             setConnection("warning", "Cancelado");
@@ -2478,6 +2508,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function switchMode(mode) {
         activeMode = mode;
+        // Recordar dónde se quedó el usuario: al recargar la página vuelve aquí.
+        try { localStorage.setItem("aetherLastMode", mode); } catch { /* storage bloqueado */ }
         const tabStreamer = $("tabModeStreamer");
         const tabCopilot = $("tabModeCopilot");
         const tabStudio = $("tabModeStudio");
@@ -2498,13 +2530,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const studioSec = $("studioSection");
         const projectsCard = $("savedProjectsCard");
         const multiAgentSec = $("multiAgentSection");
+        const radarSec = $("trendRadarSection");
 
         // Limpiar clases activas
-        [tabStreamer, tabCopilot, tabStudio, tabProjects, tabMultiAgent].forEach(t => t && t.classList.remove("active"));
-        [dockStreamer, dockCopilot, dockStudio, dockProjects].forEach(d => d && d.classList.remove("active"));
+        [tabStreamer, tabCopilot, tabStudio, tabProjects, tabMultiAgent, $("tabModeRadar")].forEach(t => t && t.classList.remove("active"));
+        [dockStreamer, dockCopilot, dockStudio, dockProjects, $("dockRadar")].forEach(d => d && d.classList.remove("active"));
         if (studioSec) studioSec.hidden = true;
         if (projectsCard) projectsCard.hidden = true;
         if (multiAgentSec) multiAgentSec.hidden = true;
+        if (radarSec) radarSec.hidden = true;
         if (results) results.hidden = true;
 
         const bentoPane = $("streamerTabPane");
@@ -2560,6 +2594,20 @@ document.addEventListener("DOMContentLoaded", () => {
             if ($("topbarSectionBadge")) $("topbarSectionBadge").textContent = "Biblioteca de Proyectos";
             if ($("topbarSectionDesc")) $("topbarSectionDesc").textContent = "Colección de emisiones finalizadas y videos guardados";
             loadSavedProjects();
+        } else if (mode === "radar") {
+            const tabRadar = $("tabModeRadar");
+            const dockRadarBtn = $("dockRadar");
+            if (tabRadar) tabRadar.classList.add("active");
+            if (dockRadarBtn) dockRadarBtn.classList.add("active");
+            if (heroTitle) heroTitle.textContent = "Radar de Viralidad";
+            if (heroSubtitle) heroSubtitle.textContent = "Ranking viral por región y temas urgentes aún sin video, listos para replicar en español";
+            if (trendingRow) trendingRow.hidden = true;
+            if (bentoPane) bentoPane.hidden = true;
+            if (previewBox) previewBox.hidden = true;
+            if (results) results.hidden = true;
+            if (radarSec) radarSec.hidden = false;
+            if ($("topbarSectionBadge")) $("topbarSectionBadge").textContent = "Radar de Viralidad";
+            if ($("topbarSectionDesc")) $("topbarSectionDesc").textContent = "Barrido automático cada 3 horas: qué sube, qué baja y qué emerge";
         } else if (mode === "multiagent") {
             if (tabMultiAgent) tabMultiAgent.classList.add("active");
             if (heroTitle) heroTitle.textContent = "Multi-Agent Dev Studio";
@@ -2583,6 +2631,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("tabModeCopilot")?.addEventListener("click", () => switchMode("copilot"));
     $("tabModeStudio")?.addEventListener("click", () => switchMode("studio"));
     $("tabModeProjects")?.addEventListener("click", () => switchMode("projects"));
+    $("tabModeRadar")?.addEventListener("click", () => switchMode("radar"));
     $("tabModeMultiAgent")?.addEventListener("click", () => switchMode("multiagent"));
 
     // Dictado por voz (Micro) para el requerimiento multi-agente
@@ -2795,6 +2844,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("dockCopilot")?.addEventListener("click", () => switchMode("copilot"));
     $("dockStudio")?.addEventListener("click", () => switchMode("studio"));
     $("dockProjects")?.addEventListener("click", () => switchMode("projects"));
+    $("dockRadar")?.addEventListener("click", () => switchMode("radar"));
 
     // Pills de formato 16:9 vs 9:16 (Compatible con .kai-pill-btn y .subcard-pill-btn)
     document.querySelectorAll("#formatPillsWrap button").forEach(btn => {
@@ -3260,6 +3310,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 card_theme: $("streamerCardTheme")?.value || "dark",
                 voice: $("streamerVoice")?.value || "es-MX-JorgeNeural",
                 rtmp_url: rtmpUrl,
+                // Modo análisis de caso: video concreto que KAI examina (fotogramas reales)
+                video_url: ($("streamerCaseUrl")?.value || "").trim(),
                 sub_style: subStyle,
                 subs_enabled: subsEnabled,
                 visual_mode: visualMode,
@@ -3722,6 +3774,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Exponer funciones globales para que el Agente Copilot pueda controlar la app
     window.switchMode = switchMode;
+
+    // Puente para el Radar de Viralidad: al replicar un tema/video, la nueva
+    // producción de KAI se monitorea en vivo igual que una emisión manual.
+    window.__startRadarTask = (taskId, topic) => {
+        observedTaskId = taskId;
+        localStorage.setItem("currentTaskId", taskId);
+        try {
+            const curUrl = new URL(window.location.href);
+            curUrl.searchParams.set("task", taskId);
+            curUrl.searchParams.delete("project");
+            window.history.replaceState({}, "", curUrl);
+        } catch { /* URL API no disponible */ }
+        switchMode("studio");
+        setStudioAspectRatio("16:9");
+        if ($("topbarProjectTitle")) $("topbarProjectTitle").textContent = topic;
+        if ($("topbarSaveStatus")) {
+            $("topbarSaveStatus").innerHTML = `<span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#ef4444; box-shadow:0 0 8px #ef4444; margin-right:4px;"></span> EN EMISIÓN`;
+            $("topbarSaveStatus").style.color = "#ef4444";
+            $("topbarSaveStatus").style.borderColor = "rgba(239, 68, 68, 0.4)";
+            $("topbarSaveStatus").style.background = "rgba(239, 68, 68, 0.12)";
+        }
+        listen(taskId);
+    };
     window.openProject = openProject;
     window.listen = listen;
 
@@ -3744,5 +3819,13 @@ document.addEventListener("DOMContentLoaded", () => {
         listen(urlTaskId);
     } else if (savedTaskId) {
         listen(savedTaskId);
+    } else {
+        // Sin tarea en curso: volver a la sección donde el usuario se quedó.
+        try {
+            const lastMode = localStorage.getItem("aetherLastMode");
+            if (lastMode && ["radar", "projects", "studio", "copilot", "multiagent", "streamer"].includes(lastMode) && lastMode !== "streamer") {
+                switchMode(lastMode);
+            }
+        } catch { /* storage bloqueado */ }
     }
 });

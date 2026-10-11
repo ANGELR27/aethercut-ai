@@ -20,7 +20,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import aiofiles
 from fastapi import FastAPI, BackgroundTasks, Body, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from config.settings import settings
@@ -33,6 +33,7 @@ from core.project_store import ProjectStore, editor_snapshot
 from core.render_engine import VideoRenderEngine
 from core.streamer_pipeline import StreamerOptions, StreamerPipeline
 from core.timeline import TimelineMapper
+from core.trend_radar import TrendRadar
 from utils.file_manager import FileManager
 
 app = FastAPI(title="AetherCut AI Video Editor")
@@ -111,6 +112,24 @@ def friendly_error(exc: Exception) -> str:
     if "ffmpeg" in low:
         return "FFmpeg falló al procesar el video. Prueba con otro archivo o formato (MP4 recomendado)."
     return text[:300]
+
+
+def summarize_active_tasks(limit: int = 5) -> list:
+    """Resumen thread-safe de las tareas en curso para el contexto del Agente Copilot."""
+    out = []
+    with _state_lock:
+        for tid, st in tasks_progress.items():
+            if st.get("completed") or st.get("error") or st.get("cancelled"):
+                continue
+            out.append({
+                "id": tid,
+                "step": st.get("step"),
+                "progress": round(float(st.get("progress") or 0)),
+                "message": (st.get("message") or "")[:120],
+            })
+            if len(out) >= limit:
+                break
+    return out
 
 
 def update_task_state(task_id: str, step: str, progress: float, message: str, **extra: Any) -> None:
@@ -272,7 +291,12 @@ async def run_export_task(task_id: str) -> None:
                         _p, dur = await narrator.synthesize(card.avatar_spoken_text, audio_file)
                         card.avatar_audio_path = str(audio_file)
                         video_file = store.workdir / f"{card.card_id}_avatar.webm"
-                        rendered = avatar_rnd.render_reaction_clip(dur + 0.5, video_file, audio_path=audio_file)
+                        # to_thread: render_reaction_clip es síncrono pesado (cientos
+                        # de frames + FFmpeg); directo congelaba todo el event loop
+                        # (sin progreso ni cancelación) durante el render de cada avatar.
+                        rendered = await asyncio.to_thread(
+                            avatar_rnd.render_reaction_clip, dur + 0.5, video_file, audio_path=audio_file
+                        )
                         if rendered:
                             card.avatar_video_path = str(rendered)
                             card.avatar_enabled = True
@@ -371,6 +395,13 @@ async def process_video(
     return {"task_id": task_id, "project_id": task_id}
 
 
+def _auto_studio_thumbnail(task_id: str, title: str, topic: str) -> None:
+    """Miniatura profesional local (Pillow) para dejar el video listo sin cuotas."""
+    from core.publish_studio import PublishStudio
+    res = PublishStudio(task_id).generate_studio_thumbnail_fast(title=title, topic=topic)
+    safe_log(f"[Radar] Video listo con miniatura de estudio: {res.get('url')}")
+
+
 async def run_streamer_task(task_id: str, options: StreamerOptions) -> None:
     update_task_state(task_id, "research", 10.0, f"Investigando datos web sobre «{options.topic}»...")
     cancel_event = task_cancel_events[task_id]
@@ -389,8 +420,22 @@ async def run_streamer_task(task_id: str, options: StreamerOptions) -> None:
         result = await pipeline.run()
         if cancel_event.is_set():
             raise CancellationRequested()
-        update_task_state(task_id, "done", 100.0, "¡Transmisión completada!", completed=True, result=result)
+        # preview_url en el estado final (igual que el pipeline clásico): el último
+        # tick del SSE lleva la URL del master para que la Mesa cargue el monitor.
+        update_task_state(task_id, "done", 100.0, "¡Transmisión completada!", completed=True, result=result,
+                          preview_url=f"/api/projects/{task_id}/preview")
         project.set_status("done", result=result)
+        # Los videos originados por el Radar de Viralidad quedan listos para
+        # publicar: miniatura profesional de estudio generada automáticamente.
+        try:
+            origin = ((project.read().get("options") or {}).get("origin") or "")
+            if origin == "radar":
+                update_task_state(task_id, "thumbnail", 100.0, "Generando miniatura profesional de estudio...")
+                thumb_title = str(result.get("title") or (project.read().get("options") or {}).get("topic") or task_id)
+                thumb_topic = str((project.read().get("options") or {}).get("topic") or "")
+                await asyncio.to_thread(_auto_studio_thumbnail, task_id, thumb_title, thumb_topic)
+        except Exception as exc:
+            safe_log(f"[Radar] Miniatura automática falló: {exc}")
     except (CancellationRequested, asyncio.CancelledError):
         update_task_state(task_id, "cancelled", tasks_progress.get(task_id, {}).get("progress", 0.0),
                           "Transmisión cancelada.", completed=True, cancelled=True)
@@ -435,6 +480,10 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
         "intro_style": str(payload.get("intro_style", "kai")).strip().lower() or "kai",
         "outro_enabled": bool(payload.get("outro_enabled", True)),
         "bgm_track": str(payload.get("bgm_track", "default")).strip().lower() or "default",
+        # Modo análisis de caso: video/caso concreto que KAI analiza visualmente
+        "source_video_url": (str(payload.get("video_url", "")).strip() or None)
+        if str(payload.get("video_url", "")).strip().lower() not in ("none", "null", "")
+        else None,
     }
 
     task_id = uuid.uuid4().hex[:8]
@@ -461,7 +510,8 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
         source_file=settings.OUTPUTS_DIR / f"{task_id}_master.mp4",
         original_name=f"KAI Stream: {topic}",
         options={"topic": topic, "style": style, "duration_sec": duration_sec, "mode": "streamer",
-                 "aspect_ratio": aspect_ratio, "card_theme": card_theme, "voice": voice, **extra_opts}
+                 "aspect_ratio": aspect_ratio, "card_theme": card_theme, "voice": voice,
+                 "origin": str(payload.get("origin", "manual")), **extra_opts}
     )
     task_cancel_events[task_id] = threading.Event()
     task_jobs[task_id] = asyncio.create_task(run_streamer_task(task_id, options))
@@ -508,6 +558,7 @@ async def resume_project(task_id: str):
             intro_style=str(raw_options.get("intro_style", "kai")),
             outro_enabled=bool(raw_options.get("outro_enabled", True)),
             bgm_track=str(raw_options.get("bgm_track", "default")),
+            source_video_url=raw_options.get("source_video_url"),
         )
         tasks_progress[task_id] = {
             "step": "render", "progress": 50.0, "message": f"Reanudando transmisión de «{topic}»...",
@@ -1681,11 +1732,15 @@ def agent_chat_endpoint(payload: dict = Body(...)):
     """Procesa una consulta u orden del usuario con el modelo seleccionado y ejecuta acciones."""
     message = payload.get("message", "").strip()
     model_id = payload.get("model_id", "gemini").strip()
-    app_context = payload.get("app_context", {})
+    app_context = payload.get("app_context", {}) or {}
     history = payload.get("history", [])
 
     if not message:
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío.")
+
+    # El agente conoce el estado real del servidor: qué tareas están en curso ahora mismo.
+    if isinstance(app_context, dict):
+        app_context["server_tasks"] = summarize_active_tasks()
 
     from core.app_agent import AppAgentController
     controller = AppAgentController()
@@ -1710,118 +1765,120 @@ def agent_chat_endpoint(payload: dict = Body(...)):
         }
 
 
-@app.get("/api/agent/wait/{job_id}")
-def agent_wait_nim_job(job_id: str):
-    """El usuario eligió 'Esperar' — espera hasta 90s más por el resultado del job NIM pendiente."""
-    import time, concurrent.futures, json, re
+@app.post("/api/agent/chat/stream")
+async def agent_chat_stream(payload: dict = Body(...)):
+    """Chat del agente con STREAMING en tiempo real (SSE).
+
+    Eventos emitidos:
+      {"type": "status",   "message": "..."}   — etapa del motor (contactando modelo…)
+      {"type": "reasoning","text": "..."}      — razonamiento acumulado del modelo, en vivo
+      {"type": "final",    "payload": {...}}   — respuesta completa (reply, actions, extra)
+      {"type": "error",    "message": "..."}   — fallo del flujo
+    """
+    import asyncio
+
+    message = str(payload.get("message", "")).strip()
+    model_id = str(payload.get("model_id", "gemini")).strip()
+    app_context = payload.get("app_context", {}) or {}
+    history = payload.get("history", [])
+
+    if not message:
+        raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío.")
+
+    if isinstance(app_context, dict):
+        app_context["server_tasks"] = summarize_active_tasks()
+
     from core.app_agent import AppAgentController
+    controller = AppAgentController()
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
 
-    job = AppAgentController._pending_nim_jobs.pop(job_id, None)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job no encontrado o ya expirado.")
+    def emit(event: dict) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, event)
 
-    future  = job["future"]
-    executor = job["executor"]
-    conn    = job["conn"]
-    elapsed = time.time() - job["started_at"]
-    remaining = max(5.0, job["hard_timeout"] - elapsed)
+    async def run_agent() -> dict:
+        def work():
+            try:
+                return controller.process_message(
+                    message=message,
+                    model_id=model_id,
+                    app_context=app_context,
+                    history=history if isinstance(history, list) else [],
+                    on_event=emit,
+                )
+            except Exception as exc:
+                safe_log(f"[Server] Error en chat del agente (stream): {exc}")
+                return {
+                    "model_used": model_id,
+                    "reply": "⚠️ Ocurrió un error al procesar la solicitud. Intenta de nuevo.",
+                    "reasoning": str(exc),
+                    "actions": [],
+                    "extra": {},
+                }
 
-    try:
-        raw_resp = future.result(timeout=remaining)
-        executor.shutdown(wait=False)
-        clean = (raw_resp or "").strip()
-        m = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", clean)
-        if m:
-            clean = m.group(1).strip()
-        else:
-            s, e = clean.find("{"), clean.rfind("}")
-            if s != -1 and e > s:
-                clean = clean[s:e+1].strip()
-        parsed_data = None
+        return await loop.run_in_executor(None, work)
+
+    async def sse():
+        task = asyncio.create_task(run_agent())
         try:
-            parsed_data = json.loads(clean, strict=False)
-        except Exception:
-            pass
-
-        controller = AppAgentController()
-        parsed_actions = parsed_data.get("actions", []) if isinstance(parsed_data, dict) else []
-        if not parsed_data or not isinstance(parsed_data, dict) or not parsed_actions:
-            css_data = controller._extract_and_apply_css_if_present(job.get("user_message", ""), raw_resp or clean, {})
-            if css_data:
-                parsed_data = css_data
-            elif not parsed_data or not isinstance(parsed_data, dict):
-                parsed_data = {"reply": clean or "Listo.", "actions": []}
-
-        reply   = parsed_data.get("reply", "Tarea completada.")
-        actions = parsed_data.get("actions", [])
-        if not isinstance(actions, list):
-            actions = []
-
-        # Ejecutar cualquier edit_file si no fue auto-aplicado
-        for act in actions:
-            if isinstance(act, dict) and act.get("type") == "edit_file" and not act.get("file_written"):
-                rel_p = act.get("path", "")
-                content = act.get("content", "")
+            while True:
                 try:
-                    target_f = _resolve_safe_path(rel_p)
-                    target_f.parent.mkdir(parents=True, exist_ok=True)
-                    if target_f.exists():
-                        import shutil
-                        shutil.copy2(str(target_f), str(target_f) + ".bak")
-                        existing = target_f.read_text(encoding="utf-8")
-                    else:
-                        existing = ""
-                    target_f.write_text(existing + "\n" + content, encoding="utf-8")
-                    act["file_written"] = str(rel_p)
-                    if target_f.suffix == ".css":
-                        act["css_code"] = content
-                        act["reload"] = False
-                    else:
-                        act["reload"] = True
-                except Exception as ef_err:
-                    safe_log(f"[Server] Error en edit_file durante wait: {ef_err}")
+                    event = await asyncio.wait_for(queue.get(), timeout=0.4)
+                except asyncio.TimeoutError:
+                    if task.done():
+                        break
+                    yield ": ping\n\n"
+                    continue
+                if event.get("type") == "final":
+                    break
+                yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+            payload_final = await task
+            yield f"data: {json.dumps({'type': 'final', 'payload': payload_final}, ensure_ascii=False, default=str)}\n\n"
+        except Exception as exc:
+            safe_log(f"[Server] Error en stream del agente: {exc}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)}, ensure_ascii=False)}\n\n"
+        finally:
+            task.cancel()
 
-        extra = parsed_data.get("extra", {})
-
-        return {
-            "status": "ok",
-            "model_used": conn.role_title,
-            "reply": reply,
-            "reasoning": f"✅ {conn.role_title} respondió tras la espera.",
-            "actions": actions,
-            "extra": extra,
-        }
-    except concurrent.futures.TimeoutError:
-        executor.shutdown(wait=False)
-        return {
-            "status": "timeout",
-            "model_used": "none",
-            "reply": "⚠️ El modelo no respondió. Por favor usa Gemini.",
-            "reasoning": "Hard timeout alcanzado.",
-            "actions": [],
-            "extra": {},
-        }
-    except Exception as exc:
-        executor.shutdown(wait=False)
-        safe_log(f"[Server] Error esperando job {job_id}: {exc}")
-        return {
-            "status": "error",
-            "model_used": "none",
-            "reply": f"⚠️ Error al obtener respuesta: {exc}",
-            "reasoning": str(exc),
-            "actions": [],
-            "extra": {},
-        }
+    return StreamingResponse(sse(), media_type="text/event-stream")
 
 
-@app.delete("/api/agent/wait/{job_id}")
-def agent_cancel_nim_job(job_id: str):
-    """El usuario eligió Gemini — cancela el job NIM pendiente y libera recursos."""
-    from core.app_agent import AppAgentController
-    job = AppAgentController._pending_nim_jobs.pop(job_id, None)
-    if job:
-        job["executor"].shutdown(wait=False)
-    return {"cancelled": True, "job_id": job_id}
+@app.get("/api/agent/chats")
+def list_agent_chats():
+    """Lista los chats guardados del asistente (máximo 20, recientes primero)."""
+    from core.chat_store import ChatStore
+    return {"chats": ChatStore().list()}
+
+
+@app.get("/api/agent/chats/{chat_id}")
+def get_agent_chat(chat_id: str):
+    """Devuelve un chat guardado completo (título + mensajes)."""
+    from core.chat_store import ChatStore
+    chat = ChatStore().load(chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat no encontrado.")
+    return {"chat": chat}
+
+
+@app.post("/api/agent/chats")
+def save_agent_chat(payload: dict = Body(...)):
+    """Crea o actualiza un chat del asistente. El almacén conserva hasta 20."""
+    from core.chat_store import ChatStore
+    chat_id = payload.get("chat_id") or None
+    messages = payload.get("messages", [])
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=400, detail="'messages' debe ser una lista.")
+    document = ChatStore().save(chat_id, messages)
+    return {"chat": document}
+
+
+@app.delete("/api/agent/chats/{chat_id}")
+def delete_agent_chat(chat_id: str):
+    from core.chat_store import ChatStore
+    deleted = ChatStore().delete(chat_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat no encontrado.")
+    return {"deleted": True, "chat_id": chat_id}
 
 
 @app.post("/api/agent/generate-thumbnail")
@@ -1845,6 +1902,267 @@ def agent_generate_thumbnail(payload: dict = Body(...)):
     except Exception as exc:
         safe_log(f"[Server] Error generando miniatura: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================================
+# ESTUDIO DE PUBLICACIÓN — ver qué se publica, miniatura IA y subida a YouTube
+# ============================================================================
+
+def _publish_studio(project_id: str):
+    from core.publish_studio import PublishStudio
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", project_id or ""):
+        raise HTTPException(status_code=400, detail="Identificador de proyecto no válido.")
+    if not (settings.PROJECTS_DIR / project_id / "project.json").exists():
+        raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+    return PublishStudio(project_id)
+
+
+@app.post("/api/publish/prepare")
+def publish_prepare(payload: Dict[str, Any] = Body(...)):
+    """Resumen de exactamente lo que se va a publicar + estado del canal."""
+    import core.publish_studio as ps
+    import core.youtube_oauth as yt
+    studio = _publish_studio(str(payload.get("project_id", "")))
+    try:
+        info = studio.prepare()
+        # No se exponen rutas del equipo local a la interfaz.
+        info.pop("video_path", None)
+        info["preview_url"] = f"/api/projects/{studio.project_id}/preview"
+        info["styles"] = [{"id": key, "label": value["label"]} for key, value in ps.THUMB_STYLES.items()]
+        info["youtube"] = {
+            "configured": yt.is_configured(),
+            "connected": yt.is_connected(),
+            "channel": yt.get_channel_info() if yt.is_connected() else None,
+        }
+        return info
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=friendly_error(exc))
+
+
+@app.post("/api/publish/metadata")
+def publish_metadata(payload: Dict[str, Any] = Body(...)):
+    """Título, descripción y etiquetas SEO generados con IA."""
+    studio = _publish_studio(str(payload.get("project_id", "")))
+    try:
+        return studio.generate_metadata(instructions=str(payload.get("instructions", "")))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=friendly_error(exc))
+
+
+@app.post("/api/publish/thumbnail")
+def publish_thumbnail(payload: Dict[str, Any] = Body(...)):
+    """Miniatura 1280x720 con el modelo de imagen de Gemini (Nano Banana)."""
+    studio = _publish_studio(str(payload.get("project_id", "")))
+    frame_at = payload.get("frame_at")
+    try:
+        return studio.generate_ai_thumbnail(
+            title=str(payload.get("title", "")),
+            topic=str(payload.get("topic", "")),
+            style=str(payload.get("style", "cinematic")),
+            thumbnail_text=str(payload.get("thumbnail_text", "")),
+            use_frame=bool(payload.get("use_frame", False)),
+            frame_at=float(frame_at) if isinstance(frame_at, (int, float)) else None,
+            custom_prompt=str(payload.get("custom_prompt", "")),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=friendly_error(exc))
+
+
+@app.get("/api/publish/youtube/status")
+def publish_youtube_status():
+    import core.youtube_oauth as yt
+    return {
+        "configured": yt.is_configured(),
+        "connected": yt.is_connected(),
+        "channel": yt.get_channel_info() if yt.is_connected() else None,
+    }
+
+
+@app.get("/api/publish/youtube/connect")
+def publish_youtube_connect():
+    """Redirige al consentimiento OAuth de Google (PKCE)."""
+    import core.youtube_oauth as yt
+    from urllib.parse import quote
+    try:
+        flow = yt.begin_authorization()
+    except Exception as exc:
+        return RedirectResponse(f"/?publish_error={quote(str(exc)[:200])}")
+    return RedirectResponse(flow["auth_url"])
+
+
+@app.get("/api/publish/youtube/callback")
+def publish_youtube_callback(code: str = "", state: str = "", error: str = ""):
+    """Google regresa aquí tras el consentimiento; guarda el token del canal."""
+    import core.youtube_oauth as yt
+    from urllib.parse import quote
+    if error:
+        return RedirectResponse(f"/?publish_error={quote(error[:200])}")
+    try:
+        yt.complete_authorization(code=code, state=state)
+    except Exception as exc:
+        safe_log(f"[Publish] Error completando OAuth de YouTube: {exc}")
+        return RedirectResponse(f"/?publish_error={quote(str(exc)[:200])}")
+    return RedirectResponse("/?publish_connected=1")
+
+
+@app.post("/api/publish/youtube/disconnect")
+def publish_youtube_disconnect():
+    import core.youtube_oauth as yt
+    yt.disconnect()
+    return {"connected": False}
+
+
+def _run_youtube_upload(task_id: str, studio, video: Path, payload: Dict[str, Any], thumbnail_path: Optional[Path]) -> None:
+    import core.youtube_oauth as yt
+    try:
+        def report(fraction: float, message: str) -> None:
+            update_task_state(task_id, "upload", 2.0 + fraction * 95.0, message)
+
+        upload = yt.upload_video(
+            video_path=video,
+            title=str(payload.get("title", "")),
+            description=str(payload.get("description", "")),
+            tags=list(payload.get("tags") or []),
+            privacy=str(payload.get("privacy", "public")),
+            category_id=str(payload.get("category_id", "27")),
+            made_for_kids=bool(payload.get("made_for_kids", False)),
+            notify_subscribers=bool(payload.get("notify_subscribers", True)),
+            progress=report,
+        )
+        thumbnail_set = False
+        if thumbnail_path:
+            update_task_state(task_id, "thumbnail", 98.0, "Asignando miniatura personalizada...")
+            thumbnail_set = yt.set_thumbnail(upload["video_id"], thumbnail_path)
+        result = {
+            **upload,
+            "thumbnail_set": thumbnail_set,
+            "project_id": studio.project_id,
+            "studio_url": f"https://studio.youtube.com/video/{upload['video_id']}/edit",
+        }
+        with _state_lock:
+            tasks_progress[task_id].update({"completed": True, "result": result})
+        update_task_state(task_id, "done", 100.0, "¡Video publicado en YouTube con éxito!")
+    except Exception as exc:
+        safe_log(f"[Publish] Fallo la subida a YouTube: {exc}")
+        with _state_lock:
+            tasks_progress[task_id].update({"error": str(exc)[:400]})
+        update_task_state(task_id, "error", 100.0, f"No se pudo publicar: {str(exc)[:200]}")
+
+
+@app.post("/api/publish/youtube/upload")
+async def publish_youtube_upload(payload: Dict[str, Any] = Body(...)):
+    """Sube el video master directamente al canal conectado (tarea en background)."""
+    import core.youtube_oauth as yt
+    studio = _publish_studio(str(payload.get("project_id", "")))
+    if not yt.is_connected():
+        raise HTTPException(status_code=409, detail="El canal de YouTube no está conectado. Conéctalo primero.")
+    video = studio.resolve_master_video()
+    if not video:
+        raise HTTPException(status_code=404, detail="Este proyecto no tiene un video final para publicar.")
+
+    thumbnail_path: Optional[Path] = None
+    thumb_url = str(payload.get("thumbnail_url") or "")
+    if thumb_url.startswith("/media/"):
+        candidate = settings.OUTPUTS_DIR / thumb_url[len("/media/"):]
+        if candidate.is_file():
+            thumbnail_path = candidate
+
+    task_id = f"pub_{uuid.uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc).isoformat()
+    tasks_progress[task_id] = {
+        "step": "upload", "progress": 2.0, "message": "Autenticando con YouTube...",
+        "completed": False, "error": None, "result": None, "cancel_supported": False,
+        "file_name": str(payload.get("title") or "Video KAI"),
+        "created_at": now, "updated_at": now, "step_started_at": now,
+        "events": [{"step": "upload", "progress": 2.0, "message": "Autenticando con YouTube...", "at": now}],
+    }
+    thread = threading.Thread(
+        target=_run_youtube_upload,
+        args=(task_id, studio, video, payload, thumbnail_path),
+        daemon=True,
+    )
+    thread.start()
+    return {"task_id": task_id, "project_id": studio.project_id}
+
+
+# ============================================================================
+# RADAR DE VIRALIDAD — ranking de videos virales por región + temas urgentes
+# ============================================================================
+
+trend_radar = TrendRadar()
+
+
+@app.on_event("startup")
+async def start_trend_radar_scheduler() -> None:
+    """Revisión automática cada 3 horas: qué sube, qué baja, qué emerge."""
+    threading.Thread(target=trend_radar.scheduler_loop, daemon=True).start()
+
+
+@app.get("/api/trend-radar")
+async def get_trend_radar():
+    """Ranking viral y temas urgentes (caché viva; se auto-refresca si caducó)."""
+    return trend_radar.get_snapshot()
+
+
+@app.post("/api/trend-radar/refresh")
+async def refresh_trend_radar():
+    """Fuerza un barrido nuevo en background (charts + temas con IA)."""
+    started = trend_radar.start_background_refresh()
+    return {"started": started, "refreshing": True}
+
+
+@app.post("/api/trend-radar/analyze")
+async def analyze_trend_item(payload: Dict[str, Any] = Body(...)):
+    """La IA analiza el video original y propone enfoques; el usuario elige."""
+    kind = str(payload.get("kind", "")).strip().lower()
+    item = payload.get("item") or {}
+    if kind != "video" or not isinstance(item, dict) or not item:
+        raise HTTPException(status_code=400, detail="El análisis de estrategia aplica a videos virales (kind='video').")
+    try:
+        return trend_radar.analyze_video(item)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=friendly_error(exc))
+
+
+@app.post("/api/trend-radar/replicate")
+async def replicate_trend_item(payload: Dict[str, Any] = Body(...)):
+    """Replica un video viral (en español, con mejoras) o produce un tema urgente.
+
+    La IA convierte los parámetros del original en una brief en español y
+    arranca directamente la producción autónoma de KAI (streamer pipeline).
+    Si viene "choice" (enfoque elegido en el panel de estrategia), la brief se
+    construye alrededor de esa decisión; "instructions" añade notas libres.
+    """
+    kind = str(payload.get("kind", "")).strip().lower()
+    item = payload.get("item") or {}
+    if kind not in ("video", "topic") or not isinstance(item, dict) or not item:
+        raise HTTPException(status_code=400, detail="Indica kind ('video'|'topic') y el elemento 'item' a replicar.")
+    choice = payload.get("choice") if isinstance(payload.get("choice"), dict) else None
+    instructions = str(payload.get("instructions", "") or "")[:400]
+    try:
+        brief = trend_radar.build_replication(kind, item, choice=choice, instructions=instructions)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=friendly_error(exc))
+
+    style = str(payload.get("style", "divulgacion")).strip() or "divulgacion"
+    # Duración: la que pida el usuario; si no, la que la IA recomienda según el original.
+    raw_duration = payload.get("duration_sec")
+    if raw_duration is None:
+        raw_duration = brief.get("recommended_duration_sec") or 60
+    duration_sec = max(20, min(240, int(raw_duration)))
+    creation = await create_streamer_broadcast({
+        "topic": brief["topic"],
+        "extra_notes": brief["extra_notes"],
+        "style": style,
+        "duration_sec": duration_sec,
+        "origin": "radar",
+    })
+    return {"task_id": creation["task_id"], "project_id": creation["project_id"],
+            "topic": brief["topic"], "extra_notes": brief["extra_notes"]}
 
 
 # ============================================================================

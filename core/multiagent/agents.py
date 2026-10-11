@@ -80,7 +80,7 @@ class ArchitectAgent:
             '  "suggested_tests": ["tests/test_modulo.py"]\n'
             "}\n"
             "REGLAS OBLIGATORIAS DE ARQUITECTURA:\n"
-            "- EDICIÓN MODULAR Y ÁGIL (ESTILO ANTIGRAVITY / CURSOR): NUNCA pidas reescribir un archivo gigante entero (como app.js de 140KB o style.css de 58KB) en una sola tarea. En su lugar, delega extensiones modulares, parches o nuevos módulos específicos (ej: 'web/static/js/timeline.js', 'web/static/css/theme-dark-matte.css', 'core/motion_presets.py') o modificaciones puntuales de funciones.\n"
+            "- EDICIÓN MODULAR Y ÁGIL (ESTILO ANTIGRAVITY / CURSOR): NUNCA pidas reescribir un archivo gigante entero (como app.js de 140KB o style.css de 58KB) en una sola tarea. En su lugar, delega extensiones modulares, parches o nuevos módulos específicos (ej: 'web/static/js/timeline.js', 'web/static/css/theme-dark-matte.css', 'core/web_card_renderer.py') o modificaciones puntuales de funciones.\n"
             "- Si la tarea es ligera (crear tests, helpers, templates, extensiones CSS, utilidades): asigna 'complexity': 'light' y 'assigned_model': 'z-ai/glm-5.3-flash' (la ejecutas tú mismo de forma ágil).\n"
             "- Si la tarea es pesada o compleja (arquitectura base, lógica de algoritmos, refactorización profunda, integración compleja): asigna 'complexity': 'heavy' y 'assigned_model': 'z-ai/glm-5.3' (para el Ingeniero Senior).\n"
             "IMPORTANTE: Sé conciso, no agregues texto fuera del JSON, mantén entre 2 y 5 tareas esenciales."

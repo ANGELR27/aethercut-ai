@@ -20,6 +20,17 @@ class Settings:
     NVIDIA_API_KEY: str = os.getenv("NVIDIA_API_KEY", "")
     NVIDIA_MODEL: str = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3")
 
+    # Estudio de Publicación: miniaturas IA (Gemini image) y subida directa a YouTube
+    GEMINI_IMAGE_API_KEY: str = os.getenv("GEMINI_IMAGE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+    GEMINI_IMAGE_MODEL: str = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+    YOUTUBE_CLIENT_ID: str = os.getenv("YOUTUBE_CLIENT_ID", "")
+    YOUTUBE_CLIENT_SECRET: str = os.getenv("YOUTUBE_CLIENT_SECRET", "")
+    YOUTUBE_REDIRECT_PORT: int = int(os.getenv("YOUTUBE_REDIRECT_PORT", "8000"))
+
+    # Radar de Viralidad: YouTube Data API v3 (charts mostPopular por región)
+    YOUTUBE_DATA_API_KEY: str = os.getenv("YOUTUBE_DATA_API_KEY", "") or os.getenv("GEMINI_IMAGE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+    TREND_REGIONS: str = os.getenv("TREND_REGIONS", "US,GB,CA")
+
     # Multi-Agent Specialized Triad
     GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
     GLM_FLASH_API_KEY: str = os.getenv("GLM_FLASH_API_KEY", "")

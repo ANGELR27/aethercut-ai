@@ -13,6 +13,8 @@ Renderiza cada escena diseñada por el AI Director de forma modular:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import math
 import re
 import subprocess
@@ -135,10 +137,19 @@ class SceneEngine:
         scene_dir = self.workdir / f"scene_{scene.scene_id}"
         scene_dir.mkdir(parents=True, exist_ok=True)
         scene_out = scene_dir / f"scene_{scene.scene_id}.mp4"
+        # Escritura atómica: FFmpeg escribe a .tmp.mp4 y solo al terminar bien se
+        # renombra. Una cancelación (proc.kill) deja el parcial en .tmp, jamás en
+        # el archivo final — la caché no puede envenenarse con un MP4 sin moov.
+        scene_tmp = scene_dir / f"scene_{scene.scene_id}.tmp.mp4"
+        scene_tmp.unlink(missing_ok=True)
 
-        # 0. Cache inteligente de escenas (Reanudar sin rehacer lo que ya está listo)
+        # 0. Cache inteligente de escenas (Reanudar sin rehacer lo que ya está listo).
+        # Se valida tamaño Y la firma de settings + guion: una escena hecha con otro
+        # formato (9:16 ↔ 16:9), otra voz u otro texto NO se reutiliza nunca.
         thumb_path = scene_dir / "scene_thumb.jpg"
-        if scene_out.exists() and scene_out.stat().st_size > 50000:
+        meta_path = scene_dir / "render_meta.json"
+        if scene_out.exists() and scene_out.stat().st_size > 50000 and self._cache_meta_valid(meta_path, scene):
+            scene_tmp.unlink(missing_ok=True)
             if not thumb_path.exists():
                 try:
                     import subprocess
@@ -208,17 +219,32 @@ class SceneEngine:
                 else:
                     c_cards.append({"title": scene.name, "desc": scene.speech[:60] + "..."})
                 c_cards.append({"title": "INFERENCIA ACTIVA", "desc": "Validación cognitiva en tiempo real."})
-                va.render_character_action_clip(
+                # to_thread: render_character_action_clip genera TODOS los frames
+                # (duration×25 PNGs a resolución completa) + FFmpeg de forma
+                # síncrona; ejecutarlo directo congelaba el event loop entero
+                # (sin progreso, sin cancelación) durante toda la escena.
+                await asyncio.to_thread(
+                    va.render_character_action_clip,
                     headline=scene.card.headline if scene.card else scene.name,
                     action_name="Análisis & Decisión Estratégica",
                     cards_info=c_cards,
                     duration_sec=duration,
-                    out_mp4=vec_clip
+                    out_mp4=vec_clip,
                 )
                 if vec_clip.exists():
                     broll_img = vec_clip
             except Exception as _ev:
                 safe_log(f"[SceneEngine] Fallback en vector_motion: {_ev}")
+
+        # MODO ANÁLISIS DE CASO: si el director ancló esta escena a un fotograma
+        # REAL del video fuente, ese fotograma ES el fondo — evidencia visual
+        # del caso concreto, jamás stock genérico. (Imagen → Ken Burns.)
+        case_frame_idx = getattr(scene, "case_frame", None)
+        if case_frame_idx is not None:
+            case_frame_path = self.workdir / "case_frames" / f"frame_{int(case_frame_idx):02d}.jpg"
+            if case_frame_path.exists():
+                broll_img = case_frame_path
+                safe_log(f"[SceneEngine] 🎯 Escena {scene.scene_id}: fotograma REAL del caso (frame {int(case_frame_idx)}) como fondo.")
 
         if not broll_img or not broll_img.exists():
             # Priorizar video en movimiento para todas las escenas con B-Roll, reacción, noticias o contexto
@@ -293,6 +319,14 @@ class SceneEngine:
                 audio_path=audio_path,
                 fps=24
             )
+            # Validar que el render realmente produjo un archivo utilizable:
+            # en escenas consecutivas el render puede "completar" sin excepción
+            # pero dejar un archivo vacío/corrupto (recursos agotados). Sin esta
+            # verificación, el FFmpeg de la escena intentaba abrir un .mov roto
+            # y la escena entera salía truncada (0.4s en vez de 15s).
+            if not scene_avatar_clip.exists() or scene_avatar_clip.stat().st_size < 10000:
+                safe_log(f"[SceneEngine] Avatar sincronizado inválido o vacío para escena {scene.scene_id}: fallback a base.")
+                scene_avatar_clip = None
         except Exception as exc:
             safe_log(f"[SceneEngine] Fallback a avatar clip base: {exc}")
             scene_avatar_clip = None
@@ -343,7 +377,7 @@ class SceneEngine:
 
                 # 3. Mapa Geopolítico / Satelital Táctico GeoIntel
                 elif any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN")) or "mapa" in c_headline.lower():
-                    self.web_renderer.render_geointel_map_to_image(
+                    map_result = self.web_renderer.render_geointel_map_to_image(
                         location_title=c_headline,
                         country_name=c_stat or "ZONA DE INVESTIGACIÓN",
                         out_png=card_img_path,
@@ -351,7 +385,22 @@ class SceneEngine:
                         notes=c_body,
                         badge=c_badge or "RECONOCIMIENTO GEOGRÁFICO",
                     )
-                    safe_log(f"[SceneEngine] 🗺️ Mapa Geopolítico GeoIntel generado para escena {scene.scene_id}")
+                    if map_result:
+                        safe_log(f"[SceneEngine] 🗺️ Mapa Geopolítico GeoIntel generado para escena {scene.scene_id}")
+                    else:
+                        # Ubicación no reconocida: sin mapa, tarjeta Bento normal.
+                        # Nunca un mapa falso con coordenadas inventadas.
+                        self.web_renderer.render_to_image(
+                            headline=c_headline,
+                            out_png=card_img_path,
+                            stat_value=c_stat or "DATO CLAVE",
+                            stat_label="Cifra Verificada",
+                            body=c_body,
+                            badge=c_badge or "DATO VERIFICADO",
+                            source="Registro Oficial 2026",
+                            style="tactical_amber" if scene.type in ("breaking_news", "card_focus") else "obsidian_bento",
+                        )
+                        safe_log(f"[SceneEngine] 📊 Mapa sin ubicación reconocida: tarjeta Bento estándar (escena {scene.scene_id})")
 
                 # 4. Bento Box Pro estándar (sin ruedas)
                 else:
@@ -460,6 +509,7 @@ class SceneEngine:
         # 3e. Preparar Texto Libre Cinemático Flotante (sin card) si la escena es un Top, ranking o enumeración
         free_title_img_path = None
         free_title_blur_bg = False
+        kinetic_word_paths = []
         free_data = getattr(scene, "free_title", None)
         if not free_data and not card_img_path:
             name_low = scene.name.lower()
@@ -478,6 +528,7 @@ class SceneEngine:
 
         if free_data:
             out_free_path = scene_dir / f"free_title_{scene.scene_id}.png"
+            kinetic_word_paths = []
             try:
                 free_title_img_path = self.web_renderer.render_free_kinetic_text_to_image(
                     main_title=free_data.get("title") or scene.name,
@@ -493,6 +544,25 @@ class SceneEngine:
             except Exception as _fe:
                 safe_log(f"[SceneEngine] Error generando texto libre cinemático: {_fe}")
                 free_title_img_path = None
+
+            # Tipografía cinética VIRAL: cada palabra como PNG bicolor gigante que
+            # estalla en pantalla una a una (pop + rise) al ritmo de la locución.
+            # Solo si Chromium funciona y el título tiene 1-4 palabras; el PNG
+            # completo queda como fallback si la serie falla.
+            if free_title_img_path is not None or free_data.get("title"):
+                try:
+                    from core.web_card_renderer import KINETIC_DUOTONES
+                    duo = KINETIC_DUOTONES[int(scene.scene_id) % len(KINETIC_DUOTONES)]
+                    kinetic_word_paths = self.web_renderer.render_kinetic_word_series(
+                        title=free_data.get("title") or scene.name,
+                        out_dir=scene_dir / f"kinetic_{scene.scene_id}",
+                        duo=duo,
+                        max_words=4,
+                    )
+                    if kinetic_word_paths:
+                        safe_log(f"[SceneEngine] ⚡ {len(kinetic_word_paths)} palabras cinéticas bicolor listas (escena {scene.scene_id})")
+                except Exception as _ke:
+                    kinetic_word_paths = []
 
         # 4. Generar subtítulos para la escena
         srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
@@ -533,7 +603,14 @@ class SceneEngine:
                 if sub_is_image:
                     inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(clip_p)])
                 else:
-                    inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(clip_p)])
+                    # Beat de VIDEO sincronizado a su frase: el clip entra a
+                    # cut_sec mostrando SU PROPIO frame 0. Se lee solo lo que
+                    # resta de escena y setpts desplaza los timestamps hasta
+                    # cut_sec. Antes el clip corría oculto desde t=0 y al
+                    # revelarse entraba por su mitad (frame interno de cut_sec),
+                    # perdiendo el momento exacto que el director marcó.
+                    remaining = max(0.5, duration - cut_sec)
+                    inputs.extend(["-t", f"{remaining:.2f}", "-r", "25", "-stream_loop", "-1", "-i", str(clip_p)])
                 clip_in_idx = num_in
                 num_in += 1
                 v_scaled = f"v_bg_scaled_{c_idx_sub}"
@@ -549,7 +626,8 @@ class SceneEngine:
                     )
                 else:
                     filter_parts.append(
-                        f"[{clip_in_idx}:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[{v_scaled}];"
+                        f"[{clip_in_idx}:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},"
+                        f"setpts=PTS+{cut_sec:.2f}/TB,setsar=1[{v_scaled}];"
                         f"[{cur_v}][{v_scaled}]overlay=0:0:enable='gte(t,{cut_sec:.2f})'[{v_next}]"
                     )
                 cur_v = v_next
@@ -560,8 +638,24 @@ class SceneEngine:
             num_in += 1
 
         # Desenfoque temporal dinámico: si hay tarjeta o texto libre cinemático, desenfocar durante su aparición
-        card_duration = min(9.5, max(4.5, duration - 1.2)) if (card_img_path and card_img_path.exists()) else 0.0
-        free_title_dur = min(3.5, max(2.2, duration - 0.8)) if (free_title_img_path and free_title_blur_bg) else 0.0
+        # Duración de la tarjeta por TIEMPO DE LECTURA (regla broadcast: ~1/3 s por
+        # palabra + 1.2s de animación/buffer, acotado 4-6.5s). Antes usaba hasta 9.5s
+        # fijos: la card se volvía un adorno permanente tapando el video.
+        if card_img_path and card_img_path.exists():
+            card_words = len(f"{getattr(scene.card, 'headline', '') or ''} {getattr(scene.card, 'body', '') or ''}".split())
+            card_duration = max(4.0, min(6.5, 0.35 * card_words + 1.2))
+        else:
+            card_duration = 0.0
+        # Duración del texto libre: con serie cinética la ventana cubre el
+        # estallido escalonado de las palabras (0.32s por palabra) + 1.6s de
+        # lectura final. Sin serie, el comportamiento clásico.
+        if free_title_blur_bg and (free_title_img_path or kinetic_word_paths):
+            if kinetic_word_paths:
+                free_title_dur = max(2.4, min(4.6, 0.32 * len(kinetic_word_paths) + 1.6))
+            else:
+                free_title_dur = min(3.5, max(2.2, duration - 0.8))
+        else:
+            free_title_dur = 0.0
 
         if card_duration > 0:
             # Fondo nítido + capa desenfocada activa solo durante la permanencia de la tarjeta
@@ -576,7 +670,12 @@ class SceneEngine:
         # Avatar según layout de cámara
         av_file = scene_avatar_clip if (scene_avatar_clip and scene_avatar_clip.exists()) else (avatar_clip or avatar_webm)
         if av_file and Path(av_file).exists():
-            inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(av_file)])
+            # SIN '-r' de entrada: el clip de avatar nace a 24 fps y su envolvente de
+            # lip-sync está construida a 24 fps. Re-tiempearlo a 25 (-r 25) adelantaba
+            # la boca ~4% y hacía que el loop reiniciara en el 96% de cada escena.
+            # A fps nativos, el clip dura exactamente lo que duró el audio y el loop
+            # reinicia justo al terminar la escena.
+            inputs.extend(["-t", dur_str, "-stream_loop", "-1", "-i", str(av_file)])
             av_idx = num_in
             num_in += 1
 
@@ -625,7 +724,38 @@ class SceneEngine:
             cur_v = "v_av"
 
         # Overlay adicional según tipo de escena: Texto Libre Cinemático o Tarjeta Bento
-        if free_title_img_path and free_title_img_path.exists():
+        if kinetic_word_paths:
+            # ── TIPOGRAFÍA CINÉTICA VIRAL (palabra a palabra) ──
+            # Cada palabra estalla en pantalla con fade + rise (ease-out cúbico)
+            # escalonadas 0.32s, apiladas verticalmente como bloque central. La
+            # serie completa respira junta y se funde a la vez al terminar.
+            n_words = len(kinetic_word_paths)
+            stagger = 0.32
+            ft_start = 0.4
+            ft_end = min(duration - 0.3, ft_start + (n_words - 1) * stagger + 1.7)
+            for i_w, word_path in enumerate(kinetic_word_paths):
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(word_path)])
+                w_idx = num_in
+                num_in += 1
+                st = ft_start + i_w * stagger
+                # PNG a 2x: reducir al tamaño objetivo (palabra ~200px de alto en pantalla)
+                filter_parts.append(
+                    f"[{w_idx}:v]scale=iw*0.5:ih*0.5,format=rgba,"
+                    f"fade=t=in:st={st:.2f}:d=0.20:alpha=1,"
+                    f"fade=t=out:st={ft_end - 0.35:.2f}:d=0.35:alpha=1[kw{i_w}_a]"
+                )
+                # Pop con rise: entra subiendo 34px con easing cúbico y se apila
+                # centrada como bloque (offset vertical por índice de palabra).
+                pop_calc = f"min(max((t-{st:.2f})/0.30\\,0)\\,1)"
+                row_off = (i_w - (n_words - 1) / 2.0)
+                y_expr = f"(H-h)/2 + {row_off:.2f}*(h+14) + 34*(1-pow({pop_calc}\\,3))"
+                filter_parts.append(
+                    f"[{cur_v}][kw{i_w}_a]overlay=x='(W-w)/2':y='{y_expr}':"
+                    f"enable='between(t,{st:.2f},{ft_end:.2f})'[v_kw{i_w}]"
+                )
+                cur_v = f"v_kw{i_w}"
+
+        elif free_title_img_path and free_title_img_path.exists():
             inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(free_title_img_path)])
             ft_idx = num_in
             num_in += 1
@@ -716,17 +846,21 @@ class SceneEngine:
             inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(chips_img_path)])
             chp_idx = num_in
             num_in += 1
-            chip_x = "((W-w)/2)" if not self.is_vertical else "30"
-            # Altura ergonómica: si hay tarjeta Bento (110 + ~430 = ~540), situar los chips con respiro debajo a 565px
-            chip_y = 565 if (card_img_path and not self.is_vertical) else (150 if not self.is_vertical else int(self.H * 0.44))
+            # Posición FIJA y predecible (regla broadcast): abajo-izquierda dentro
+            # del área segura, sin importar el contenido. Antes flotaba al centro
+            # o a 150px según la escena — el espectador nunca aprendía dónde mirar.
+            # El PNG viene a 2x (device-scale-factor), se reduce al 78%: banderas
+            # grandes (~70px) y texto nítido.
+            chip_x = 64 if not self.is_vertical else 26
+            chip_y = "main_h-overlay_h-88" if not self.is_vertical else "main_h-overlay_h-150"
             # Duración del pop-up: 3.5 segundos o hasta el final de la escena
             chip_dur = 3.5
             chip_end = min(duration - 0.25, round(chip_start_time + chip_dur, 2))
             ch_fo = max(chip_start_time + 0.3, chip_end - 0.35)
             filter_parts.append(
-                f"[{chp_idx}:v]format=rgba,fade=t=in:st={chip_start_time:.2f}:d=0.25:alpha=1,fade=t=out:st={ch_fo:.2f}:d=0.35:alpha=1[chips_animated]"
+                f"[{chp_idx}:v]scale=iw*0.78:ih*0.78,format=rgba,fade=t=in:st={chip_start_time:.2f}:d=0.25:alpha=1,fade=t=out:st={ch_fo:.2f}:d=0.35:alpha=1[chips_animated]"
             )
-            filter_parts.append(f"[{cur_v}][chips_animated]overlay=x='{chip_x}':y={chip_y}:enable='between(t,{chip_start_time:.2f},{chip_end:.2f})'[v_chips]")
+            filter_parts.append(f"[{cur_v}][chips_animated]overlay=x={chip_x}:y='{chip_y}':enable='between(t,{chip_start_time:.2f},{chip_end:.2f})'[v_chips]")
             cur_v = "v_chips"
 
         # Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
@@ -778,7 +912,7 @@ class SceneEngine:
             inputs.extend(["-i", str(sfx_path)])
             sfx_idx = num_in
             num_in += 1
-            audio_filter_parts.append(f"[{sfx_idx}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,adelay=delays=150:all=1,volume=0.35[a_sfx]")
+            audio_filter_parts.append(f"[{sfx_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,adelay=delays=150:all=1,volume=0.35[a_sfx]")
             audio_mix_inputs.append("[a_sfx]")
 
         # Aplicar color grading cinematográfico al output final si no es 'raw'
@@ -791,8 +925,23 @@ class SceneEngine:
             filter_parts.append("[v_out]format=yuv420p[v_graded]")
             final_v = "v_graded"
 
+        # Transición dip-to-black entre escenas (estándar broadcast): cada escena
+        # entra desde negro y sale a negro (0.25s). En la concatenación se lee
+        # como un corte con dip rápido y elegante; la primera escena abre desde
+        # negro (apertura) y la última cierra a negro (final). Coste cero: forma
+        # parte del encode propio de la escena, sin re-codificar en el concat.
+        filter_parts.append(
+            f"[{final_v}]fade=t=in:st=0:d=0.25,"
+            f"fade=t=out:st={max(0.0, duration - 0.28):.2f}:d=0.28[v_final]"
+        )
+        final_v = "v_final"
+
         inputs_tags = "".join(audio_mix_inputs)
-        audio_filter_parts.append(f"{inputs_tags}amix=inputs={len(audio_mix_inputs)}:duration=longest:dropout_transition=2,aformat=sample_rates=48000:channel_layouts=stereo[a_out]")
+        # normalize=0: amix por defecto divide cada entrada entre el número de
+        # entradas activas → la voz bajaba 3-6 dB con BGM/SFX y sufría un "swell"
+        # al expirar el SFX (dropout_transition). Sin normalización, la voz
+        # mantiene el -16 LUFS del loudnorm y cada pista conserva su volumen.
+        audio_filter_parts.append(f"{inputs_tags}amix=inputs={len(audio_mix_inputs)}:duration=longest:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[a_out]")
 
         full_filter = ";\n".join(filter_parts + audio_filter_parts)
         filter_file = scene_dir / "scene_filter.txt"
@@ -817,29 +966,51 @@ class SceneEngine:
             "-b:a", "256k",
             "-ar", "48000",
             "-t", dur_str,
-            str(scene_out),
+            str(scene_tmp),
         ]
 
         if self.cancel_event and self.cancel_event.is_set():
             raise asyncio.CancelledError("Render cancelado.")
 
+        # Diagnóstico persistente: el comando completo queda junto al filtro de la
+        # escena; si FFmpeg falla, su stderr completo se escribe en la carpeta
+        # (antes solo iba a la consola del servidor y se perdía).
+        try:
+            (scene_dir / "scene_cmd.txt").write_text(" ".join(cmd), encoding="utf-8")
+        except Exception:
+            pass
+
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
         except asyncio.CancelledError:
             try:
                 proc.kill()
             except Exception:
                 pass
             raise
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise RuntimeError(f"FFmpeg agotó el tiempo (600 s) renderizando la escena {scene.scene_id}.")
 
         if self.cancel_event and self.cancel_event.is_set():
             raise asyncio.CancelledError("Render cancelado tras ejecución de escena.")
 
-        if not scene_out.exists() or scene_out.stat().st_size < 10000:
+        if not scene_tmp.exists() or scene_tmp.stat().st_size < 10000:
             err_msg = stderr.decode(errors="replace") if stderr else "No stderr"
+            try:
+                (scene_dir / "scene_ffmpeg_stderr.log").write_text(err_msg, encoding="utf-8")
+            except Exception:
+                pass
             print(f"[SceneEngine] ERROR FFmpeg escena {scene.scene_id}:\n{err_msg}")
             raise RuntimeError(f"Fallo al renderizar la escena {scene.scene_id}: {err_msg[-300:]}")
+
+        # Escena completa y válida: publicar atómicamente y registrar su firma.
+        scene_tmp.replace(scene_out)
+        self._write_cache_meta(meta_path, scene)
 
         # Extraer miniatura visual de alta definición para el monitor en vivo del frontend
         # (Se captura en t=1.8s cuando los gráficos y tarjetas Bento ya hicieron slide-in completo)
@@ -865,12 +1036,15 @@ class SceneEngine:
         progress_cb: Optional[Callable[[float, str], None]] = None,
     ) -> Path:
         """Renderiza todas las escenas y las concatena en el master broadcast final."""
-        # Selección de track BGM según preferencia de usuario
+        # Selección de track BGM según preferencia de usuario.
+        # Rutas absolutas contra BASE_DIR: relativas al CWD, un lanzamiento desde
+        # otro directorio mataba el BGM y los SFX en silencio.
+        _audio_dir = settings.BASE_DIR / "assets" / "audio"
         BGM_TRACKS = {
-            "default":   Path("assets/audio/bgm_streamer.wav"),
-            "tension":   Path("assets/audio/bgm_tension.wav"),
-            "upbeat":    Path("assets/audio/bgm_upbeat.wav"),
-            "ambient":   Path("assets/audio/bgm_ambient.wav"),
+            "default":   _audio_dir / "bgm_streamer.wav",
+            "tension":   _audio_dir / "bgm_tension.wav",
+            "upbeat":    _audio_dir / "bgm_upbeat.wav",
+            "ambient":   _audio_dir / "bgm_ambient.wav",
             "silent":    None,  # Sin música
         }
         bgm_track_key = getattr(self, 'bgm_track', 'default') if hasattr(self, 'bgm_track') else 'default'
@@ -904,13 +1078,30 @@ class SceneEngine:
             if progress_cb:
                 progress_cb(pct, f"Grabando Escena {scene.scene_id}/{total_scenes}: {scene.name} ({scene.type})...")
 
-            sc_file = await self.render_scene(
-                scene=scene,
-                avatar_clip=avatar_clip,
-                avatar_webm=avatar_webm,
-                bgm_path=bgm_path,
-                chat_overlay_path=chat_overlay_path,
-            )
+            # Reintento por escena: FFmpeg falla a veces de forma transitoria bajo
+            # carga (return -22, streams sin paquetes). Antes, una escena fallida
+            # abortaba TODO el run aunque las demás ya estuvieran listas.
+            try:
+                sc_file = await self.render_scene(
+                    scene=scene,
+                    avatar_clip=avatar_clip,
+                    avatar_webm=avatar_webm,
+                    bgm_path=bgm_path,
+                    chat_overlay_path=chat_overlay_path,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as scene_err:
+                safe_log(f"[SceneEngine] Escena {scene.scene_id} falló ({str(scene_err)[:150]}). Reintentando 1 vez...")
+                if progress_cb:
+                    progress_cb(pct, f"Escena {scene.scene_id} falló por un error transitorio; reintentando...")
+                sc_file = await self.render_scene(
+                    scene=scene,
+                    avatar_clip=avatar_clip,
+                    avatar_webm=avatar_webm,
+                    bgm_path=bgm_path,
+                    chat_overlay_path=chat_overlay_path,
+                )
             scene_files.append(sc_file)
 
         # Concatenación final instantánea
@@ -934,10 +1125,37 @@ class SceneEngine:
         ]
 
         proc = await asyncio.create_subprocess_exec(*concat_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await proc.communicate()
+        concat_out, concat_err = await proc.communicate()
 
-        if not output_file.exists() or output_file.stat().st_size < 50000:
-            raise RuntimeError("Error al concatenar las escenas de la transmisión.")
+        # 1) Verificar el código de salida: antes NO se comprobaba — un FFmpeg
+        # interrumpido (p. ej. servidor reiniciado durante el +faststart de un
+        # master de cientos de MB) dejaba el archivo con los datos pero SIN el
+        # índice moov, pasaba el chequeo de tamaño y la transmisión terminaba
+        # "done" con un video que ningún reproductor podía abrir.
+        if proc.returncode != 0 or not output_file.exists() or output_file.stat().st_size < 50000:
+            err_txt = (concat_err or b"").decode(errors="replace")[-300:]
+            raise RuntimeError(
+                f"Error concatenando las escenas de la transmisión (código {proc.returncode}): {err_txt}. "
+                "Reanudar reconstruye el master al instante: las escenas están en caché."
+            )
+
+        # 2) Validar integridad real del MP4: el átomo moov (índice) debe existir.
+        # Es una lectura de cabecera de milisegundos que evita entregar como
+        # "done" un master decapitado.
+        probe = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(output_file),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        probe_out, _ = await probe.communicate()
+        if probe.returncode != 0 or not probe_out.strip():
+            output_file.unlink(missing_ok=True)
+            raise RuntimeError(
+                "El master quedó corrupto (sin índice MP4), se eliminó para forzar su reconstrucción. "
+                "Reanudar la transmisión lo regenera en segundos con las escenas en caché."
+            )
 
         # Liberar inmediatamente archivos temporales pesados de las escenas (.mov intermedios)
         # conservando el video master, thumbnails y metadata intactos
@@ -947,8 +1165,12 @@ class SceneEngine:
                 for mov in sc_dir.glob("*.mov"):
                     try: mov.unlink()
                     except Exception: pass
-            # Limpiar avatar base intermedio del workdir si existe
+            # Limpiar avatar base intermedio del workdir si existe — PERO conservar
+            # kai_avatar.mov: es la caché del loop base que StreamerPipeline reutiliza
+            # entre ejecuciones (dos estrategias de caché no deben pelearse).
             for mov in self.workdir.glob("*.mov"):
+                if mov.name == "kai_avatar.mov":
+                    continue
                 try: mov.unlink()
                 except Exception: pass
         except Exception as _e_clean:
@@ -956,6 +1178,43 @@ class SceneEngine:
 
         safe_log(f"[SceneEngine] Transmisión completa masterizada con {total_scenes} escenas en: {output_file}")
         return output_file
+
+    def _settings_signature(self) -> Dict[str, Any]:
+        """Huella de los parámetros que cambian el pixel/sonido de una escena.
+
+        La caché de escenas la compara antes de reutilizar: reanudar con otro
+        formato (9:16 ↔ 16:9), voz, calidad u otra línea de guion debe re-renderizar.
+        """
+        return {
+            "aspect_ratio": self.aspect_ratio,
+            "voice": self.voice,
+            "fps": self.fps,
+            "crf": self.crf,
+            "color_grade": self.color_grade,
+            "sub_style": self.sub_style,
+            "subs_enabled": self.subs_enabled,
+            "audio_normalize": self.audio_normalize,
+            "bgm_volume": self.bgm_volume,
+            "bgm_track": self.bgm_track,
+            "card_theme": self.card_theme,
+        }
+
+    def _cache_meta_valid(self, meta_path: Path, scene: "DirectorScene") -> bool:
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        expected = self._settings_signature()
+        expected["speech_hash"] = hashlib.md5((scene.speech or "").encode("utf-8")).hexdigest()
+        return meta == expected
+
+    def _write_cache_meta(self, meta_path: Path, scene: "DirectorScene") -> None:
+        try:
+            meta = self._settings_signature()
+            meta["speech_hash"] = hashlib.md5((scene.speech or "").encode("utf-8")).hexdigest()
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def _get_audio_duration(self, audio_path: Path) -> float:
         try:
@@ -1023,7 +1282,7 @@ class SceneEngine:
             "perú": "pe", "peru": "pe", "pe": "pe",
         }
 
-        flags_dir = Path("assets/flags_cache")
+        flags_dir = settings.BASE_DIR / "assets" / "flags_cache"
         flags_dir.mkdir(parents=True, exist_ok=True)
 
         def _get_flag_img(country_code: str, target_h: int) -> Optional[Image.Image]:
@@ -1082,14 +1341,23 @@ class SceneEngine:
                 c_code = COUNTRY_CODES[m_code.group(1).lower()]
                 clean_name = m_code.group(2).strip()
             else:
-                # 2. Buscar por nombre de país en el texto
+                # 2. Buscar por nombre de país: SOLO palabra completa ("us" dentro
+                # de "Museo" o "Discusión" no es EE.UU.). Antes este fallback por
+                # substring pintaba banderas falsas en chips corrientes.
                 low_raw = raw.lower()
                 for k, code_val in COUNTRY_CODES.items():
-                    if k in low_raw:
-                        c_code = code_val
-                        break
-                # Limpiar posibles emojis rotos o caracteres basura
-                clean_name = re.sub(r"^[A-Za-z]{2}\s+", "", clean_name).strip()
+                    m_flag = re.search(rf"\b{re.escape(k)}\b", low_raw)
+                    if not m_flag:
+                        continue
+                    # Claves cortas solo como SIGLAS en mayúsculas: "Usa energía"
+                    # es el verbo español, no Estados Unidos.
+                    if len(k) <= 4 and not raw[m_flag.start():m_flag.end()].isupper():
+                        continue
+                    c_code = code_val
+                    break
+                # Nota: ya NO se recorta el prefijo de 2 letras aquí — el re.sub
+                # anterior destruía palabras legítimas ("IA avances" → "avances")
+                # en el caso en que ni siquiera hubo código de país detectado.
 
             flag_img = _get_flag_img(c_code, flag_h) if c_code else None
             txt_w = int(probe.textlength(clean_name, font=f_font))
@@ -1142,12 +1410,19 @@ class SceneEngine:
         return out_path
 
     def _get_sfx_path(self, sfx_name: str) -> Optional[Path]:
+        # El LLM puede emitir "sfx": null — sin este guard el AttributeError
+        # ("NoneType no tiene .lower") abortaba el broadcast completo.
+        if not sfx_name or not isinstance(sfx_name, str):
+            return None
+        _audio_dir = settings.BASE_DIR / "assets" / "audio"
         sfx_map = {
-            "whoosh": Path("assets/audio/whoosh.wav"),
-            "chime": Path("assets/audio/chime.wav"),
-            "impact": Path("assets/audio/whoosh.wav"),
+            "whoosh": _audio_dir / "whoosh.wav",
+            "chime": _audio_dir / "chime.wav",
+            "impact": _audio_dir / "impact.wav",
+            "alert": _audio_dir / "alert.wav",
+            "none": None,
         }
-        return sfx_map.get(sfx_name.lower())
+        return sfx_map.get(sfx_name.lower().strip())
 
     def _generate_scene_subtitles(
         self,

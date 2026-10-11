@@ -12,13 +12,19 @@ export class AgentCopilot {
         this.isThinking = false;
         this.currentAbortController = null;
         this.currentTypewriterInterval = null;
+        this.currentReplyTypewriterInterval = null;
+        this.activeReplyStream = null;
         this.currentThinkingId = null;
 
         // Estado del MODO REN (Modificador de la Plataforma)
         this.isRenMode = false;
         this.selectedElementSelector = null;
+        this.lastRenSelector = null;   // último elemento seleccionado: permite iterar sin re-seleccionar
         this.isInspectorActive = false;
         this.renStylesMap = {};
+
+        // Persistencia de chats
+        this.chatId = null;
 
         this.modelsMeta = {
             "gemini":      { name: "Gemini 2.5 Flash",  color: "#f59e0b", badge: "⚡ Recomendado" },
@@ -30,6 +36,46 @@ export class AgentCopilot {
         this.initElements();
         this.attachEvents();
         this.loadPersistedRenStyles();
+        this.loadModelsFromServer();
+        this.loadSavedChatsList();
+    }
+
+    /**
+     * Carga la lista real de modelos desde el servidor y actualiza tarjetas,
+     * pills y etiquetas en vivo: la interfaz muestra lo que el motor ofrece.
+     */
+    async loadModelsFromServer() {
+        try {
+            const resp = await fetch("/api/agent/models");
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const models = Array.isArray(data.models) ? data.models : [];
+            models.forEach(m => {
+                if (!m || !m.id) return;
+                this.modelsMeta[m.id] = {
+                    name: m.name || m.id,
+                    color: m.color || "#38bdf8",
+                    badge: m.badge || "",
+                    desc: m.desc || "",
+                    provider: m.provider || "",
+                };
+                const card = document.querySelector(`.agent-model-card[data-model="${m.id}"]`);
+                if (card) {
+                    const nameEl = card.querySelector(".agent-model-name");
+                    const descEl = card.querySelector(".agent-model-desc");
+                    const badgeEl = card.querySelector(".agent-model-badge");
+                    const dotEl = card.querySelector(".agent-model-dot");
+                    if (nameEl) nameEl.textContent = m.name || m.id;
+                    if (descEl && m.desc) descEl.textContent = m.desc;
+                    if (badgeEl && m.badge) badgeEl.textContent = m.badge;
+                    if (dotEl && m.color) dotEl.style.background = m.color;
+                }
+            });
+            // Refrescar las etiquetas del modelo activo con el nombre real del servidor.
+            this.selectModel(this.activeModel);
+        } catch (e) {
+            console.warn("[AgentCopilot] No se pudo cargar la lista de modelos del servidor:", e);
+        }
     }
 
     initElements() {
@@ -66,6 +112,9 @@ export class AgentCopilot {
         this.inspectorBadge = document.getElementById("agentRenInspectorBadge");
         this.inspectorTag = document.getElementById("agentRenHoverTag");
         this.inspectorSel = document.getElementById("agentRenHoverSel");
+
+        // Persistencia de chats
+        this.savedChatsList = document.getElementById("agentSavedChatsList");
     }
 
     attachEvents() {
@@ -216,6 +265,8 @@ export class AgentCopilot {
     resetChat() {
         if (!this.messagesContainer) return;
         this.history = [];
+        this.chatId = null;  // el siguiente guardado crea un chat nuevo
+        this.loadSavedChatsList();
         this.messagesContainer.innerHTML = `
             <div class="agent-message agent-msg-bot">
                 <div class="agent-msg-avatar">
@@ -265,19 +316,34 @@ export class AgentCopilot {
             <div class="agent-msg-body">
                 <div class="agent-msg-author">AetherCopilot <span>${this.modelsMeta[this.activeModel].name}</span></div>
                 <div class="agent-msg-content">
-                    <p style="color:#94a3b8; display:flex; align-items:center; gap:8px;">
+                    <p style="color:#94a3b8; display:flex; align-items:center; gap:8px; margin:0 0 6px;">
                         <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#c084fc; animation:pulse 1s infinite;"></span>
-                        Pensando y ejecutando acciones...
+                        <span id="thinkStatus_${id}">Pensando…</span>
                     </p>
                 </div>
             </div>
         `;
         this.messagesContainer.appendChild(msgDiv);
         this.scrollToBottom();
+
+        // Temporizador en vivo: muestra cuánto lleva trabajando el motor y
+        // conserva el último estado informado por el streaming.
+        const statusEl = document.getElementById(`thinkStatus_${id}`);
+        const startedAt = Date.now();
+        const timer = setInterval(() => {
+            if (!statusEl || !statusEl.isConnected) {
+                clearInterval(timer);
+                return;
+            }
+            const secs = Math.round((Date.now() - startedAt) / 1000);
+            const current = statusEl.dataset.status || "Pensando…";
+            statusEl.textContent = `${current} · ${secs}s`;
+        }, 1000);
+
         return id;
     }
 
-    appendBotResponse(reply, actions = [], extra = {}, modelName = "GLM-5.3 Flash", reasoning = "") {
+    appendBotResponse(reply, actions = [], extra = {}, modelName = "GLM-5.3 Flash", reasoning = "", opts = {}) {
         if (!this.messagesContainer) return;
         const msgDiv = document.createElement("div");
         msgDiv.className = "agent-message agent-msg-bot";
@@ -340,16 +406,35 @@ export class AgentCopilot {
                     icon = "✏️";
                     const p = a.path || a.file_written || "archivo";
                     const fName = p.split("/").pop();
-                    label = `edit_file: ${fName} [✓ Modificado en disco]`;
+                    label = a.error
+                        ? `edit_file: ${fName} [⚠️ ${a.error}]`
+                        : `edit_file: ${fName} [✓ Modificado en disco]`;
                 }
                 else if (type === "read_file") {
                     icon = "📖";
                     const fName = (a.path || "archivo").split("/").pop();
-                    label = `read_file: ${fName} [✓ Leído]`;
+                    label = a.error
+                        ? `read_file: ${fName} [⚠️ ${a.error}]`
+                        : `read_file: ${fName} [✓ Leído]`;
                 }
                 else if (type === "list_files") {
                     icon = "📁";
-                    label = `list_files: ${a.dir || "web"} [✓ Listado]`;
+                    label = a.error
+                        ? `list_files: ${a.dir || "web"} [⚠️ ${a.error}]`
+                        : `list_files: ${a.dir || "web"} [✓ Listado]`;
+                }
+                else if (type === "search_code") {
+                    icon = "🔍";
+                    const count = a.count ?? (Array.isArray(a.matches) ? a.matches.length : 0);
+                    label = a.error
+                        ? `search_code: ${a.pattern || ""} [⚠️ ${a.error}]`
+                        : `search_code: "${a.pattern || ""}" [✓ ${count} coincidencias · ${a.scanned_files ?? "?"} archivos]`;
+                }
+                else if (type === "modify_timeline_card" || type === "modify_card") {
+                    icon = "📊";
+                    label = a.card_url
+                        ? `modify_timeline_card: ${a.headline || a.card_id || ""} [✓ Tarjeta re-renderizada]`
+                        : `modify_timeline_card: ${a.headline || a.card_id || ""} [⚠️ Ver detalles]`;
                 }
 
                 actionsHtml += `<span class="agent-action-badge success">${icon} ${label}</span>`;
@@ -386,7 +471,12 @@ export class AgentCopilot {
             cleanReply = cleanReply.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, '\\');
         }
 
-        const formattedReply = this.formatMarkdown(cleanReply);
+        // Respuesta con efecto typewriter: el mensaje ya no aparece de golpe.
+        // Si había una respuesta anterior todavía escribiéndose, se completa al instante.
+        this.finalizeActiveReplyStream();
+
+        const replyStreamId = `replyStream_${uniqueThinkId}`;
+        const replyCursorId = `replyCursor_${uniqueThinkId}`;
 
         msgDiv.innerHTML = `
             <div class="agent-msg-avatar">
@@ -403,7 +493,7 @@ export class AgentCopilot {
                     ${reasoningHtml}
                     ${contextPillsHtml}
                     ${actionsHtml}
-                    ${formattedReply}
+                    <div class="agent-reply-stream" id="${replyStreamId}"></div><span class="agent-typewriter-cursor" id="${replyCursorId}">|</span>
                     ${thumbHtml}
                 </div>
             </div>
@@ -411,7 +501,97 @@ export class AgentCopilot {
         this.messagesContainer.appendChild(msgDiv);
         this.scrollToBottom();
 
-        // Activar botones interactivos de código: Copiar y Aplicar en vivo
+        // Respuesta al instante (historial cargado) o escrita palabra a palabra
+        if (opts.instant) {
+            this.activeReplyStream = null;
+            const container = document.getElementById(replyStreamId);
+            if (container) container.innerHTML = this.formatMarkdown(cleanReply);
+            const cursorEl = document.getElementById(replyCursorId);
+            if (cursorEl) cursorEl.remove();
+            this.attachCodeBlockActions(msgDiv);
+        } else {
+            // Escribir la respuesta palabra a palabra con render Markdown progresivo
+            this.streamReplyTypewriter(
+                document.getElementById(replyStreamId),
+                document.getElementById(replyCursorId),
+                cleanReply,
+                msgDiv,
+            );
+        }
+
+        // Pensamiento: al instante si ya se transmitió en vivo; typewriter natural si no.
+        if (reasoning && reasoning.trim().length > 0) {
+            const textEl = document.getElementById(textId);
+            const cursorEl = document.getElementById(cursorId);
+            const badgeEl = document.getElementById(badgeId);
+            if (textEl) {
+                if (opts.instantReasoning || opts.instant) {
+                    textEl.textContent = reasoning.trim();
+                    if (badgeEl) {
+                        badgeEl.textContent = "Completado";
+                        badgeEl.style.borderColor = "rgba(16, 185, 129, 0.4)";
+                        badgeEl.style.color = "#34d399";
+                    }
+                    if (cursorEl) cursorEl.remove();
+                } else {
+                    this.streamTypewriter(textEl, cursorEl, badgeEl, reasoning.trim());
+                }
+            }
+        }
+    }
+
+    /**
+     * Escribe la respuesta del modelo con efecto typewriter, re-renderizando el
+     * Markdown de forma progresiva. Al terminar, conecta los botones de los
+     * bloques de código (Copiar / Aplicar en vivo).
+     */
+    streamReplyTypewriter(containerEl, cursorEl, fullText, msgDiv) {
+        if (!containerEl) return;
+        const total = (fullText || "").length;
+        if (!total) {
+            if (cursorEl) cursorEl.remove();
+            this.attachCodeBlockActions(msgDiv);
+            return;
+        }
+        // Adaptativo: mensajes largos escriben más rápido para no eternizar la
+        // espera, pero a un ritmo natural y legible (no de golpe).
+        const chunk = total > 1500 ? 10 : total > 600 ? 6 : total > 250 ? 3 : 2;
+        let index = 0;
+        this.activeReplyStream = { containerEl, cursorEl, fullText, msgDiv };
+        this.currentReplyTypewriterInterval = setInterval(() => {
+            index = Math.min(index + chunk, total);
+            containerEl.innerHTML = this.formatMarkdown(fullText.substring(0, index));
+            this.scrollToBottom();
+            if (index >= total) {
+                this.finalizeActiveReplyStream();
+            }
+        }, 32);
+    }
+
+    /**
+     * Completa al instante la respuesta que estaba escribiéndose (por ejemplo,
+     * al llegar un mensaje nuevo o al pulsar Detener).
+     */
+    finalizeActiveReplyStream() {
+        if (this.currentReplyTypewriterInterval) {
+            clearInterval(this.currentReplyTypewriterInterval);
+            this.currentReplyTypewriterInterval = null;
+        }
+        const stream = this.activeReplyStream;
+        this.activeReplyStream = null;
+        if (stream && stream.containerEl && stream.containerEl.isConnected) {
+            stream.containerEl.innerHTML = this.formatMarkdown(stream.fullText || "");
+            if (stream.cursorEl) stream.cursorEl.remove();
+            this.attachCodeBlockActions(stream.msgDiv);
+            this.scrollToBottom();
+        }
+    }
+
+    /**
+     * Conecta los botones interactivos de los bloques de código.
+     */
+    attachCodeBlockActions(msgDiv) {
+        if (!msgDiv) return;
         msgDiv.querySelectorAll(".agent-code-copy-btn").forEach(btn => {
             btn.addEventListener("click", () => {
                 const code = decodeURIComponent(btn.getAttribute("data-code") || "");
@@ -472,22 +652,12 @@ export class AgentCopilot {
                 }
             });
         });
-
-        // Disparar animación de escritura typewriter para el pensamiento
-        if (reasoning && reasoning.trim().length > 0) {
-            const textEl = document.getElementById(textId);
-            const cursorEl = document.getElementById(cursorId);
-            const badgeEl = document.getElementById(badgeId);
-            if (textEl) {
-                this.streamTypewriter(textEl, cursorEl, badgeEl, reasoning.trim());
-            }
-        }
     }
 
     /**
      * Animación fluida de escritura palabra/carácter por carácter (Estilo Antigravity)
      */
-    streamTypewriter(textEl, cursorEl, badgeEl, fullText, speed = 10) {
+    streamTypewriter(textEl, cursorEl, badgeEl, fullText, speed = 26) {
         if (!textEl) return;
         if (this.currentTypewriterInterval) {
             clearInterval(this.currentTypewriterInterval);
@@ -550,7 +720,9 @@ export class AgentCopilot {
             active_view: activeView,
             aspect_ratio: aspect,
             is_ren_mode: this.isRenMode,
-            target_selector: this.selectedElementSelector,
+            // El agente recuerda el último elemento seleccionado aunque el Modo
+            // REN se apague: permite iterar ("ahora en rojo") sin re-seleccionar.
+            target_selector: this.selectedElementSelector || this.lastRenSelector,
             selected_timeline_item: selItemData,
         };
     }
@@ -560,6 +732,8 @@ export class AgentCopilot {
             clearInterval(this.currentTypewriterInterval);
             this.currentTypewriterInterval = null;
         }
+        // Completar al instante cualquier respuesta que siga escribiéndose.
+        this.finalizeActiveReplyStream();
         if (this.currentAbortController) {
             this.currentAbortController.abort();
             this.currentAbortController = null;
@@ -625,8 +799,11 @@ export class AgentCopilot {
             content: typeof h.content === "string" ? h.content.slice(0, 300) : String(h.content).slice(0, 300)
         }));
 
+        // ── STREAMING EN TIEMPO REAL: el pensamiento del modelo se muestra EN VIVO ──
+        let liveReasoning = "";
+        let sawAnyEvent = false;
         try {
-            const resp = await fetch("/api/agent/chat", {
+            const resp = await fetch("/api/agent/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 signal: this.currentAbortController.signal,
@@ -637,53 +814,286 @@ export class AgentCopilot {
                     history: historyToSend,
                 }),
             });
-
-            const data = await resp.json();
-            const thinkEl = document.getElementById(this.currentThinkingId);
-            if (thinkEl) thinkEl.remove();
-            this.currentThinkingId = null;
-
-            if (!resp.ok) {
-                throw new Error(data.detail || "Error al procesar mensaje");
+            if (!resp.ok || !resp.body) {
+                throw new Error("stream_no_disponible");
             }
 
-            // ── CASO ESPECIAL: El modelo NIM tarda > 12s ──
-            if (data.status === "nim_slow") {
-                this.isThinking = false;
-                this.resetSendButton();
-                this.currentAbortController = null;
-                this.appendNimSlowCard(data.job_id, data.model_name, text, historyToSend, appContext);
-                return;
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let finalPayload = null;
+
+            const handleEvent = (ev) => {
+                if (!ev || !ev.type) return;
+                sawAnyEvent = true;
+                if (ev.type === "status") {
+                    this.updateThinkingStatus(this.currentThinkingId, ev.message);
+                } else if (ev.type === "reasoning") {
+                    liveReasoning = ev.text || liveReasoning;
+                    this.updateThinkingReasoning(this.currentThinkingId, liveReasoning);
+                } else if (ev.type === "final") {
+                    finalPayload = ev.payload || {};
+                } else if (ev.type === "error") {
+                    throw new Error(ev.message || "Error del motor del agente.");
+                }
+            };
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let sep;
+                while ((sep = buffer.indexOf("\n\n")) !== -1) {
+                    const chunk = buffer.slice(0, sep);
+                    buffer = buffer.slice(sep + 2);
+                    for (const line of chunk.split("\n")) {
+                        if (!line.startsWith("data:")) continue;
+                        try { handleEvent(JSON.parse(line.slice(5).trim())); }
+                        catch (parseErr) { if (parseErr.message && !parseErr.message.includes("JSON")) throw parseErr; }
+                    }
+                }
+                if (finalPayload) break;
             }
 
-            const modelLabel = this.modelsMeta[data.model_used]?.name || this.modelsMeta[this.activeModel]?.name || data.model_used;
-            this.appendBotResponse(data.reply, data.actions, data.extra, modelLabel, data.reasoning);
-
-            // Guardar en historial de conversación
-            this.history.push({ role: "user", content: text });
-            this.history.push({ role: "assistant", content: data.reply || "" });
-            // Mantener máximo 20 turnos
-            if (this.history.length > 20) this.history = this.history.slice(-20);
-
-            // EJECUTAR ACCIONES EN LA APLICACIÓN
-            if (data.actions && Array.isArray(data.actions)) {
-                this.executeAppActions(data.actions, data.extra);
-            }
-        } catch (err) {
-            if (err.name === "AbortError") {
+            if (!finalPayload) throw new Error("stream_sin_final");
+            this.handleAgentResponse(finalPayload, text, liveReasoning, true);
+        } catch (streamErr) {
+            if (streamErr.name === "AbortError") {
                 console.log("[AgentCopilot] Petición abortada.");
                 return;
             }
-            console.error("[AgentCopilot] Error:", err);
-            const thinkEl = document.getElementById(this.currentThinkingId);
-            if (thinkEl) thinkEl.remove();
-            this.currentThinkingId = null;
-            this.appendBotResponse(`⚠️ No se pudo completar la solicitud: ${err.message}`, [], {}, "Error");
+            // Fallback al endpoint clásico si el stream falló antes de entregar algo.
+            if (!sawAnyEvent) {
+                try {
+                    const resp2 = await fetch("/api/agent/chat", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        signal: this.currentAbortController.signal,
+                        body: JSON.stringify({
+                            message: text,
+                            model_id: this.activeModel,
+                            app_context: appContext,
+                            history: historyToSend,
+                        }),
+                    });
+                    const data = await resp2.json();
+                    if (!resp2.ok) throw new Error(data.detail || "Error al procesar mensaje");
+                    this.handleAgentResponse(data, text, data.reasoning || "", false);
+                } catch (err2) {
+                    if (err2.name === "AbortError") return;
+                    const thinkEl = document.getElementById(this.currentThinkingId);
+                    if (thinkEl) thinkEl.remove();
+                    this.currentThinkingId = null;
+                    this.appendBotResponse(`⚠️ No se pudo completar la solicitud: ${err2.message}`, [], {}, "Error");
+                }
+            } else {
+                const thinkEl = document.getElementById(this.currentThinkingId);
+                if (thinkEl) thinkEl.remove();
+                this.currentThinkingId = null;
+                this.appendBotResponse(`⚠️ La transmisión se interrumpió: ${streamErr.message || "error desconocido"}`, [], {}, "Error");
+            }
         } finally {
             this.isThinking = false;
             this.currentAbortController = null;
             this.resetSendButton();
         }
+    }
+
+    /**
+     * Procesa la respuesta final del agente: renderiza, guarda historial,
+     * ejecuta acciones y persiste el chat en disco.
+     */
+    handleAgentResponse(data, userText, reasoning, reasoningWasStreamed) {
+        const thinkEl = document.getElementById(this.currentThinkingId);
+        if (thinkEl) thinkEl.remove();
+        this.currentThinkingId = null;
+
+        const modelLabel = this.modelsMeta[data.model_used]?.name || this.modelsMeta[this.activeModel]?.name || data.model_used;
+        // Si el pensamiento ya se mostró en vivo, no se re-escribe con typewriter.
+        this.appendBotResponse(data.reply, data.actions, data.extra, modelLabel, reasoning || "", {
+            instantReasoning: Boolean(reasoningWasStreamed),
+        });
+
+        this.history.push({ role: "user", content: userText });
+        this.history.push({ role: "assistant", content: data.reply || "" });
+        if (this.history.length > 20) this.history = this.history.slice(-20);
+
+        if (data.actions && Array.isArray(data.actions)) {
+            this.executeAppActions(data.actions, data.extra);
+        }
+
+        // Persistencia: cada intercambio se guarda; el almacén conserva 20 chats.
+        this.saveCurrentChat();
+    }
+
+    /**
+     * Actualiza el texto de estado dentro del mensaje "Pensando...".
+     */
+    updateThinkingStatus(thinkId, status) {
+        if (!thinkId) return;
+        const el = document.getElementById(`thinkStatus_${thinkId}`);
+        if (!el) return;
+        el.dataset.status = status || "Pensando…";
+        el.textContent = el.dataset.status;
+    }
+
+    /**
+     * Muestra el razonamiento del modelo EN TIEMPO REAL dentro del mensaje
+     * "Pensando..." mientras el modelo piensa.
+     */
+    updateThinkingReasoning(thinkId, text) {
+        if (!thinkId || !text) return;
+        const bubble = document.getElementById(thinkId);
+        if (!bubble) return;
+        let area = document.getElementById(`thinkReasoning_${thinkId}`);
+        if (!area) {
+            const content = bubble.querySelector(".agent-msg-content");
+            if (!content) return;
+            area = document.createElement("details");
+            area.id = `thinkReasoning_${thinkId}`;
+            area.className = "agent-thinking-dropdown";
+            area.open = true;
+            area.innerHTML = `<summary>
+                    <span class="agent-thinking-icon">🧠</span>
+                    <span>Pensamiento en tiempo real</span>
+                    <span class="agent-thinking-badge">Escribiendo…</span>
+                </summary>
+                <div class="agent-thinking-body"><span class="agent-typewriter-text"></span></div>`;
+            content.appendChild(area);
+        }
+        const textEl = area.querySelector(".agent-typewriter-text");
+        if (textEl) textEl.textContent = text;
+        this.scrollToBottom();
+    }
+
+    /* =========================================================================
+       PERSISTENCIA DE CHATS (hasta 20 conversaciones guardadas en disco)
+       ========================================================================= */
+
+    async saveCurrentChat() {
+        if (!this.history.length) return;
+        try {
+            const resp = await fetch("/api/agent/chats", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: this.chatId, messages: this.history }),
+            });
+            const data = await resp.json();
+            if (resp.ok && data.chat) this.chatId = data.chat.id;
+            this.loadSavedChatsList();
+        } catch (e) {
+            console.warn("[AgentCopilot] No se pudo guardar el chat:", e);
+        }
+    }
+
+    async loadSavedChatsList() {
+        if (!this.savedChatsList) return;
+        try {
+            const resp = await fetch("/api/agent/chats");
+            const data = await resp.json();
+            const chats = Array.isArray(data.chats) ? data.chats : [];
+            this.savedChatsList.replaceChildren();
+            if (!chats.length) {
+                const empty = document.createElement("span");
+                empty.className = "agent-chats-empty";
+                empty.textContent = "Sin chats guardados todavía";
+                this.savedChatsList.appendChild(empty);
+                return;
+            }
+            chats.forEach(chat => {
+                const item = document.createElement("div");
+                item.className = `agent-chat-item${chat.id === this.chatId ? " is-active" : ""}`;
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "agent-chat-item-open";
+                const title = document.createElement("span");
+                title.className = "agent-chat-item-title";
+                title.textContent = chat.title || "Chat sin título";
+                const meta = document.createElement("span");
+                meta.className = "agent-chat-item-time";
+                meta.textContent = this.formatChatTime(chat.updated_at);
+                button.append(title, meta);
+                button.addEventListener("click", () => this.openSavedChat(chat.id));
+                const del = document.createElement("button");
+                del.type = "button";
+                del.className = "agent-chat-item-delete";
+                del.title = "Eliminar chat";
+                del.textContent = "×";
+                del.addEventListener("click", (event) => {
+                    event.stopPropagation();
+                    this.deleteSavedChat(chat.id);
+                });
+                item.append(button, del);
+                this.savedChatsList.appendChild(item);
+            });
+        } catch (e) {
+            console.warn("[AgentCopilot] No se pudo listar los chats:", e);
+        }
+    }
+
+    formatChatTime(iso) {
+        const date = iso ? new Date(iso) : null;
+        if (!date || Number.isNaN(date.valueOf())) return "";
+        const diffMin = Math.floor((Date.now() - date.valueOf()) / 60000);
+        if (diffMin < 1) return "ahora";
+        if (diffMin < 60) return `hace ${diffMin} min`;
+        if (diffMin < 1440) return `hace ${Math.floor(diffMin / 60)} h`;
+        return date.toLocaleDateString([], { day: "2-digit", month: "short" });
+    }
+
+    async openSavedChat(chatId) {
+        try {
+            const resp = await fetch(`/api/agent/chats/${encodeURIComponent(chatId)}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || "No se pudo abrir el chat.");
+            const chat = data.chat || {};
+            this.chatId = chat.id || chatId;
+            this.history = Array.isArray(chat.messages) ? chat.messages.slice() : [];
+            this.renderHistoryMessages();
+            this.loadSavedChatsList();
+        } catch (e) {
+            this.showToast(`No se pudo abrir el chat: ${e.message}`, "error");
+        }
+    }
+
+    async deleteSavedChat(chatId) {
+        try {
+            const resp = await fetch(`/api/agent/chats/${encodeURIComponent(chatId)}`, { method: "DELETE" });
+            if (!resp.ok) throw new Error("El servidor no pudo eliminarlo.");
+            if (chatId === this.chatId) this.chatId = null;  // la conversación en pantalla sigue; el próximo guardado crea uno nuevo
+            this.loadSavedChatsList();
+        } catch (e) {
+            this.showToast(`No se pudo eliminar el chat: ${e.message}`, "error");
+        }
+    }
+
+    renderHistoryMessages() {
+        if (!this.messagesContainer) return;
+        this.finalizeActiveReplyStream();
+        this.messagesContainer.replaceChildren();
+        const welcome = document.createElement("div");
+        welcome.className = "agent-message agent-msg-bot";
+        welcome.innerHTML = `
+            <div class="agent-msg-avatar">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+                    <path d="M4 11a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v7a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-7z"/>
+                    <circle cx="9" cy="15" r="1"/>
+                    <circle cx="15" cy="15" r="1"/>
+                </svg>
+            </div>
+            <div class="agent-msg-body">
+                <div class="agent-msg-author">AetherCopilot <span>chat recuperado</span></div>
+                <div class="agent-msg-content"><p>Conversación restaurada. Puedes continuar donde la dejaste.</p></div>
+            </div>
+        `;
+        this.messagesContainer.appendChild(welcome);
+        (this.history || []).forEach(msg => {
+            if (!msg || !msg.content) return;
+            if (msg.role === "user") this.appendUserMessage(msg.content);
+            else this.appendBotResponse(msg.content, [], {}, "AetherCopilot", "", { instant: true });
+        });
+        this.scrollToBottom();
     }
 
     /**
@@ -941,132 +1351,6 @@ export class AgentCopilot {
     }
 
     /* =========================================================================
-       TARJETA INTERACTIVA: MODELO NIM LENTO (> 12s)
-       ========================================================================= */
-
-    /**
-     * Muestra una tarjeta en el chat cuando un modelo NIM tarda más de 12s.
-     * El usuario puede elegir: esperar al modelo original o cambiar a Gemini.
-     */
-    appendNimSlowCard(jobId, modelName, originalText, historyToSend, appContext) {
-        if (!this.messagesContainer) return;
-        const cardId = `nim-slow-${jobId}`;
-        const card = document.createElement("div");
-        card.id = cardId;
-        card.className = "agent-message agent-msg-bot agent-nim-slow-card";
-        card.innerHTML = `
-            <div class="agent-msg-avatar" style="background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4);">
-                <span style="font-size:16px;">⏳</span>
-            </div>
-            <div class="agent-msg-body" style="flex:1;">
-                <div class="agent-msg-author" style="color:#f59e0b;">
-                    AetherCopilot <span>Modelo Lento</span>
-                </div>
-                <div class="agent-msg-content">
-                    <p><strong>${this.escapeHtml(modelName)}</strong> está procesando tu solicitud pero tardó más de 12 segundos.</p>
-                    <p style="color:#94a3b8; font-size:12px; margin-top:4px;">El modelo NIM sigue trabajando en segundo plano. ¿Qué prefieres hacer?</p>
-                    <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
-                        <button class="agent-nim-btn-gemini" data-job="${jobId}" style="
-                            background: linear-gradient(135deg, rgba(245,158,11,0.2), rgba(245,158,11,0.1));
-                            border: 1px solid rgba(245,158,11,0.5); color: #fbbf24;
-                            padding: 8px 16px; border-radius: 8px; cursor: pointer;
-                            font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;
-                            transition: all 0.2s ease;
-                        ">
-                            ⚡ Continuar con Gemini
-                        </button>
-                        <button class="agent-nim-btn-wait" data-job="${jobId}" data-model="${this.escapeHtml(modelName)}" style="
-                            background: rgba(255,255,255,0.05);
-                            border: 1px solid rgba(255,255,255,0.15); color: #94a3b8;
-                            padding: 8px 16px; border-radius: 8px; cursor: pointer;
-                            font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px;
-                            transition: all 0.2s ease;
-                        ">
-                            ⏳ Esperar con <strong style="color:#e2e8f0; margin-left:3px;">${this.escapeHtml(modelName)}</strong>
-                        </button>
-                    </div>
-                    <div class="agent-nim-timer" style="margin-top:8px; font-size:11px; color:#475569;">
-                        Tiempo transcurrido: <span class="agent-nim-elapsed" id="nim-elapsed-${jobId}">12</span>s
-                    </div>
-                </div>
-            </div>
-        `;
-        this.messagesContainer.appendChild(card);
-        this.scrollToBottom();
-
-        // Contador de tiempo en vivo
-        let elapsed = 12;
-        const timerInterval = setInterval(() => {
-            elapsed++;
-            const el = document.getElementById(`nim-elapsed-${jobId}`);
-            if (el) el.textContent = elapsed;
-            else clearInterval(timerInterval);
-        }, 1000);
-
-        // Botón: Cambiar a Gemini
-        card.querySelector(".agent-nim-btn-gemini").addEventListener("click", async () => {
-            clearInterval(timerInterval);
-            card.remove();
-            // Cancelar el job NIM en background
-            fetch(`/api/agent/wait/${jobId}`, { method: "DELETE" }).catch(() => {});
-            // Nueva llamada directa con Gemini
-            this.isThinking = true;
-            this.setStopButton();
-            const thinkId = this.appendBotThinking();
-            this.currentAbortController = new AbortController();
-            try {
-                const r = await fetch("/api/agent/chat", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    signal: this.currentAbortController.signal,
-                    body: JSON.stringify({ message: originalText, model_id: "gemini", app_context: appContext, history: historyToSend }),
-                });
-                const d = await r.json();
-                document.getElementById(thinkId)?.remove();
-                const label = this.modelsMeta["gemini"]?.name || "Gemini";
-                this.appendBotResponse(d.reply, d.actions, d.extra, label, d.reasoning);
-                this.history.push({ role: "user", content: originalText });
-                this.history.push({ role: "assistant", content: d.reply || "" });
-                if (d.actions?.length) this.executeAppActions(d.actions, d.extra);
-            } catch (e) {
-                document.getElementById(thinkId)?.remove();
-                this.appendBotResponse("⚠️ Error al contactar Gemini.", [], {}, "Error");
-            } finally {
-                this.isThinking = false;
-                this.resetSendButton();
-                this.currentAbortController = null;
-            }
-        });
-
-        // Botón: Esperar con el modelo original
-        card.querySelector(".agent-nim-btn-wait").addEventListener("click", async () => {
-            clearInterval(timerInterval);
-            // Actualizar la tarjeta para mostrar que está esperando
-            card.querySelector(".agent-msg-content").innerHTML = `
-                <p>⏳ Esperando respuesta de <strong>${this.escapeHtml(modelName)}</strong>...</p>
-                <p style="color:#475569; font-size:11px;">El modelo está procesando. Esto puede tardar hasta 90 segundos.</p>
-            `;
-            try {
-                const r = await fetch(`/api/agent/wait/${jobId}`);
-                const d = await r.json();
-                card.remove();
-                const label = this.modelsMeta[this.activeModel]?.name || modelName;
-                if (d.status === "ok") {
-                    this.appendBotResponse(d.reply, d.actions, d.extra, label, d.reasoning);
-                    this.history.push({ role: "user", content: originalText });
-                    this.history.push({ role: "assistant", content: d.reply || "" });
-                    if (d.actions?.length) this.executeAppActions(d.actions, d.extra);
-                } else {
-                    this.appendBotResponse(d.reply || "⚠️ El modelo no respondió a tiempo.", [], {}, label);
-                }
-            } catch (e) {
-                card.remove();
-                this.appendBotResponse(`⚠️ Error al esperar al modelo: ${e.message}`, [], {}, modelName);
-            }
-        });
-    }
-
-    /* =========================================================================
        MÉTODOS DEL MODO REN (RENDER / EDIT NETWORK) & SELECTOR DE ELEMENTOS
        ========================================================================= */
 
@@ -1206,6 +1490,7 @@ export class AgentCopilot {
 
     setRenTarget(selector) {
         this.selectedElementSelector = selector;
+        this.lastRenSelector = selector;  // memoria de iteración: sigue vigente al apagar REN
         if (this.renTargetPill && this.renTargetSelText) {
             this.renTargetSelText.textContent = selector;
             this.renTargetPill.style.display = "inline-flex";
@@ -1269,10 +1554,39 @@ export class AgentCopilot {
         }], {}, "Modo REN");
     }
 
+    /**
+     * Normaliza los estilos de una acción ren_mutate a un objeto {propiedad: valor}.
+     * Los modelos a veces envían "styles" como string CSS ("background: #06b6d4")
+     * en lugar de objeto; sin normalizar, Object.entries() itera letra por letra
+     * y genera CSS roto (el cambio nunca aparece en pantalla).
+     */
+    normalizeStyles(styles) {
+        if (!styles) return {};
+        if (typeof styles === "string") {
+            const obj = {};
+            styles.split(";").forEach(pair => {
+                const idx = pair.indexOf(":");
+                if (idx === -1) return;
+                const prop = pair.slice(0, idx).trim();
+                const value = pair.slice(idx + 1).trim();
+                if (prop && value) obj[prop] = value;
+            });
+            return obj;
+        }
+        if (typeof styles === "object") {
+            const obj = {};
+            Object.entries(styles).forEach(([k, v]) => {
+                if (k && v !== null && v !== undefined) obj[k] = String(v);
+            });
+            return obj;
+        }
+        return {};
+    }
+
     applyRenMutation(action) {
         const sel = action.selector || "body";
         const op = action.operation || "style";
-        const styles = action.styles || {};
+        const styles = this.normalizeStyles(action.styles);
 
         if (op === "remove") {
             const targets = document.querySelectorAll(sel);
@@ -1293,7 +1607,27 @@ export class AgentCopilot {
             const targets = document.querySelectorAll(sel);
             targets.forEach(t => t.style.setProperty("display", "none", "important"));
             this.renStylesMap[sel] = Object.assign(this.renStylesMap[sel] || {}, { display: "none" });
+        } else if (op === "show") {
+            // "show" estaba documentada en el prompt pero nunca implementada:
+            // restaurar el elemento (limpia estilos REN en vivo y persistidos).
+            delete this.renStylesMap[sel];
+            document.querySelectorAll(sel).forEach(t => {
+                t.style.removeProperty("display");
+                t.style.removeProperty("height");
+                t.style.removeProperty("overflow");
+                t.style.removeProperty("pointer-events");
+                t.removeAttribute("data-ren-removed");
+            });
         } else {
+            if (Object.keys(styles).length > 0) {
+                // Aplicación inmediata en el DOM + persistencia en el mapa REN.
+                document.querySelectorAll(sel).forEach(t => {
+                    Object.entries(styles).forEach(([prop, val]) => {
+                        const kebabProp = prop.replace(/([A-Z])/g, "-$1").toLowerCase();
+                        t.style.setProperty(kebabProp, val, "important");
+                    });
+                });
+            }
             this.renStylesMap[sel] = Object.assign(this.renStylesMap[sel] || {}, styles);
         }
 

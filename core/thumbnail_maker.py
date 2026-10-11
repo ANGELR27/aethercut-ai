@@ -28,6 +28,22 @@ def _get_font(names: List[str], size: int) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+def _open_as_rgb(path: Path) -> Image.Image:
+    """Abre una imagen como RGB componiendo la transparencia sobre fondo oscuro.
+
+    Las tarjetas web del streamer son PNG RGBA con fondo transparente:
+    un convert("RGB") directo volvía negros los píxeles transparentes y la
+    miniatura salía con un bloque negro en lugar del contenido.
+    """
+    im = Image.open(path)
+    if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+        rgba = im.convert("RGBA")
+        base = Image.new("RGB", rgba.size, (9, 10, 13))
+        base.paste(rgba, (0, 0), rgba)
+        return base
+    return im.convert("RGB")
+
+
 class YouTubeThumbnailMaker:
     """Motor de portadas de YouTube de alta conversión (1280x720)."""
 
@@ -66,7 +82,7 @@ class YouTubeThumbnailMaker:
             for c in candidates:
                 if c.exists() and c != out_file:
                     try:
-                        bg_img = Image.open(c).convert("RGB")
+                        bg_img = _open_as_rgb(c)
                         break
                     except Exception:
                         pass

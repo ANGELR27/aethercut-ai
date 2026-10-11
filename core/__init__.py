@@ -12,7 +12,6 @@ from .asset_providers import (
     AssetProvider,
     PixabayAssetProvider,
     PexelsAssetProvider,
-    FallbackSyntheticAssetProvider,
     AssetProviderFactory,
 )
 from .orchestrator import AssetOrchestrator
@@ -32,7 +31,6 @@ __all__ = [
     "AssetProvider",
     "PixabayAssetProvider",
     "PexelsAssetProvider",
-    "FallbackSyntheticAssetProvider",
     "AssetProviderFactory",
     "AssetOrchestrator",
     "SubtitleGenerator",

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=20">
+    <link rel="stylesheet" href="/static/css/style.css?v=22">
     <link rel="stylesheet" href="/static/css/theme/matte-dark.css?v=5">
     <script src="https://cdn.jsdelivr.net/npm/motion@11.11.17/dist/motion.js"></script>
 </head>
@@ -37,6 +37,9 @@
 
     <!-- PANEL 5: BIBLIOTECA DE PROYECTOS GUARDADOS -->
     {% include 'components/projects_library.html' %}
+
+    <!-- PANEL 6: RADAR DE VIRALIDAD (RANKING GLOBAL + TEMAS URGENTES) -->
+    {% include 'components/trend_radar.html' %}
 
     <!-- PANEL 6: MULTI-AGENT DEV STUDIO -->
     <section id="multiAgentSection" hidden>
@@ -86,9 +89,12 @@
 <!-- VENTANAS MODALES FLOTANTES (REPRODUCTOR DE PROYECTOS Y PRUEBAS DE VOZ) -->
 {% include 'components/modals.html' %}
 
+<!-- ESTUDIO DE PUBLICACIÓN (PREVIEW + MINIATURA IA + YOUTUBE) -->
+{% include 'components/publish_modal.html' %}
+
 <!-- APARTADO FLOTANTE OCULTO EXPANDIBLE DEL AGENTE COPILOT (CHATGPT CLONE MULTI-MODELO) -->
 {% include 'components/agent_chat_modal.html' %}
 
-<script type="module" src="/static/js/app.js?v=47"></script>
+<script type="module" src="/static/js/app.js?v=52"></script>
 </body>
 </html>

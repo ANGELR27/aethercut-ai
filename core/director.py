@@ -52,6 +52,9 @@ class DirectorScene:
     popups: List[Dict[str, Any]] = field(default_factory=list)
     # Texto libre cinemático flotante (sin card, con desenfoque de fondo opcional)
     free_title: Optional[Dict[str, Any]] = None
+    # Modo análisis de caso: índice del fotograma REAL del video fuente que
+    # respalda esta escena (cuando la transmisión analiza un video/caso concreto).
+    case_frame: Optional[int] = None
 
 
 @dataclass
@@ -95,11 +98,13 @@ class DirectorBroadcastPlan:
                     visual_query2=vq2,
                     card=card_obj,
                     chips=s.get("chips", []),
-                    sfx=s.get("sfx", "whoosh"),
+                    # 'or "whoosh"': un "sfx": null (la clave existe) devolvía None.
+                    sfx=(s.get("sfx") or "whoosh") if s.get("sfx") != "none" else "none",
                     duration_est=float(s.get("duration_est", s.get("duration_est_sec", 10.0))),
                     visual_beats=_clean_beats(s.get("visual_beats")),
                     popups=_clean_popups(s.get("popups")),
                     free_title=s.get("free_title"),
+                    case_frame=s.get("case_frame") if isinstance(s.get("case_frame"), int) else None,
                 )
             )
         return cls(
@@ -185,6 +190,15 @@ REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
 - Habla de forma directa, cautivadora e inteligente, como un narrador o divulgador de primer nivel dirigiéndose a su público.
 - Evita muletillas o saludos vacíos (como "Hola a todos" o "Bienvenidos a mi canal"); entra directo al tema con energía y datos interesantes.
 
+REGLAS DE RETENCIÓN Y VARIEDAD VISUAL (EDICIÓN PROFESIONAL):
+- VARIEDAD DE ESCENA: NUNCA dos escenas consecutivas del mismo "type" (excepto avatar_cam para abrir y cerrar). Alterna card_focus → video_reaction → vector_motion → chat_debate para que el encuadre respire y el ojo no se aburda del mismo formato.
+- PRIMEROS 15 SEGUNDOS DENSOS: el mayor abandono del espectador ocurre aquí. La escena 1 debe entregar el gancho + el dato más impactante del tema, sin contexto previo ni preámbulos.
+- BEAT DE RE-ENGANCHE al 60-70% del guion: en esa zona incluye OBLIGATORIAMENTE una escena que reformule la tensión con una pregunta directa al espectador, un dato que invierta lo dicho, o un anticipo del desenlace ("y aquí es donde todo cambia...").
+- RITMO DE ORACIONES VARIADO: alterna frases cortas contundentes (6-9 palabras) con frases de desarrollo (14-18 palabras). La variación de cadencia retiene más que el vocabulario.
+- CARDS CONCISAS: el "body" de cada card se sostiene en pantalla solo lo que toma leerlo (~un tercio de segundo por palabra). Máximo 130 caracteres: si no cabe el dato esencial en esa cifra, simplifica el texto en vez de alargarlo.
+- CITA FUENTES REALES POR NOMBRE: cuando la evidencia web mencione un medio, estudio o institución (Reuters, Ember, Nature, ONU, NASA), cítalo POR SU NOMBRE en la narración al menos 2 veces a lo largo del video ("según el informe de Ember...", "como publicó Reuters...") y en los popups ("Fuente: Ember"). La atribución real construye credibilidad y retiene al espectador escéptico.
+- GANCHO VISUAL CONCRETO: el gancho inicial debe señalar algo visible y verificable ("miren estas marcas en la montaña") que la escena siguiente MUESTRE de verdad — nunca prometas visualmente algo que el montaje no entrega.
+
 REGLAS PARA DATOS, MAPAS, ESTADÍSTICAS Y TARJETAS BENTO HUD (AL MENOS 60% DE LAS ESCENAS):
 - ALTO CONTENIDO VISUAL E INFOGRÁFICO OBLIGATORIO: Un video plano o sin gráficos enriquece muy poco la experiencia. Por lo menos el 60% al 70% de las escenas DEBEN contener elementos visuales complementarios: o bien una tarjeta Bento HUD ("card"), o referencias visuales con banderas ("chips"), o un mapa geopolítico.
 - SIEMPRE que se mencione una cifra, porcentaje, estadística, comparativa (ej: perro vs humano, PIB, inflación, velocidad, presupuesto, año récord), o hecho verificable, la escena DEBE incluir obligatoriamente el objeto "card".
@@ -226,7 +240,8 @@ REGLAS DE SELECCIÓN VISUAL (MÁXIMA RELEVANCIA Y MULTI-VIDEO POR ESCENA):
 - POP-UPS ("popups"): de 0 a 2 por escena. Texto corto (máx. 40 caracteres) que aparece en el instante exacto en que se pronuncia el "trigger" (copia LITERAL de 2 a 5 palabras del speech). "kind": "stat" (cifra), "fact" (dato), "alert" (advertencia/polémica) o "quote" (cita). No repitas lo que ya está en la "card".
 - PROHIBIDO repetir el mismo visual_query entre escenas. Cada toma debe ser fresca y diferente.
 - EXCLUSIÓN TOTAL DE MARCAS DE AGUA Y SELLOS: NUNCA busques marcas de stock comercial con sellos (Shutterstock, Alamy, iStock, Adobe Stock).
-==============================================================================
+- ANCLAJE A LA ENTIDAD REAL DEL CASO: cuando la transmisión trate un caso, lugar, persona, objeto o evento ESPECÍFICO, el "visual_query" y los "query" de los beats DEBEN nombrar esa entidad exacta (ej: 'Dyatlov Pass tent 1959 expedition photograph', 'Nazca lines hummingbird geoglyph aerial', 'Monte Ararat Durupinar formation satellite') y NUNCA su equivalente genérico ('snowy mountain', 'ancient lines', 'rocky mountain'). Una montaña cualquiera cuando se habla de UNA montaña concreta es una mentira visual que rompe la credibilidad.
+{case_frames_block}==============================================================================
 
 TIPOS DE ESCENA DISPONIBLES:
 1. "avatar_cam": KAI diciendo la primera frase de gancho (Hook de impacto de 3 a 4 segundos MÁXIMO) y luego entra inmediatamente el contenido visual y B-Roll para que la audiencia no se aburra. Ideal para abrir con intriga o para la conclusión final reflexiva.
@@ -312,8 +327,14 @@ class AIDirector:
         evidence: str,
         duration_target: int,
         style_instructions: str,
+        case_frames: Optional[List[Dict[str, Any]]] = None,
     ) -> DirectorBroadcastPlan:
-        """Pide a Gemini dirigir la emisión completa escena por escena."""
+        """Pide a Gemini dirigir la emisión completa escena por escena.
+
+        case_frames: fotogramas REALES del video/caso fuente (modo análisis de
+        caso). Cada item: {"index": int, "desc": str}. El director los usa como
+        fondo de las escenas que hablan de lo que SE VE en esos fotogramas.
+        """
         safe_log(f"[AIDirector] Planificando y dirigiendo transmisión para: «{topic}» ({duration_target}s)")
 
         # Detección inteligente de TOPs y Rankings (ej: TOP 10, TOP 5, Ranking 7)
@@ -347,6 +368,25 @@ class AIDirector:
         else:
             duration_label = f"{dur} segundos"
 
+        # Bloque de fotogramas del caso (modo análisis): describe al director qué
+        # hay disponible y le obliga a anclar las escenas a esos fotogramas reales.
+        if case_frames:
+            frame_lines = "\n".join(
+                f"  * case_frame {f['index']}: {f.get('desc', '')[:200]}"
+                for f in case_frames
+            )
+            case_frames_block = f"""
+ANÁLISIS VISUAL DEL VIDEO/CASO FUENTE (FOTOGRAMAS REALES DISPONIBLES):
+Estos fotogramas REALES del caso ya están descargados y listos como fondos de pantalla. Índice + descripción:
+{frame_lines}
+- OBLIGATORIO: las escenas que se refieran a lo que SE VE en estos fotogramas DEBEN incluir "case_frame": <índice del fotograma> en su JSON (es un número entero). Es la evidencia visual del caso: mostrar stock genérico cuando existe el fotograma real sería una mentira visual.
+- Ordena la narración para RECORRER los fotogramas en el orden natural del caso ("miren las marcas en la montaña" → el fotograma con las marcas).
+- El gancho inicial DEBE abrir con el fotograma más impactante del caso (case_frame en la escena 1 o 2).
+
+"""
+        else:
+            case_frames_block = ""
+
         import datetime as _dt
         _now = _dt.date.today()
         prompt = DIRECTOR_SYSTEM_PROMPT.format(
@@ -362,6 +402,7 @@ class AIDirector:
             seconds_per_scene=seconds_per_scene,
             words_per_scene=words_per_scene,
             total_words=total_words,
+            case_frames_block=case_frames_block,
         )
 
         try:
@@ -404,10 +445,17 @@ class AIDirector:
                         visual_query2=s.get("visual_query2", ""),
                         card=card_obj,
                         chips=s.get("chips", []),
-                        sfx=s.get("sfx", "whoosh"),
+                        # 'or "whoosh"': un "sfx": null del LLM (la clave existe) no
+                        # debe dejar None — crasheaba el render de la escena.
+                        sfx=(s.get("sfx") or "whoosh") if s.get("sfx") != "none" else "none",
                         duration_est=float(s.get("duration_est_sec", seconds_per_scene)),
                         visual_beats=_clean_beats(s.get("visual_beats")),
                         popups=_clean_popups(s.get("popups")),
+                        # free_title: el prompt exige producirlo y from_dict lo
+                        # conservaba, pero esta ruta directa lo descartaba — los
+                        # títulos libres del LLM solo aparecían tras la auditoría GLM.
+                        free_title=s.get("free_title"),
+                        case_frame=s.get("case_frame") if isinstance(s.get("case_frame"), int) else None,
                     )
                 )
 

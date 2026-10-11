@@ -13,29 +13,12 @@ def _ass_time(sec: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def _srt_time(sec: float) -> str:
-    ms = int(round(max(0.0, sec) * 1000))
-    h, ms = divmod(ms, 3600000)
-    m, ms = divmod(ms, 60000)
-    s, ms = divmod(ms, 1000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
 def _escape(text: str) -> str:
     return text.replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ")
 
 
 class SubtitleGenerator:
     """Subtítulos SRT y ASS. El ASS usa la resolución real del video para que el tamaño sea correcto."""
-
-    @staticmethod
-    def generate_srt(captions: List[CaptionItem], output_path: Path) -> Path:
-        lines = []
-        for i, c in enumerate(captions, start=1):
-            lines += [str(i), f"{_srt_time(c.start_sec)} --> {_srt_time(c.end_sec)}", c.text.strip(), ""]
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("\n".join(lines), encoding="utf-8")
-        return output_path
 
     @staticmethod
     def generate_ass(captions: List[CaptionItem], output_path: Path, width: int = 1920, height: int = 1080) -> Path:

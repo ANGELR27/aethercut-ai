@@ -53,6 +53,8 @@ REVISA Y OPTIMIZA CADA ESCENA:
    - Deben reflejar exactamente la entidad, lugar o acción concreta mencionada en ese segundo.
 3. "visual_beats":
    - Comprueba que el 'trigger' sea una subcadena literal que sí existe dentro del 'speech'. Si no coincide, ajústalo.
+4. "case_frame" (SI EXISTE):
+   - CONSERVA el valor exacto sin cambios en cada escena que lo tenga. Es el índice de un fotograma REAL del video fuente del caso: modificarlo o eliminarlo rompe el análisis visual.
 
 PLAN ACTUAL:
 {json.dumps(scenes, ensure_ascii=False, indent=2)}
@@ -78,6 +80,13 @@ RESPONDE EXCLUSIVAMENTE CON UN JSON VÁLIDO conteniendo el array de escenas opti
             data = json.loads(cleaned)
             opt_scenes = data.get("optimized_scenes")
             if opt_scenes and isinstance(opt_scenes, list) and len(opt_scenes) == len(scenes):
+                # Forzar la conservación de case_frame: el auditor puede olvidarse
+                # de copiarlo aunque el prompt lo pida — sin esto, el modo análisis
+                # de caso pierde el anclaje a los fotogramas reales del video fuente.
+                for i, orig in enumerate(scenes):
+                    if isinstance(orig, dict) and orig.get("case_frame") is not None:
+                        if isinstance(opt_scenes[i], dict) and opt_scenes[i].get("case_frame") is None:
+                            opt_scenes[i]["case_frame"] = orig["case_frame"]
                 safe_log(f"[FlashReviewer] ✓ {len(opt_scenes)} escenas auditadas y optimizadas exitosamente por GLM-5.3-flash.")
                 plan_dict["scenes"] = opt_scenes
                 plan_dict["reviewed_by"] = "z-ai/glm-5.3-flash"

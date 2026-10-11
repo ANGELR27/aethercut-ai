@@ -27,7 +27,6 @@ from config.settings import settings
 from core.orchestrator import AssetOrchestrator
 from core.avatar_narrator import AvatarNarrator, DEFAULT_VOICE
 from core.avatar_renderer import AvatarRenderer
-from core.card_renderer import InfoCardRenderer
 from core.director import AIDirector, DirectorBroadcastPlan, DirectorScene
 from core.llm import LLMClient, safe_log
 from core.models import ActionType, BRollCue, CaptionItem, InfoCard, SourceRef, TimelineSegment, VideoEditingPlan
@@ -105,55 +104,6 @@ def resolve_style_instructions(style_raw: str) -> str:
         return STYLE_PROMPTS.get(style_raw.lower().strip(), STYLE_PROMPTS["divulgacion"])
     return "\n\n---\n\n".join(matched)
 
-STREAMER_SCRIPT_PROMPT = """Eres KAI, el divulgador, analista e streamer con inteligencia artificial más carismático y riguroso.
-
-TAREA:
-Crea un guión profesional para una transmisión en video de aproximadamente {duration_target} segundos ({duration_label}) sobre este tema:
-TEMA: "{topic}"
-
-{style_instructions}
-
-DURACIÓN OBJETIVO Y EXTENSIÓN OBLIGATORIA:
-- Duración deseada: {duration_target} segundos ({duration_label}).
-- OBJETIVO DE PALABRAS PARA EL MONÓLOGO: Aproximadamente {words_target} palabras (lectura fluida a ritmo natural de 135-145 ppm).
-- IMPORTANTE: Si la duración es extendida (3 a 15 minutos), es OBLIGATORIO que desarrolles los argumentos a fondo, con múltiples secciones, datos precisos, antecedentes, dilemas para reflexionar y advertencias sobre precauciones necesarias. No lo resumas.
-
-INFORMACIÓN Y HECHOS RECOPILADOS DE LA WEB:
-{evidence}
-
-REGLAS DE GUIÓN:
-1. "monologue": Texto completo que KAI dirá en voz alta:
-   - Arranque potente que capture la atención de inmediato.
-   - Pausas naturales con comas, puntos y puntos suspensivos (...) para que la voz respire con cadencia humana.
-   - Enlace natural con las tarjetas de datos y comentarios del chat en vivo.
-   - Cierre con conclusión sólida y llamado a la reflexión o debate.
-2. "cards": Lista de {num_cards} tarjetas Bento de apoyo con datos concretos (cifras exactas o conceptos clave).
-3. "chat_comments": Lista de 3 o 4 comentarios del chat en vivo con preguntas o reacciones de los espectadores.
-4. "broll_queries": Lista de {num_brolls} términos en inglés para fondos visuales cinematográficos.
-5. "highlight_words": 6 palabras clave de alto impacto.
-
-FORMATO DE RESPUESTA (ESTRICTO JSON):
-{{
-  "title": "Titular llamativo de la transmisión",
-  "monologue": "Texto completo y natural que KAI dirá en voz alta ({words_target} palabras aprox)...",
-  "cards": [
-    {{
-      "headline": "Titular corto (máx 30 caracteres)",
-      "body": "Explicación concisa y nítida del dato (máx 130 caracteres)",
-      "badge": "DATO CLAVE",
-      "stat": "40%"
-    }}
-  ],
-  "chat_comments": [
-    {{"user": "Usuario1", "badge": "VIP", "text": "Pregunta o reacción interesante"}},
-    {{"user": "Usuario2", "badge": "SUB", "text": "Comentario sobre el dilema planteado"}},
-    {{"user": "Usuario3", "badge": "MOD", "text": "Aporte complementario con datos"}}
-  ],
-  "broll_queries": ["search term 1", "search term 2"],
-  "highlight_words": ["palabra1", "palabra2"]
-}}"""
-
-
 @dataclass
 class StreamerOptions:
     topic: str
@@ -171,6 +121,11 @@ class StreamerOptions:
     enable_cards: bool = True
     extra_notes: str = ""          # Indicaciones libres del usuario para el director
     flash_audit: bool = True       # Auditoría editorial con GLM-5.3-flash
+    # === MODO ANÁLISIS DE CASO ===
+    # URL de un video/caso concreto (YouTube u otro sitio soportado por yt-dlp):
+    # KAI descarga el video, extrae fotogramas REALES, los analiza con Gemini y
+    # el director los usa como fondos — análisis visual de un caso específico.
+    source_video_url: Optional[str] = None
     # === PARÁMETROS DE PRODUCCIÓN PROFESIONAL (nuevos) ===
     audio_normalize: bool = True   # Normalización loudnorm EBU R128 (-16 LUFS broadcast)
     color_grade: str = "cinema"    # raw | cinema | broadcast | neon | warm | cool
@@ -246,6 +201,14 @@ class StreamerPipeline:
             except Exception as _e:
                 safe_log(f"[Streamer] No se pudo leer plan cacheado, regenerando: {_e}")
 
+        # 0. MODO ANÁLISIS DE CASO: descargar el video fuente, extraer fotogramas
+        # REALES y analizarlos con Gemini ANTES de dirigir. Los frames quedan en
+        # workdir/case_frames para que scene_engine los use como fondos.
+        case_frames: List[Dict[str, Any]] = []
+        source_url = str(getattr(self.options, "source_video_url", "") or "").strip()
+        if source_url and source_url.lower() not in ("none", "null"):
+            case_frames = await self._prepare_case_media(source_url)
+
         if not plan:
             # 1. Investigación Web
             self._state("research", 10.0, f"Investigando en internet sobre «{self.options.topic}»...")
@@ -264,6 +227,7 @@ class StreamerPipeline:
                 evidence=evidence,
                 duration_target=self.options.duration_sec,
                 style_instructions=style_instructions,
+                case_frames=case_frames,
             )
 
         # Auditoría editorial y optimización de escenas con GLM-5.3-flash (solo para producciones nuevas)
@@ -521,366 +485,121 @@ class StreamerPipeline:
             safe_log(f"[Streamer] Búsqueda de soporte falló: {exc}")
         return "Noticia relevante y debate actual sobre el tema en tendencia."
 
-    async def _generate_script(self, topic: str, style: str, evidence: str) -> Dict[str, Any]:
-        """Genera el monólogo y elementos con Gemini adaptados al estilo y duración seleccionada."""
-        style_instructions = resolve_style_instructions(style)
+    # ------------------------------------------------------------------
+    # MODO ANÁLISIS DE CASO: video fuente real → fotogramas → Gemini
+    # ------------------------------------------------------------------
 
-        dur_sec = max(30, self.options.duration_sec)
-        words_target = max(130, int(dur_sec * 2.3))
-        num_cards = min(6, max(2, int(dur_sec / 120)))
-        num_brolls = min(8, max(4, int(dur_sec / 40) + 1))
+    async def _prepare_case_media(self, source_url: str) -> List[Dict[str, Any]]:
+        """Descarga el video del caso, extrae fotogramas reales y los describe.
 
-        if dur_sec >= 600:
-            duration_label = f"{dur_sec // 60} minutos (Análisis Extendido)"
-        elif dur_sec >= 120:
-            duration_label = f"{dur_sec // 60} minutos"
-        else:
-            duration_label = f"{dur_sec} segundos"
-
-        prompt = STREAMER_SCRIPT_PROMPT.format(
-            topic=topic,
-            style_instructions=style_instructions,
-            duration_target=dur_sec,
-            duration_label=duration_label,
-            words_target=words_target,
-            num_cards=num_cards,
-            num_brolls=num_brolls,
-            evidence=evidence
-        )
-
-        gen_timeout = max(35.0, min(120.0, float(dur_sec * 0.12)))
+        Devuelve [{"index": int, "desc": str}, ...] para el director. Es
+        tolerante a fallos: si algo falla, la transmisión continúa en modo
+        normal (sin fotogramas), con un log claro del motivo.
+        """
+        frames_dir = self.workdir / "case_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        existing = sorted(frames_dir.glob("frame_*.jpg"))
         try:
-            loop = asyncio.get_running_loop()
-            raw = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: self.llm.generate(prompt, json_mode=True, max_models=2)),
-                timeout=gen_timeout
-            )
-            cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
-            return json.loads(cleaned)
-        except Exception as exc:
-            safe_log(f"[Streamer] Error en Gemini script: {exc}")
-            if style_key == "debate":
-                fb_monologue = (
-                    f"¡Qué tal mi gente! Hoy abrimos el debate con un tema que genera dilemas profundos: {topic}. "
-                    "Por un lado, los defensores aseguran que el progreso es imparable... "
-                    "Pero debemos detenernos y preguntarnos: ¿cuáles son las consecuencias imprevistas? "
-                    "¿Qué precauciones deberíamos plantearnos antes de que sea irreversible? "
-                    "¡Dato mata relato! Las cifras confirman una transformación acelerada, pero la prudencia no se puede delegar. "
-                    "Dejen su postura en el chat porque este dilema nos involucra a todos."
-                )
-            elif style_key == "analisis":
-                fb_monologue = (
-                    f"Bienvenidos a este análisis exhaustivo sobre {topic}. "
-                    "Para entender el estado actual, primero debemos remontarnos al origen de esta tecnología. "
-                    "El mecanismo real y la arquitectura técnica demuestran que no se trata de una moda pasajera, sino de un cambio estructural. "
-                    "Las cifras oficiales y los estudios más rigurosos proyectan un impacto determinante en los próximos años. "
-                    "Desglosemos cada punto con precisión, porque como siempre decimos: ¡dato mata relato!"
-                )
-            else:
-                fb_monologue = (
-                    f"¡Qué tal mi gente! Hoy tenemos que hablar a fondo de {topic}. "
-                    "La realidad es que este tema está marcando un punto de inflexión. "
-                    "¡Y como siempre les digo: dato mata relato! Estén atentos a cada cifra y a cada dilema porque esto recién comienza."
-                )
-            return {
-                "title": f"KAI Live: {topic[:40]}",
-                "monologue": fb_monologue,
-                "cards": [
-                    {"headline": "Dato Clave Verificado", "body": "Transformación confirmada por fuentes técnicas oficiales.", "badge": "DATO CLAVE", "stat": "2026"},
-                    {"headline": "Dilema y Precaución", "body": "Puntos críticos que debemos plantearnos con seriedad.", "badge": "DEBATE", "stat": "95%"}
-                ],
-                "chat_comments": [
-                    {"user": "TechFan", "badge": "VIP", "text": "¡Tema crucial para debatir!"},
-                    {"user": "Lucas_Dev", "badge": "SUB", "text": "¿Qué precauciones hay que tener KAI?"},
-                    {"user": "Sara_M", "badge": "MOD", "text": "Dato mata relato siempre."}
-                ],
-                "broll_queries": ["future technology", "modern abstract data"],
-                "highlight_words": ["futuro", "datos", "dilema", "riesgo"]
-            }
+            if not existing:
+                self._state("case_media", 6.0, "Descargando el video del caso para análisis visual...")
+                video_file = self.workdir / "case_source.%(ext)s"
+                final_video = None
 
-    async def _fetch_brolls(self, queries: List[str]) -> List[Path]:
-        """Descarga fondos o clips de video libres de derechos rotativos."""
-        orchestrator = AssetOrchestrator(target_dir=self.workdir / "assets")
-        clips: List[Path] = []
-        for i, q in enumerate(queries[:8]):
+                def do_download():
+                    import yt_dlp
+                    opts = {
+                        # Mismo encadenado de formatos que el proveedor B-Roll
+                        # (bestvideo+bestaudio): el formato simple 'best[height<=1080]'
+                        # falla sin runtime JavaScript disponible.
+                        "format": "bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+                        "outtmpl": str(video_file),
+                        "quiet": True,
+                        "no_warnings": True,
+                        "noplaylist": True,
+                        "noprogress": True,
+                        "socket_timeout": 18,
+                    }
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        ydl.download([source_url])
+
+                await asyncio.wait_for(asyncio.to_thread(do_download), timeout=180)
+                candidates = [p for p in self.workdir.glob("case_source.*") if p.suffix.lower() in (".mp4", ".mkv", ".webm", ".mov")]
+                if not candidates:
+                    safe_log("[Streamer] Caso: la descarga no produjo un archivo de video.")
+                    return []
+                final_video = candidates[0]
+
+                if self.cancel_event.is_set():
+                    raise asyncio.CancelledError()
+
+                # Extraer fotogramas repartidos por TODA la duración (máx 12, min 3)
+                self._state("case_media", 8.0, "Extrayendo fotogramas clave del video del caso...")
+                def probe_duration():
+                    import subprocess
+                    r = subprocess.run(
+                        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                         "-of", "default=noprint_wrappers=1:nokey=1", str(final_video)],
+                        capture_output=True, text=True, timeout=20)
+                    return float(r.stdout.strip() or 0)
+                try:
+                    dur = await asyncio.wait_for(asyncio.to_thread(probe_duration), timeout=25)
+                except Exception:
+                    dur = 60.0
+                num = max(3, min(12, int(dur // 8) or 3))
+                fps_expr = f"{num}/{max(1.0, dur):.3f}"
+                import subprocess
+
+                def extract_frames():
+                    subprocess.run([
+                        "ffmpeg", "-y", "-i", str(final_video),
+                        "-vf", f"fps={fps_expr},scale=1280:-2",
+                        "-frames:v", str(num), "-q:v", "3",
+                        str(frames_dir / "frame_%02d.jpg"),
+                    ], capture_output=True, timeout=180)
+
+                await asyncio.wait_for(asyncio.to_thread(extract_frames), timeout=200)
+                existing = sorted(frames_dir.glob("frame_*.jpg"))
+
+            if not existing:
+                return []
+
+            # Análisis visual con Gemini (multimodal): describir cada fotograma.
+            self._state("case_media", 9.0, f"Gemini analizando {len(existing)} fotogramas reales del caso...")
+            frames_info: List[Dict[str, Any]] = []
             try:
-                cue = BRollCue(
-                    cue_id=f"streamer_broll_{i}",
-                    start_sec=float(i * 6.0),
-                    end_sec=float((i + 1) * 6.0),
-                    concept=q,
-                    search_query_en=q,
-                    reasoning="Apoyo visual contextual en video",
-                )
-                res = await orchestrator._resolve_single_cue(cue)
-                if res.local_file_path and Path(res.local_file_path).exists():
-                    clips.append(Path(res.local_file_path))
-            except Exception as exc:
-                safe_log(f"[Streamer] Falló descarga B-Roll para {q}: {exc}")
-        return clips
+                from google.genai import types as gtypes
 
-    async def _assemble_broadcast_video(
-        self,
-        audio_file: Path,
-        avatar_webm: Path,
-        broll_clips: List[Path],
-        cards: List[Dict[str, Any]],
-        duration: float,
-        out_path: Path,
-        title: str,
-        chat_path: Optional[Path] = None,
-        monologue: str = "",
-    ) -> None:
-        """Renderiza la transmisión broadcast en FFmpeg con B-roll full-screen rotativo, tarjetas, chat, subtítulos y audio mix."""
-        is_vertical = self.options.aspect_ratio == "9:16"
-        W, H = (1080, 1920) if is_vertical else (1920, 1080)
-        fps = 30
-        dur_str = f"{duration:.2f}"
-
-        # 1. Lienzo base Negro Mate Puro
-        inputs = ["-f", "lavfi", "-i", f"color=c=0x080808:s={W}x{H}:d={dur_str}:r={fps}"]
-        num_inputs = 1
-        filter_parts = ["[0:v]format=yuva420p[v0]"]
-        cur_v = "v0"
-
-        # 2. Añadir B-rolls dinámicos full-frame rotativos cada 6-7 segundos (100% pantalla, dinámico)
-        valid_brolls = [Path(c) for c in broll_clips if Path(c).exists()]
-        if valid_brolls:
-            num_brolls = len(valid_brolls)
-            clip_dur = 6.5
-            total_slots = math.ceil(duration / clip_dur)
-            for s_idx in range(total_slots):
-                b_clip = valid_brolls[s_idx % num_brolls]
-                st_time = s_idx * clip_dur
-                en_time = min(duration, (s_idx + 1) * clip_dur)
-                if b_clip.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
-                    inputs.extend(["-loop", "1", "-i", str(b_clip)])
-                else:
-                    inputs.extend(["-stream_loop", "-1", "-i", str(b_clip)])
-                b_idx = num_inputs
-                num_inputs += 1
-
-                # Escalar y recortar al 100% de la pantalla sin bordes negros
-                filter_parts.append(
-                    f"[{b_idx}:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[broll_{s_idx}];"
-                    f"[{cur_v}][broll_{s_idx}]overlay=0:0:enable='between(t,{st_time:.2f},{en_time:.2f})'[v_bg_{s_idx}]"
-                )
-                cur_v = f"v_bg_{s_idx}"
-
-            # Sutil capa oscura translúcida (20%) para garantizar legibilidad de HUD, tarjetas y subtítulos
-            filter_parts.append(
-                f"[{cur_v}]drawbox=x=0:y=0:w={W}:h={H}:color=black@0.20:t=fill[v_bg_dim]"
-            )
-            cur_v = "v_bg_dim"
-
-        # 3. Añadir Avatar WebM con canal alfa transparente 100% real (sin caja negra)
-        if avatar_webm and avatar_webm.exists():
-            inputs.extend(["-stream_loop", "-1", "-i", str(avatar_webm)])
-            a_idx = num_inputs
-            num_inputs += 1
-            if is_vertical:
-                av_w = int(W * 0.40)
-                filter_parts.append(
-                    f"[{a_idx}:v]scale={av_w}:{av_w},format=rgba[avatar];"
-                    f"[{cur_v}][avatar]overlay={int(W - av_w - 30)}:{int(H - av_w - 110)}:format=auto[v_av]"
-                )
-            else:
-                av_w = int(W * 0.26)
-                filter_parts.append(
-                    f"[{a_idx}:v]scale={av_w}:{av_w},format=rgba[avatar];"
-                    f"[{cur_v}][avatar]overlay={int(W - av_w - 45)}:{int(H - av_w - 45)}:format=auto[v_av]"
-                )
-            cur_v = "v_av"
-
-        # 4. Añadir Overlay de Chat en Vivo
-        if chat_path and Path(chat_path).exists():
-            inputs.extend(["-i", str(chat_path)])
-            chat_stream_idx = num_inputs
-            num_inputs += 1
-            c_start_t = 2.5
-            c_end_t = max(3.0, duration - 1.5)
-            if is_vertical:
-                cx = 30
-                cy = int(H * 0.72)
-            else:
-                cx = 60
-                cy = int(H - 330)
-            filter_parts.append(
-                f"[{cur_v}][{chat_stream_idx}:v]overlay={cx}:{cy}:enable='between(t,{c_start_t:.1f},{c_end_t:.1f})'[v_chat]"
-            )
-            cur_v = "v_chat"
-
-        # 5. Añadir Tarjetas Bento
-        for c_idx, c_info in enumerate(cards):
-            c_file = Path(c_info["path"])
-            if c_file.exists():
-                inputs.extend(["-i", str(c_file)])
-                card_stream_idx = num_inputs
-                num_inputs += 1
-                c_start = c_info["start"]
-                c_end = c_info["end"]
-                if is_vertical:
-                    cx = 40
-                    cy = int(H * 0.58)
-                else:
-                    cx = 60
-                    cy = 60
-                filter_parts.append(
-                    f"[{cur_v}][{card_stream_idx}:v]overlay={cx}:{cy}:enable='between(t,{c_start},{c_end})'[v_card_{c_idx}]"
-                )
-                cur_v = f"v_card_{c_idx}"
-
-        # 6. Subtítulos dinámicos en tercio inferior (renderizados vía libass para mínimo consumo de memoria y máxima velocidad)
-        if monologue:
-            words = monologue.split()
-            chunk_size = 4
-            sub_chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
-            if sub_chunks:
-                chunk_dur = duration / len(sub_chunks)
-                srt_path = self.workdir / "kai_stream_subtitles.srt"
-                srt_lines = []
-                for idx, chunk in enumerate(sub_chunks):
-                    st = idx * chunk_dur
-                    en = (idx + 1) * chunk_dur
-                    clean_txt = chunk.strip().replace(":", "")
-                    if clean_txt:
-                        def _fmt_srt(t: float) -> str:
-                            h = int(t // 3600)
-                            m = int((t % 3600) // 60)
-                            s = int(t % 60)
-                            ms = int((t - int(t)) * 1000)
-                            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-                        srt_lines.append(f"{idx + 1}\n{_fmt_srt(st)} --> {_fmt_srt(en)}\n{clean_txt}\n")
-                if srt_lines:
-                    srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
-                    esc_srt = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
-                    sub_size = 20 if is_vertical else 16
-                    margin_v = 45 if is_vertical else 26
-                    filter_parts.append(
-                        f"[{cur_v}]subtitles='{esc_srt}':force_style='FontName=Segoe UI,FontSize={sub_size},Bold=1,PrimaryColour=&H00FFFFFF,BorderStyle=3,OutlineColour=&HB2000000,MarginV={margin_v}'[v_subs]"
+                def analyze():
+                    parts = []
+                    for i, frame in enumerate(existing[:8]):
+                        data = frame.read_bytes()
+                        parts.append(gtypes.Part.from_bytes(data=data, mime_type="image/jpeg"))
+                    parts.append(
+                        "Estos son fotogramas (EN ORDEN, índice 0 a N) de un video real. "
+                        "Para cada fotograma describe en español qué se ve (máx 25 palabras), "
+                        "destacando lo visualmente llamativo o revelador para un análisis. "
+                        'Responde SOLO JSON: {"frames": [{"index": 0, "desc": "..."}, ...]}'
                     )
-                    cur_v = "v_subs"
+                    return self.llm.generate(parts, json_mode=True, max_models=2)
 
-        # 7. Titular superior en vivo (ASCII seguro para Windows cp1252)
-        safe_title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).encode("ascii", "ignore").decode("ascii").strip()[:35].replace("'", "").replace(":", "")
-        if not safe_title:
-            safe_title = "TRANSMISION KAI"
-        font_path = "C\\:/Windows/Fonts/segoeuib.ttf"
-        filter_parts.append(
-            f"[{cur_v}]drawtext=fontfile='{font_path}':text='REC EN VIVO  |  {safe_title}':fontcolor=white:fontsize={22 if is_vertical else 26}:x=44:y=34:box=1:boxcolor=black@0.75:boxborderw=8[v_final]"
-        )
+                raw = await asyncio.wait_for(asyncio.to_thread(analyze), timeout=120)
+                parsed = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+                for item in parsed.get("frames", []):
+                    if isinstance(item, dict) and isinstance(item.get("index"), int):
+                        frames_info.append({"index": item["index"], "desc": str(item.get("desc", ""))[:220]})
+            except Exception as ana_exc:
+                safe_log(f"[Streamer] Análisis Gemini de fotogramas falló: {ana_exc}")
 
-        # 8. Entrada y mezcla de audio (Voz + BGM con ducking + SFX Whoosh y Chime)
-        inputs.extend(["-i", str(audio_file)])
-        audio_idx = num_inputs
-        num_inputs += 1
+            # Si Gemini no describió, registrar los frames con descripción vacía:
+            # igual sirven como fondos (el director puede anclarlos por orden).
+            if not frames_info:
+                frames_info = [{"index": i, "desc": ""} for i in range(len(existing))]
+            safe_log(f"[Streamer] Caso listo: {len(frames_info)} fotogramas reales disponibles para el director.")
+            return frames_info
 
-        bgm_file = Path("assets/audio/bgm_streamer.wav")
-        whoosh_file = Path("assets/audio/whoosh.wav")
-        chime_file = Path("assets/audio/chime.wav")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            safe_log(f"[Streamer] Modo análisis de caso degradado ({exc}): continuando sin fotogramas.")
+            return []
 
-        audio_filter_parts: List[str] = []
-        audio_mix_inputs: List[str] = [f"[{audio_idx}:a]"]
-
-        if bgm_file.exists():
-            inputs.extend(["-t", dur_str, "-stream_loop", "-1", "-i", str(bgm_file)])
-            bgm_in_idx = num_inputs
-            num_inputs += 1
-            audio_filter_parts.append(f"[{bgm_in_idx}:a]volume=0.06[a_bgm]")
-            audio_mix_inputs.append("[a_bgm]")
-
-        if whoosh_file.exists() and cards:
-            inputs.extend(["-i", str(whoosh_file)])
-            whoosh_in_idx = num_inputs
-            num_inputs += 1
-            w_delay = max(500, int(cards[0].get("start", 2.0) * 1000))
-            audio_filter_parts.append(f"[{whoosh_in_idx}:a]adelay={w_delay}|{w_delay},volume=0.35[a_whoosh]")
-            audio_mix_inputs.append("[a_whoosh]")
-
-        if chime_file.exists():
-            inputs.extend(["-i", str(chime_file)])
-            chime_in_idx = num_inputs
-            num_inputs += 1
-            c_delay = max(1000, int(duration * 0.72 * 1000))
-            audio_filter_parts.append(f"[{chime_in_idx}:a]adelay={c_delay}|{c_delay},volume=0.32[a_chime]")
-            audio_mix_inputs.append("[a_chime]")
-
-        if len(audio_mix_inputs) > 1:
-            inputs_tags = "".join(audio_mix_inputs)
-            audio_filter_parts.append(f"{inputs_tags}amix=inputs={len(audio_mix_inputs)}:duration=first:dropout_transition=2[a_final]")
-            a_map = "[a_final]"
-        else:
-            a_map = f"{audio_idx}:a"
-
-        has_rtmp = bool(self.options.rtmp_url and str(self.options.rtmp_url).strip() not in ("None", "null", ""))
-        v_file_map = "[v_final]"
-        a_file_map = a_map
-
-        if has_rtmp:
-            filter_parts.append("[v_final]split=2[v_file][v_rtmp]")
-            v_file_map = "[v_file]"
-            v_rtmp_map = "[v_rtmp]"
-            if a_map.startswith("[") and a_map.endswith("]"):
-                clean_a = a_map[1:-1]
-                audio_filter_parts.append(f"[{clean_a}]asplit=2[a_file][a_rtmp]")
-            else:
-                audio_filter_parts.append(f"[{a_map}]asplit=2[a_file][a_rtmp]")
-            a_file_map = "[a_file]"
-            a_rtmp_map = "[a_rtmp]"
-
-        full_filter_complex = ";\n".join(filter_parts + audio_filter_parts)
-        filter_script = self.workdir / "streamer_filter.txt"
-        filter_script.write_text(full_filter_complex, encoding="utf-8")
-
-        cmd = [
-            "ffmpeg", "-y",
-            *inputs,
-            "-filter_complex_script", str(filter_script),
-            "-map", v_file_map,
-            "-map", a_file_map,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-movflags", "+faststart",
-            "-t", dur_str,
-            str(out_path)
-        ]
-
-        if has_rtmp:
-            rtmp_dest = str(self.options.rtmp_url).strip()
-            safe_log(f"[Streamer] Transmitiendo simultáneamente en vivo a RTMP ({rtmp_dest[:32]}...)...")
-            cmd.extend([
-                "-map", v_rtmp_map,
-                "-map", a_rtmp_map,
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-b:v", "3500k",
-                "-maxrate", "4000k",
-                "-bufsize", "7000k",
-                "-pix_fmt", "yuv420p",
-                "-g", "60",
-                "-c:a", "aac",
-                "-b:a", "160k",
-                "-ar", "44100",
-                "-f", "flv",
-                rtmp_dest
-            ])
-
-        safe_log(f"[Streamer] Ejecutando FFmpeg render...")
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            if out_path.exists() and out_path.stat().st_size > 50_000:
-                safe_log(f"[Streamer] FFmpeg completó la transmisión exitosamente ({out_path.stat().st_size} bytes generados).")
-            else:
-                err_msg = stderr.decode(errors="replace")[-600:]
-                safe_log(f"[Streamer] Error en FFmpeg: {err_msg}")
-                raise RuntimeError(f"Error renderizando transmisión: {err_msg}")
-        
-        safe_log(f"[Streamer] Renderizado completado: {out_path}")

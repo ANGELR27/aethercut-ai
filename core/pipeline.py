@@ -355,7 +355,11 @@ class VideoPipeline:
                         card.avatar_audio_path = str(audio_file)
 
                         video_file = self.workdir / f"{card.card_id}_avatar.webm"
-                        rendered = avatar_rnd.render_reaction_clip(dur + 0.5, video_file, audio_path=audio_file)
+                        # to_thread: mismo motivo que en server.run_export_task —
+                        # el render del avatar es síncrono y bloqueaba el event loop.
+                        rendered = await asyncio.to_thread(
+                            avatar_rnd.render_reaction_clip, dur + 0.5, video_file, audio_path=audio_file
+                        )
                         if rendered:
                             card.avatar_video_path = str(rendered)
                             card.avatar_enabled = True

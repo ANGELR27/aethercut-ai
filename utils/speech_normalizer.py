@@ -1,94 +1,42 @@
 import re
 
-UNIDADES = ["", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"]
-DECENAS_10 = ["diez", "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve"]
-VEINTES = ["veinte", "veintiuno", "veintidós", "veintitrés", "veinticuatro", "veinticinco", "veintiséis", "veintisiete", "veintiocho", "veintinueve"]
-DECENAS = ["", "diez", "veinte", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"]
-CENTENAS = ["", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos", "setecientos", "ochocientos", "novecientos"]
-
-
-def numero_a_palabras(n: int) -> str:
-    """Convierte un número entero positivo (hasta 999,999,999) en palabras en español continuo."""
-    if n == 0:
-        return "cero"
-    if n == 100:
-        return "cien"
-
-    def _hasta_999(num: int) -> str:
-        if num == 0:
-            return ""
-        if num == 100:
-            return "cien"
-        c = num // 100
-        resto = num % 100
-        partes = []
-        if c > 0:
-            partes.append(CENTENAS[c])
-        if 10 <= resto <= 19:
-            partes.append(DECENAS_10[resto - 10])
-        elif 20 <= resto <= 29:
-            partes.append(VEINTES[resto - 20])
-        elif resto > 0:
-            d = resto // 10
-            u = resto % 10
-            if d > 0 and u > 0:
-                partes.append(f"{DECENAS[d]} y {UNIDADES[u]}")
-            elif d > 0:
-                partes.append(DECENAS[d])
-            elif u > 0:
-                partes.append(UNIDADES[u])
-        return " ".join(partes)
-
-    if n < 1000:
-        return _hasta_999(n)
-
-    if n < 1_000_000:
-        miles = n // 1000
-        resto = n % 1000
-        prefijo = "mil" if miles == 1 else f"{_hasta_999(miles)} mil"
-        sufijo = _hasta_999(resto)
-        return f"{prefijo} {sufijo}".strip()
-
-    if n < 1_000_000_000:
-        millones = n // 1_000_000
-        resto = n % 1_000_000
-        prefijo = "un millón" if millones == 1 else f"{_hasta_999(millones)} millones"
-        resto_str = numero_a_palabras(resto) if resto > 0 else ""
-        return f"{prefijo} {resto_str}".strip()
-
-    return str(n)
-
 
 def refine_speech_cadence(text: str) -> str:
     """
-    Pule la cadencia oral del texto respetando la prosodia natural de Edge-TTS:
-    - NO inserta comas artificiales arbitrarias que provoquen pausas muertas o tartamudeo.
-    - Corrige comas huérfanas entre determinantes, adjetivos y sustantivos (ej: 'ninguna, decisión' -> 'ninguna decisión').
-    - Limpia comas antes de conjunciones copulativas innecesarias (ej: ', y' -> ' y').
+    Pule la cadencia oral del texto respetando la prosodia que el guionista
+    (humano o LLM) diseñó. Edge-TTS respeta comas y puntos suspensivos como
+    pausas reales, así que este pulido NUNCA elimina pausas legítimas:
+
+    - NO toca comas de aposición ("Todo, absolutamente todo, cambió") ni comas
+      antes de 'y' en incisos ("..., y con ello...") — antes las borraba y la
+      voz perdía las pausas que el director pidió escribir.
+    - NO colapsa puntos suspensivos '...' (pausa dramática del estilo podcast).
+    - Solo corrige defectos mecánicos evidentes: comas duplicadas, comas sin
+      espacio posterior (excepto decimales), espacios antes de coma y
+      espacios faltantes después de punto.
     """
     if not text or len(text.strip()) < 5:
         return text
 
     clean = text.strip()
 
-    # 1. Corregir comas huérfanas entre determinantes/pronombres/artículos y sustantivos
-    clean = re.sub(
-        r'\b(un|una|unos|unas|el|la|los|las|este|esta|estos|estas|ningún|ningun|ninguna|ninguno|todo|toda|cada|su|sus|mi|mis|tu|tus)\s*,\s*',
-        r'\1 ',
-        clean,
-        flags=re.IGNORECASE,
-    )
+    # 1. Comas duplicadas o encadenadas: ',,,' → ','
+    clean = re.sub(r',(\s*,)+', ',', clean)
 
-    # 2. Corregir comas accidentales antes de la conjunción 'y' en enumeraciones continuas
-    clean = re.sub(r',\s+y\b', ' y', clean)
-
-    # 3. Corregir comas pegadas a palabras o con espaciado incorrecto
+    # 2. Espacios antes de coma: 'palabra ,' → 'palabra,'
     clean = re.sub(r'\s+,', ',', clean)
+
+    # 3. Comas pegadas a la palabra siguiente (con espacio): 'dato,mas' → 'dato, mas'.
+    #    El lookahead de dígito preserva los decimales españoles ('1,5 millones').
     clean = re.sub(r',([^\s\d])', r', \1', clean)
 
-    # 4. Eliminar dobles comas o signos repetidos
-    clean = re.sub(r',(\s*,)+', ',', clean)
-    clean = re.sub(r'([,.])\1+', r'\1', clean)
+    # 4. Signos de exclamación/interrogación repetidos: '!!!' → '!', '???' → '?'.
+    #    Los puntos suspensivos '...' se conservan: son pausa dramática intencional.
+    clean = re.sub(r'([!?])\1+', r'\1', clean)
+
+    # 5. Punto pegado a la palabra siguiente: 'frase.Siguiente' → 'frase. Siguiente'
+    #    (solo si sigue letra: nunca rompe decimales '3.14' ni siglas con puntos).
+    clean = re.sub(r'\.(?=[A-ZÁÉÍÓÚÑ])', '. ', clean)
 
     return clean
 
