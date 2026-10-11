@@ -124,7 +124,18 @@ class SceneEngine:
         from core.kinetic_titles import KineticTitleRenderer
         self.title_renderer = KineticTitleRenderer(self.web_renderer)
         self.chat_renderer = LiveChatRenderer(width=340 if not self.is_vertical else 300)
+        (self.workdir / "assets").mkdir(parents=True, exist_ok=True)
         self.orchestrator = AssetOrchestrator(target_dir=self.workdir / "assets")
+        try:
+            from core.glm_motion_director import GLMMotionDirector
+            self.glm_motion_director = GLMMotionDirector()
+        except Exception:
+            self.glm_motion_director = None
+        try:
+            from core.motion_graphics_engine import MotionGraphicsEngine
+            self.motion_engine = MotionGraphicsEngine(self.web_renderer, is_vertical=self.is_vertical)
+        except Exception:
+            self.motion_engine = None
 
     async def render_scene(
         self,
@@ -348,6 +359,30 @@ class SceneEngine:
         except Exception as exc:
             safe_log(f"[SceneEngine] Fallback a avatar clip base: {exc}")
             scene_avatar_clip = None
+
+        # 2d. Microelementos visuales cineticos sutiles disenados por GLM-5.3 (HyperFrames / Remotion / Native)
+        motion_overlay_path = None
+        if getattr(self, "motion_engine", None) and getattr(self, "glm_motion_director", None):
+            try:
+                acc_col = getattr(scene, "accent_color", "#ff9436") or "#ff9436"
+                motion_spec = self.glm_motion_director.design_motion_spec(
+                    scene_name=scene.name,
+                    speech_text=speech_text,
+                    duration=duration,
+                    accent_color=acc_col,
+                    scene_type=getattr(scene, "type", "broll_narration"),
+                )
+                motion_overlay_path = await self.motion_engine.render_scene_motion_overlay(
+                    motion_spec=motion_spec,
+                    duration=duration,
+                    scene_dir=scene_dir,
+                    scene_id=scene.scene_id,
+                )
+                if motion_overlay_path and motion_overlay_path.exists():
+                    safe_log(f"[SceneEngine] ? Capa de microelementos cineticos GLM-5.3 lista para escena {scene.scene_id}")
+            except Exception as _me:
+                safe_log(f"[SceneEngine] Fallback en motion graphics: {_me}")
+                motion_overlay_path = None
 
         # 3. Preparar tarjeta Bento moderna si aplica
         card_img_path = None
@@ -722,6 +757,17 @@ class SceneEngine:
             filter_parts.append("[0:v]format=yuva420p[v_bg0]")
             cur_v = "v_bg0"
             num_in += 1
+
+        # Superposicion sutil de microelementos cineticos de fondo (particulas y acentos HUD)
+        if motion_overlay_path and motion_overlay_path.exists():
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(motion_overlay_path)])
+            m_idx = num_in
+            num_in += 1
+            filter_parts.append(
+                f"[{m_idx}:v]format=rgba,fade=t=in:st=0.3:d=0.35:alpha=1,fade=t=out:st={duration-0.35:.2f}:d=0.35:alpha=1[motion_in];"
+                f"[{cur_v}][motion_in]overlay=0:0:enable='between(t,0.3,{duration-0.2:.2f})'[v_bg_motion]"
+            )
+            cur_v = "v_bg_motion"
 
         # Desenfoque temporal dinámico: si hay tarjeta o texto libre cinemático, desenfocar durante su aparición
         # Duración de la tarjeta por TIEMPO DE LECTURA (regla broadcast: ~1/3 s por
