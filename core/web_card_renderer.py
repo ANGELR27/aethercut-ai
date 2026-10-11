@@ -1754,152 +1754,14 @@ class WebCardRenderer:
         date_str: str = "REGISTRO OFICIAL",
         badge: str = "EVIDENCIA DOCUMENTAL",
     ) -> str:
-        """Efecto de recorte de documento oficial / noticia con resaltador fluorescente estilo Vox / Johnny Harris."""
-        import re
-        s_clean = source_name.replace("<", "&lt;").replace(">", "&gt;")
-        t_clean = title.replace("<", "&lt;").replace(">", "&gt;")
-        e_clean = excerpt.replace("<", "&lt;").replace(">", "&gt;")
-        d_clean = date_str.replace("<", "&lt;").replace(">", "&gt;")
-        b_clean = badge.replace("<", "&lt;").replace(">", "&gt;")
-
-        if highlighted_phrase and highlighted_phrase.lower() in e_clean.lower():
-            pat = re.compile(re.escape(highlighted_phrase), re.IGNORECASE)
-            e_formatted = pat.sub(f'<mark class="highlighter">{highlighted_phrase}</mark>', e_clean)
-        else:
-            e_formatted = e_clean
-
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-{HTML_FONTS}
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-  }}
-  .doc-card {{
-    width: 760px;
-    background: linear-gradient(145deg, rgba(9, 10, 13, 0.97) 0%, rgba(4, 5, 7, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.95), 0 0 45px rgba(12, 24, 48, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    border-radius: 14px;
-    padding: 34px 40px;
-    color: #f1f5f9;
-    position: relative;
-    overflow: hidden;
-  }}
-  /* Comilla tipográfica de lujo en marca de agua */
-  .doc-card::after {{
-    content: '“';
-    position: absolute;
-    bottom: -35px;
-    right: 25px;
-    font-family: 'Outfit', serif;
-    font-size: 160px;
-    font-weight: 900;
-    line-height: 1;
-    color: rgba(255, 255, 255, 0.035);
-    pointer-events: none;
-  }}
-  .doc-header {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    margin-bottom: 22px;
-  }}
-  .source-tag {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    font-weight: 600;
-    color: #94a3b8;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-  }}
-  .source-dot {{
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #38bdf8;
-    box-shadow: 0 0 8px #38bdf8;
-  }}
-  .date-tag {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #64748b;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-  }}
-  .doc-title {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 26px;
-    font-weight: 700;
-    line-height: 1.25;
-    color: #ffffff;
-    letter-spacing: -0.4px;
-    margin-bottom: 20px;
-  }}
-  .doc-quote-wrap {{
-    position: relative;
-    padding-left: 20px;
-    border-left: 2px solid rgba(255, 255, 255, 0.16);
-  }}
-  .doc-body {{
-    font-size: 18px;
-    line-height: 1.68;
-    color: #cbd5e1;
-    font-weight: 400;
-  }}
-  /* Resaltador sutil estilo papelería editorial de lujo */
-  .highlighter {{
-    background: linear-gradient(180deg, transparent 40%, rgba(234, 179, 8, 0.28) 40%, rgba(234, 179, 8, 0.32) 92%, transparent 92%);
-    color: #ffffff;
-    font-weight: 600;
-    padding: 0 4px;
-    border-radius: 2px;
-    border-bottom: 1.5px solid rgba(250, 204, 21, 0.65);
-  }}
-  .doc-footer {{
-    margin-top: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 12px;
-    color: #64748b;
-    font-family: 'JetBrains Mono', monospace;
-  }}
-</style>
-</head>
-<body>
-  <div class="doc-card">
-    <div class="doc-header">
-      <div class="source-tag">
-        <span class="source-dot"></span>
-        <span>{s_clean}</span>
-      </div>
-      <div class="date-tag">{d_clean}</div>
-    </div>
-    <div class="doc-title">{t_clean}</div>
-    <div class="doc-quote-wrap">
-      <div class="doc-body">“{e_formatted}”</div>
-    </div>
-    <div class="doc-footer">
-      <span>● DOCUMENTO DE ARCHIVO VERIFICADO</span>
-      <span>{b_clean}</span>
-    </div>
-  </div>
-</body>
-</html>"""
+        """Cita oficial / evidencia documental 100% unificada al nuevo diseño Matte Dark + Ámbar Glow."""
+        return self.generate_html(
+            headline=title or source_name,
+            body=excerpt,
+            badge=badge or "EVIDENCIA DOCUMENTAL",
+            source=f"{source_name} · {date_str}" if source_name else date_str,
+            style="quote",
+        )
 
     def render_document_citation_to_image(
         self,
@@ -1911,35 +1773,15 @@ class WebCardRenderer:
         date_str: str = "REGISTRO OFICIAL",
         badge: str = "EVIDENCIA DOCUMENTAL",
     ) -> Path:
-        """Renderiza una cita documental oficial con texto resaltado fluorescente."""
-        out_png = Path(out_png)
-        out_png.parent.mkdir(parents=True, exist_ok=True)
-        html_file = out_png.with_suffix(".html")
-        html_content = self.generate_document_citation_html(
-            source_name=source_name,
-            title=title,
-            excerpt=excerpt,
-            highlighted_phrase=highlighted_phrase,
-            date_str=date_str,
-            badge=badge,
+        """Renderiza cita documental oficial con el nuevo estándar Matte Dark + Ámbar Glow."""
+        return self.render_to_image(
+            headline=title or source_name,
+            out_png=out_png,
+            body=excerpt,
+            badge=badge or "EVIDENCIA DOCUMENTAL",
+            source=f"{source_name} · {date_str}" if source_name else date_str,
+            style="quote",
         )
-        html_file.write_text(html_content, encoding="utf-8")
-        file_uri = html_file.resolve().as_uri()
-
-        args = [
-            self.browser_bin,
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--hide-scrollbars",
-            "--default-background-color=00000000",
-            f"--screenshot={out_png.resolve()}",
-            "--window-size=1200,600",
-            file_uri,
-        ]
-        subprocess.run(args, capture_output=True, check=True, timeout=15)
-        self._crop_transparent(out_png)
-        return out_png
 
     def generate_split_versus_html(
         self,
@@ -1951,7 +1793,7 @@ class WebCardRenderer:
         right_sub: str = "",
         badge: str = "COMPARATIVA DIRECTA",
     ) -> str:
-        """Diseño cinemático Versus / Comparativa doble con divisor láser de neón."""
+        """Diseño comparativa doble 100% unificado al nuevo estándar Matte Dark + Ámbar Glow."""
         l_n = left_name.replace("<", "&lt;").replace(">", "&gt;")
         l_s = left_stat.replace("<", "&lt;").replace(">", "&gt;")
         r_n = right_name.replace("<", "&lt;").replace(">", "&gt;")
@@ -1975,56 +1817,65 @@ class WebCardRenderer:
     min-height: 100vh;
     font-family: 'Plus Jakarta Sans', sans-serif;
   }}
-  .vs-wrap {{
-    width: 780px;
-    background: linear-gradient(145deg, rgba(9, 10, 13, 0.98) 0%, rgba(4, 5, 7, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.95), 0 0 45px rgba(12, 24, 48, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    border-radius: 14px;
-    padding: 28px 36px;
-    color: #ffffff;
+  .card-container {{
+    width: 660px;
+    min-height: 205px;
+    background: linear-gradient(145deg, #101217 0%, #0a0b0e 100%);
+    border: 1px solid rgba(255, 140, 40, 0.26);
+    box-shadow: 0 24px 56px rgba(0, 0, 0, 0.90),
+                0 0 32px rgba(255, 120, 20, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12),
+                inset 0 0 20px rgba(255, 120, 20, 0.03);
+    border-radius: 24px;
+    padding: 24px 28px;
     position: relative;
     overflow: hidden;
+    color: #ffffff;
   }}
-  .vs-badge {{
-    text-align: center;
-    font-family: 'JetBrains Mono', monospace;
+  .card-top-pip {{
+    position: absolute;
+    top: -4px;
+    left: 20%;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ff7a18;
+    box-shadow: 0 0 10px #ff7a18, 0 0 4px #ffb060;
+    z-index: 10;
+  }}
+  .card-top-glow {{
+    position: absolute;
+    top: -1px;
+    left: calc(20% - 66px);
+    width: 140px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 140, 40, 0.65), #ff7a18, rgba(255, 140, 40, 0.65), transparent);
+    pointer-events: none;
+    z-index: 9;
+  }}
+  .card-tag {{
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 2px;
-    color: #38bdf8;
-    margin-bottom: 20px;
+    letter-spacing: 0.13em;
+    color: #ff8a34;
     text-transform: uppercase;
+    margin-bottom: 12px;
+  }}
+  .card-tag-dot {{
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #ff8a34;
+    box-shadow: 0 0 8px #ff7a18;
   }}
   .vs-columns {{
     display: flex;
     align-items: center;
     justify-content: space-between;
-    position: relative;
-  }}
-  .vs-divider {{
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 0 16px;
-  }}
-  .divider-line {{
-    width: 1px;
-    height: 40px;
-    background: rgba(255, 255, 255, 0.2);
-  }}
-  .vs-pill {{
-    background: linear-gradient(135deg, #ef4444, #f59e0b);
-    color: #ffffff;
-    font-family: 'Outfit', sans-serif;
-    font-weight: 900;
-    font-size: 14px;
-    padding: 6px 12px;
-    border-radius: 999px;
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.6);
-    letter-spacing: 1px;
+    gap: 16px;
   }}
   .col-side {{
     flex: 1;
@@ -2032,44 +1883,63 @@ class WebCardRenderer:
   }}
   .col-name {{
     font-family: 'Outfit', sans-serif;
-    font-size: 22px;
+    font-size: 17px;
     font-weight: 800;
     color: #ffffff;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
   }}
-  .col-stat-left {{
+  .col-stat {{
     font-family: 'Outfit', sans-serif;
-    font-size: 52px;
+    font-size: 42px;
     font-weight: 900;
     line-height: 1;
-    color: #38bdf8;
-    filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.5));
-    margin-bottom: 8px;
-  }}
-  .col-stat-right {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 52px;
-    font-weight: 900;
-    line-height: 1;
-    color: #f59e0b;
-    filter: drop-shadow(0 0 20px rgba(245, 158, 11, 0.5));
-    margin-bottom: 8px;
+    color: #ff9436;
+    text-shadow: 0 2px 14px rgba(255, 148, 54, 0.35);
+    margin-bottom: 6px;
   }}
   .col-sub {{
-    font-size: 13px;
+    font-size: 12px;
     color: #94a3b8;
-    line-height: 1.4;
+    line-height: 1.35;
+  }}
+  .vs-divider {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 10px;
+  }}
+  .divider-line {{
+    width: 1px;
+    height: 28px;
+    background: rgba(255, 140, 40, 0.25);
+  }}
+  .vs-pill {{
+    background: rgba(255, 140, 40, 0.14);
+    border: 1px solid rgba(255, 140, 40, 0.35);
+    color: #ff9436;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 900;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    box-shadow: 0 0 14px rgba(255, 140, 40, 0.25);
+    letter-spacing: 1.5px;
   }}
 </style>
 </head>
 <body>
-  <div class="vs-wrap">
-    <div class="vs-badge">● {b_c}</div>
+  <div class="card-container">
+    <div class="card-top-pip"></div>
+    <div class="card-top-glow"></div>
+    <div class="card-tag"><span class="card-tag-dot"></span> {b_c}</div>
     <div class="vs-columns">
       <div class="col-side">
         <div class="col-name">{l_n}</div>
-        <div class="col-stat-left">{l_s}</div>
+        <div class="col-stat">{l_s}</div>
         <div class="col-sub">{l_sb}</div>
       </div>
       <div class="vs-divider">
@@ -2079,7 +1949,7 @@ class WebCardRenderer:
       </div>
       <div class="col-side">
         <div class="col-name">{r_n}</div>
-        <div class="col-stat-right">{r_s}</div>
+        <div class="col-stat">{r_s}</div>
         <div class="col-sub">{r_sb}</div>
       </div>
     </div>
@@ -2098,7 +1968,7 @@ class WebCardRenderer:
         right_sub: str = "",
         badge: str = "COMPARATIVA DIRECTA",
     ) -> Path:
-        """Renderiza una tarjeta Versus / Comparativa doble de dos entidades."""
+        """Renderiza la tarjeta split versus en alta definición con el nuevo estándar."""
         out_png = Path(out_png)
         out_png.parent.mkdir(parents=True, exist_ok=True)
         html_file = out_png.with_suffix(".html")
@@ -2122,7 +1992,7 @@ class WebCardRenderer:
             "--hide-scrollbars",
             "--default-background-color=00000000",
             f"--screenshot={out_png.resolve()}",
-            "--window-size=1200,500",
+            "--window-size=1200,600",
             file_uri,
         ]
         subprocess.run(args, capture_output=True, check=True, timeout=15)

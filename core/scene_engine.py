@@ -341,42 +341,8 @@ class SceneEngine:
             c_stat = scene.card.stat or ""
 
             try:
-                # 1. Cita Oficial / Documento / Noticia con resaltador fluorescente estilo Vox
-                if any(k in c_badge for k in ("DOCUMENTAL", "EVIDENCIA", "INFORME", "CITA")):
-                    hl_words = " ".join(c_body.split()[:5]) if c_body else ""
-                    self.web_renderer.render_document_citation_to_image(
-                        source_name=c_headline,
-                        title=scene.name,
-                        excerpt=c_body,
-                        out_png=card_img_path,
-                        highlighted_phrase=hl_words,
-                        date_str="REGISTRO OFICIAL 2026",
-                        badge=c_badge or "EVIDENCIA DOCUMENTAL",
-                    )
-                    safe_log(f"[SceneEngine] 📄 Cita Documental oficial con resaltador generada para escena {scene.scene_id}")
-
-                # 2. Split Versus / Comparativa Directa con divisor de neón
-                elif "VS" in c_headline.upper() or "VERSUS" in c_badge or ("COMPARATIVA" in c_badge and (" vs " in c_headline.lower() or " vs " in c_stat.lower())):
-                    parts = re.split(r"\s+vs\.?\s+", c_headline, flags=re.IGNORECASE)
-                    l_name = parts[0] if len(parts) > 0 else "BANDO A"
-                    r_name = parts[1] if len(parts) > 1 else "BANDO B"
-                    stat_parts = re.split(r"\s+vs\.?\s+", c_stat, flags=re.IGNORECASE) if c_stat else ["", ""]
-                    l_st = stat_parts[0] if len(stat_parts) > 0 else c_stat
-                    r_st = stat_parts[1] if len(stat_parts) > 1 else "VEREDICTO"
-                    self.web_renderer.render_split_versus_to_image(
-                        left_name=l_name,
-                        left_stat=l_st or "100%",
-                        right_name=r_name,
-                        right_stat=r_st or "N/D",
-                        out_png=card_img_path,
-                        left_sub="Registro y Análisis Oficial",
-                        right_sub="Datos Técnicos Verificados",
-                        badge=c_badge or "COMPARATIVA DIRECTA",
-                    )
-                    safe_log(f"[SceneEngine] ⚔️ Split Versus comparativa generada para escena {scene.scene_id}")
-
-                # 3. Mapa Geopolítico / Satelital Táctico GeoIntel
-                elif any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN")) or "mapa" in c_headline.lower():
+                # 1. Mapa Geopolítico / Satelital Táctico GeoIntel (si aplica específicamente)
+                if any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN")) or "mapa" in c_headline.lower():
                     map_result = self.web_renderer.render_geointel_map_to_image(
                         location_title=c_headline,
                         country_name=c_stat or "ZONA DE INVESTIGACIÓN",
@@ -388,8 +354,6 @@ class SceneEngine:
                     if map_result:
                         safe_log(f"[SceneEngine] 🗺️ Mapa Geopolítico GeoIntel generado para escena {scene.scene_id}")
                     else:
-                        # Ubicación no reconocida: sin mapa, tarjeta Bento normal.
-                        # Nunca un mapa falso con coordenadas inventadas.
                         self.web_renderer.render_to_image(
                             headline=c_headline,
                             out_png=card_img_path,
@@ -398,18 +362,34 @@ class SceneEngine:
                             body=c_body,
                             badge=c_badge or "DATO VERIFICADO",
                             source="Registro Oficial 2026",
-                            style="tactical_amber" if scene.type in ("breaking_news", "card_focus") else "obsidian_bento",
+                            style="auto",
+                            image_path=broll_img,
                         )
-                        safe_log(f"[SceneEngine] 📊 Mapa sin ubicación reconocida: tarjeta Bento estándar (escena {scene.scene_id})")
+                        safe_log(f"[SceneEngine] 📊 Tarjeta Bento estándar generada para escena {scene.scene_id}")
 
-                # 4. Bento Box Pro estándar (sin ruedas)
-                else:
-                    c_style = "tactical_amber" if scene.type in ("breaking_news", "card_focus") else "obsidian_bento"
+                # 2. Citas / Evidencias documentales -> Bento quote si no hay stat, o auto si hay stat
+                elif any(k in c_badge for k in ("DOCUMENTAL", "EVIDENCIA", "INFORME", "CITA")):
+                    c_style = "quote" if not c_stat else "auto"
                     self.web_renderer.render_to_image(
                         headline=c_headline,
                         out_png=card_img_path,
                         stat_value=c_stat or "",
-                        stat_label="Cifra Verificada",
+                        stat_label="Cifra Verificada" if c_stat else "",
+                        body=c_body,
+                        badge=c_badge or "EVIDENCIA DOCUMENTAL",
+                        source="Registro Oficial 2026",
+                        style=c_style,
+                        image_path=broll_img,
+                    )
+                    safe_log(f"[SceneEngine] 📜 Cita/Evidencia Bento moderna Matte Dark generada para escena {scene.scene_id}")
+
+                # 3. Comparativa / Versus / Bento estándar
+                else:
+                    self.web_renderer.render_to_image(
+                        headline=c_headline,
+                        out_png=card_img_path,
+                        stat_value=c_stat or "",
+                        stat_label="Cifra Verificada" if c_stat else "",
                         body=c_body,
                         badge=c_badge or "INFO",
                         source="Registro Oficial 2026",
@@ -418,20 +398,34 @@ class SceneEngine:
                     )
                     safe_log(f"[SceneEngine] 🎨 Tarjeta Bento moderna WebCardRenderer generada para escena {scene.scene_id}")
             except Exception as _we:
-                safe_log(f"[SceneEngine] Fallback a InfoCardRenderer (Pillow): {_we}")
-                card_obj = InfoCard(
-                    card_id=f"sc_card_{scene.scene_id}",
-                    headline=scene.card.headline,
-                    claim=scene.card.body or scene.card.headline,
-                    search_query=scene.card.headline,
-                    body=scene.card.body,
-                    start_sec=0.8,
-                    end_sec=max(3.0, duration - 0.5),
-                    stat_value=scene.card.stat or "",
-                    verdict="supported",
-                    kind="cifra" if scene.card.stat else "dato",
-                )
-                self.card_renderer.render(card_obj, card_img_path)
+                safe_log(f"[SceneEngine] Fallback a WebCardRenderer simplificado: {_we}")
+                try:
+                    self.web_renderer.render_to_image(
+                        headline=c_headline,
+                        out_png=card_img_path,
+                        stat_value=c_stat or "",
+                        stat_label="",
+                        body=c_body,
+                        badge=c_badge or "INFO",
+                        source="Registro Oficial 2026",
+                        style="auto",
+                        image_path=None,
+                    )
+                except Exception as _fe:
+                    safe_log(f"[SceneEngine] Fallback final a CardRenderer: {_fe}")
+                    card_obj = InfoCard(
+                        card_id=f"sc_card_{scene.scene_id}",
+                        headline=scene.card.headline,
+                        claim=scene.card.body or scene.card.headline,
+                        search_query=scene.card.headline,
+                        body=scene.card.body,
+                        start_sec=0.8,
+                        end_sec=max(3.0, duration - 0.5),
+                        stat_value=scene.card.stat or "",
+                        verdict="supported",
+                        kind="cifra" if scene.card.stat else "dato",
+                    )
+                    self.card_renderer.render(card_obj, card_img_path)
 
         # 3b. Preparar chips / pastillas referenciales dinámicas sincronizadas con el momento en que se mencionan
         chips_img_path = None

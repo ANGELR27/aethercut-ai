@@ -587,82 +587,73 @@ class InfoCardRenderer:
         return target_out
 
     def render(self, card: InfoCard, out_path: Path) -> str:
-        """Renderiza la tarjeta con el diseño Pinterest Bento Glassmorphism."""
-        domain = card.sources[0].domain if card.sources else "Registro oficial"
+        """Renderiza la tarjeta con el diseño unificado 2026 Matte Dark + Ámbar Glow."""
+        domain = card.sources[0].domain if card.sources else "Registro Oficial 2026"
         badge_text, badge_tone = self._get_single_badge(card)
+        out_target = Path(out_path)
+        out_target.parent.mkdir(parents=True, exist_ok=True)
+        img_path = Path(card.image_path) if getattr(card, "image_path", None) and Path(card.image_path).exists() else None
 
-        # 1. Contradicción / Corrección
-        if card.verdict == "contradicted":
-            if getattr(card, "is_myth", False):
-                return self._render_myth_cards(card, out_path)
-            headline = card.headline
-            correction_text = card.correction or card.corrected_value or card.note
-            body = f"Afirmación: «{card.claim}»\n\nDato real confirmado: {correction_text}"
-            return str(self._render_pinterest_glass_card(
-                headline=headline,
-                body=body,
-                badge_text="CORRECCIÓN OFICIAL",
-                badge_tone="red",
-                image_path=card.image_path,
-                source_domain=card.correction_source or domain,
-                out_path=out_path,
-            ))
+        try:
+            from core.web_card_renderer import WebCardRenderer
+            web_ren = WebCardRenderer()
 
-        # 2. Insuficiente evidencia
-        if card.verdict == "insufficient":
-            headline = card.headline
-            body = card.note or "No se encontraron registros ni evidencia oficial concluyente que respalden esta afirmación."
-            return str(self._render_pinterest_glass_card(
-                headline=headline,
-                body=body,
-                badge_text="EN REVISIÓN",
-                badge_tone="amber",
-                image_path=card.image_path,
-                source_domain=domain,
-                out_path=out_path,
-            ))
+            headline = card.headline or ""
+            body = card.body or card.claim or ""
+            stat_val = card.stat_value or ""
 
-        # 3. Estadística / Cifra / Gráfico de alto impacto
-        if card.stat_value or card.kind in ("cifra", "estadistica", "comparativa"):
-            headline = card.headline
-            stat_val = card.stat_value or "DATO CLAVE"
-            body = card.body or card.claim
-            b_label = f"DATO CLAVE: {stat_val[:18]}" if len(stat_val) <= 18 else "ESTADÍSTICA OFICIAL"
-            return str(self._render_stat_hero_card(
+            if card.verdict == "contradicted":
+                badge_text = "CORRECCIÓN OFICIAL"
+                correction_text = card.correction or card.corrected_value or card.note
+                if correction_text:
+                    body = f"«{card.claim}» — Confirmado: {correction_text}"
+                c_style = "quote"
+            elif card.verdict == "insufficient":
+                badge_text = "EN REVISIÓN"
+                c_style = "auto"
+            elif stat_val:
+                c_style = "auto"
+            else:
+                c_style = "auto"
+
+            res = web_ren.render_to_image(
                 headline=headline,
+                out_png=out_target,
                 stat_value=stat_val,
+                stat_label=getattr(card, "stat_label", "") or ("Cifra Verificada" if stat_val else ""),
                 body=body,
-                badge_text=b_label,
-                badge_tone="amber",
+                badge=badge_text,
+                source=domain,
+                style=c_style,
+                image_path=img_path,
+            )
+            return str(res)
+        except Exception as _we:
+            return str(self._render_pinterest_glass_card(
+                headline=card.headline or "",
+                body=card.body or card.claim or "",
+                badge_text=badge_text,
+                badge_tone=badge_tone,
                 image_path=card.image_path,
                 source_domain=domain,
-                out_path=out_path,
+                out_path=out_target,
             ))
-
-        # 4. Referencia o Apoyo visual estándar
-        headline = card.headline
-        body = card.body or card.claim
-        return str(self._render_pinterest_glass_card(
-            headline=headline,
-            body=body,
-            badge_text=badge_text,
-            badge_tone=badge_tone,
-            image_path=card.image_path,
-            source_domain=domain,
-            out_path=out_path,
-        ))
 
     def render_photo_frame(self, image_path: str, label: str, out_path: Path) -> Optional[Path]:
-        """Foto contextual enmarcada en formato Bento con badge de apoyo visual."""
+        """Foto contextual enmarcada en formato Bento Matte Dark con badge de apoyo visual."""
         try:
-            return self._render_pinterest_glass_card(
+            from core.web_card_renderer import WebCardRenderer
+            web_ren = WebCardRenderer()
+            out_p = Path(out_path)
+            img_p = Path(image_path) if image_path and Path(image_path).exists() else None
+            return web_ren.render_to_image(
                 headline=label.strip(),
+                out_png=out_p,
                 body="Apoyo visual contextual integrado para ilustrar el argumento expuesto.",
-                badge_text="APOYO VISUAL",
-                badge_tone="green",
-                image_path=image_path,
-                source_domain="Registro visual",
-                out_path=out_path,
+                badge="APOYO VISUAL",
+                source="Registro Visual 2026",
+                style="photo" if img_p else "auto",
+                image_path=img_p,
             )
         except Exception as exc:
             print(f"[CardRenderer] No se pudo enmarcar la foto: {exc}")
