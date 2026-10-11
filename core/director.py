@@ -247,7 +247,7 @@ TIPOS DE ESCENA DISPONIBLES:
 1. "avatar_cam": KAI diciendo la primera frase de gancho (Hook de impacto de 3 a 4 segundos MÁXIMO) y luego entra inmediatamente el contenido visual y B-Roll para que la audiencia no se aburra. Ideal para abrir con intriga o para la conclusión final reflexiva.
 2. "video_reaction": Clip de video dinámico a pantalla completa con KAI en recuadro PIP en la esquina reaccionando en vivo ("¡Miren esta toma!", "¡Fíjense en este detalle!").
 3. "card_focus": Tarjeta Bento HUD con gráfico infográfico (Matplotlib) y KAI en PIP. ¡OBLIGATORIA para estadísticas y comparativas!
-4. "vector_motion": Animación vectorial con física y diseño Signature Pro (redes neuronales, flujos de razonamiento o personajes realizando acciones como analizar datos, operar pantallas o tomar decisiones). ¡Ideal para explicar conceptos abstractos o procesos complejos!
+4. "vector_motion": B-Roll cinemático conceptual y gráficos de estudio de alta definición (redes neuronales, flujos tecnológicos, metraje 4K o visualizaciones abstractas). ¡Ideal para explicar conceptos y procesos complejos!
 5. "chat_debate": KAI interactúa con preguntas y dilemas de la audiencia, contrastando posturas.
 6. "breaking_news": Titular o primicia urgente con tono dinámico y clip de video en movimiento.
 

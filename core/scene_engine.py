@@ -208,33 +208,16 @@ class SceneEngine:
                 broll_img = Path("assets/streamer_studio_room.jpg")
 
         if scene.type == "vector_motion":
-            # Renderizar animación vectorial de estudio con física y estilo oficial AetherCut
+            # Sustituir monigotes/stickmen vectoriales por B-Roll temático cinemático en alta definición
             try:
-                from core.vector_animator import VectorAnimator
-                va = VectorAnimator(width=self.W, height=self.H, fps=25)
-                vec_clip = scene_dir / "vector_motion.mp4"
-                c_cards = []
-                if scene.card:
-                    c_cards.append({"title": scene.card.headline, "desc": scene.card.body})
-                else:
-                    c_cards.append({"title": scene.name, "desc": scene.speech[:60] + "..."})
-                c_cards.append({"title": "INFERENCIA ACTIVA", "desc": "Validación cognitiva en tiempo real."})
-                # to_thread: render_character_action_clip genera TODOS los frames
-                # (duration×25 PNGs a resolución completa) + FFmpeg de forma
-                # síncrona; ejecutarlo directo congelaba el event loop entero
-                # (sin progreso, sin cancelación) durante toda la escena.
-                await asyncio.to_thread(
-                    va.render_character_action_clip,
-                    headline=scene.card.headline if scene.card else scene.name,
-                    action_name="Análisis & Decisión Estratégica",
-                    cards_info=c_cards,
-                    duration_sec=duration,
-                    out_mp4=vec_clip,
-                )
-                if vec_clip.exists():
-                    broll_img = vec_clip
+                v_concept = scene.visual_query or f"{scene.name} motion graphics 4k tech"
+                safe_log(f"[SceneEngine] 🎬 Obteniendo B-Roll cinemático HD para escena conceptual {scene.scene_id}: '{v_concept}'")
+                broll_img = await self._get_scene_visual(v_concept, scene_dir, is_video_scene=True)
+                if not broll_img or not broll_img.exists():
+                    fallback_concept = f"{scene.name} concept documentary 4k"
+                    broll_img = await self._get_scene_visual(fallback_concept, scene_dir, is_video_scene=True)
             except Exception as _ev:
-                safe_log(f"[SceneEngine] Fallback en vector_motion: {_ev}")
+                safe_log(f"[SceneEngine] Fallback en visual conceptual: {_ev}")
 
         # MODO ANÁLISIS DE CASO: si el director ancló esta escena a un fotograma
         # REAL del video fuente, ese fotograma ES el fondo — evidencia visual

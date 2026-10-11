@@ -185,50 +185,8 @@ class VectorAnimator:
 
     def _character(self, d: ImageDraw.Draw, t: float,
                    cx: int, floor_y: int, action: str = "analyzing") -> None:
-        breath = math.sin(t * 3.2) * 4
-        tt = int(490 + breath)
-        tb = int(635 + breath)
-        d.ellipse((cx - 80, floor_y - 10, cx + 80, floor_y + 10), fill=(0, 0, 0, 100))
-        d.rounded_rectangle((cx - 44, tt, cx + 44, tb), radius=18,
-                             fill=(22, 32, 52, 255), outline=(56, 189, 248, 155), width=2)
-        d.line([(cx - 8, tt + 10), (cx, tt + 40), (cx + 8, tt + 10)],
-               fill=(56, 189, 248, 115), width=2)
-        neck_y = tt - 14
-        d.line([(cx, tt), (cx, neck_y)], fill=(215, 185, 165, 255), width=11)
-        hcy = neck_y - 36
-        d.ellipse((cx - 32, hcy - 32, cx + 32, hcy + 32), fill=(225, 195, 175, 255))
-        d.arc((cx - 32, hcy - 36, cx + 32, hcy + 32), start=180, end=360,
-              fill=(28, 35, 50, 255), width=11)
-        for ex in (cx - 12, cx + 12):
-            blink = abs(math.sin(t * 0.3 + ex)) > 0.97
-            eh = 2 if blink else 5
-            d.ellipse((ex - 4, hcy - 6 - eh, ex + 4, hcy - 6 + eh), fill=(35, 40, 55, 255))
-        d.line([(cx - 18, tb), (cx - 18, floor_y)], fill=(15, 20, 34, 255), width=16)
-        d.line([(cx + 18, tb), (cx + 18, floor_y)], fill=(15, 20, 34, 255), width=16)
-        for sx in (cx - 30, cx + 12):
-            d.rounded_rectangle((sx, floor_y - 10, sx + 36, floor_y), radius=5,
-                                 fill=(38, 48, 68, 255))
-        if action == "analyzing":
-            arm_y = int(math.sin(t * 1.8) * 8)
-            d.line([(cx - 40, tt + 18), (cx - 80, tt + 50 + arm_y)],
-                   fill=(22, 32, 52, 255), width=14)
-            d.ellipse((cx - 90, tt + 44 + arm_y, cx - 72, tt + 62 + arm_y),
-                      fill=(215, 185, 165, 255))
-            d.line([(cx + 40, tt + 18), (cx + 58, tt + 60)],
-                   fill=(22, 32, 52, 255), width=14)
-        elif action == "presenting":
-            ang = math.sin(t * 1.2) * 0.15
-            ax = int(math.cos(-0.5 + ang) * 85)
-            ay = int(math.sin(-0.5 + ang) * 85)
-            d.line([(cx + 40, tt + 18), (cx + 40 + ax, tt + 18 + ay)],
-                   fill=(22, 32, 52, 255), width=14)
-            d.ellipse((cx + 40 + ax - 8, tt + 18 + ay - 8,
-                       cx + 40 + ax + 8, tt + 18 + ay + 8), fill=(215, 185, 165, 255))
-        else:
-            d.line([(cx - 40, tt + 18), (cx - 50, tt + 70)],
-                   fill=(22, 32, 52, 255), width=14)
-            d.line([(cx + 40, tt + 18), (cx + 50, tt + 70)],
-                   fill=(22, 32, 52, 255), width=14)
+        # Eliminado completamente: ningún monigote o stickman rudimentario debe dibujarse
+        pass
 
     def render_character_action_clip(
         self,
@@ -239,26 +197,11 @@ class VectorAnimator:
         out_mp4: Path,
         scene_type: str = "analyzing",
     ) -> Path:
-        """Renderiza escena animada completa: personaje + graficos + red neuronal."""
+        """Fondo ambiental cinemático dark obsidian sin monigotes ni gráficos rudimentarios."""
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
         total_frames = max(1, int(self.fps * duration_sec))
         tmp = out_mp4.parent / f"_vframes_{out_mp4.stem}"
         tmp.mkdir(parents=True, exist_ok=True)
-
-        show_bars   = scene_type in ("analyzing", "data", "chart", "stats")
-        show_neural = scene_type in ("ai", "neural", "tech", "mixed")
-        show_wave   = scene_type in ("audio", "wave", "podcast", "mixed")
-
-        bar_colors = ["#38bdf8", "#34d399", "#fbbf24", "#f87171", "#a78bfa"]
-        bars: List[Tuple[str, float, str]] = []
-        for i, c in enumerate(cards_info[:5]):
-            raw = c.get("stat", f"{60 + i * 8}%")
-            try:
-                v = float(raw.replace("%", "").replace("x", "").strip()) / 100.0
-                v = max(0.1, min(1.0, v))
-            except Exception:
-                v = 0.5 + i * 0.08
-            bars.append((c.get("title", f"K{i+1}")[:6], v, bar_colors[i % len(bar_colors)]))
 
         bg = self._background()
 
@@ -267,42 +210,15 @@ class VectorAnimator:
             im = bg.copy()
             d = ImageDraw.Draw(im)
 
-            if show_wave:
-                for wv in range(4):
-                    self._wave(d, t,
-                               yc=self.H // 2 + wv * 60 - 90,
-                               x0=0, x1=self.W,
-                               amp=20 + wv * 8,
-                               freq=0.015 + wv * 0.005,
-                               color=(56, 189, 248, 28 + wv * 10),
-                               phase=wv * 0.8)
-
-            if show_neural:
-                self._neural_net(d, t, cx=int(self.W * 0.65),
-                                 cy=int(self.H * 0.5),
-                                 layers=[3, 5, 4, 3, 2], radius=320)
-
-            self._character(d, t, cx=int(self.W * 0.32), floor_y=780,
-                             action=scene_type if scene_type in ("analyzing", "presenting") else "analyzing")
-
-            if show_bars and bars:
-                self._bar_chart(d, t, x0=int(self.W * 0.52), y0=280,
-                                bars=bars, chart_w=460, chart_h=260, title="ANALISIS")
-
-            self._info_cards(d, t, x=int(self.W * 0.62), y=560, cards=cards_info[:3])
-
-            self._badge(d, 100, 90, f"ESTUDIO // {scene_type.upper()}")
-            d.text((100, 126), headline.upper()[:48],
-                   font=self._f("bold_xl"), fill=C_WHITE)
-            d.text((100, 190), action_name[:70],
-                   font=self._f("reg_md"), fill=C_MUTED)
-
-            hud_a = int(200 + math.sin(t * 4) * 55)
-            d.rounded_rectangle((100, 230, 310, 262), radius=14,
-                                 fill=(239, 68, 68, 38), outline=(239, 68, 68, hud_a), width=1)
-            d.ellipse((114, 240, 124, 250), fill=(239, 68, 68, hud_a))
-            d.text((130, 246), "EN ANALISIS",
-                   font=self._f("tag"), fill=(255, 255, 255, hud_a), anchor="lm")
+            # Ondas atmosféricas sutiles de fondo
+            for wv in range(3):
+                self._wave(d, t,
+                           yc=self.H // 2 + wv * 80 - 100,
+                           x0=0, x1=self.W,
+                           amp=16 + wv * 6,
+                           freq=0.012 + wv * 0.004,
+                           color=(56, 189, 248, 16 + wv * 6),
+                           phase=wv * 0.9)
 
             im.convert("RGB").save(tmp / f"f_{f:04d}.png")
 
@@ -326,4 +242,3 @@ class VectorAnimator:
             pass
 
         return out_mp4
-

@@ -142,7 +142,7 @@ def build_creative_hints(options: "StreamerOptions") -> str:
     hints = []
     mode = (options.visual_mode or "mixed").lower()
     if mode == "svg":
-        hints.append("PRIORIZA escenas de tipo 'vector_motion' (animaciones SVG/vectoriales propias) sobre B-Roll de stock.")
+        hints.append("PRIORIZA B-Roll de video real cinemático y tarjetas Bento informativas en movimiento.")
     elif mode == "stock":
         hints.append("PRIORIZA B-Roll de video real (video_reaction); usa vector_motion solo si es imprescindible.")
     if not options.enable_broll:
