@@ -1746,6 +1746,20 @@ def agent_chat_endpoint(payload: dict = Body(...)):
     controller = AppAgentController()
 
     try:
+        from core.opencode_engine import OpenCodeEngine
+        if OpenCodeEngine.installed():
+            try:
+                oc_res = OpenCodeEngine.run_prompt(
+                    message=message,
+                    model_id=model_id,
+                    session_id=payload.get("oc_session_id"),
+                    emit=lambda ev: None,
+                )
+                if oc_res and oc_res.get("reply") and not oc_res.get("reply", "").startswith("⚠️"):
+                    return oc_res
+            except Exception as _oce:
+                safe_log(f"[Server] OpenCode fallback por: {_oce}")
+
         res = controller.process_message(
             message=message,
             model_id=model_id,
@@ -1799,6 +1813,22 @@ async def agent_chat_stream(payload: dict = Body(...)):
     async def run_agent() -> dict:
         def work():
             try:
+                from core.opencode_engine import OpenCodeEngine
+                if OpenCodeEngine.installed():
+                    try:
+                        emit({"type": "status", "message": "Iniciando motor OpenCode…"})
+                        oc_res = OpenCodeEngine.run_prompt(
+                            message=message,
+                            model_id=model_id,
+                            session_id=payload.get("oc_session_id"),
+                            emit=emit,
+                        )
+                        if oc_res and oc_res.get("reply") and not oc_res.get("reply", "").startswith("⚠️"):
+                            return oc_res
+                    except Exception as _oce:
+                        safe_log(f"[Server] OpenCode falló, usando motor alternativo: {_oce}")
+                        emit({"type": "status", "message": "Cambiando a motor alternativo…"})
+
                 return controller.process_message(
                     message=message,
                     model_id=model_id,
@@ -1841,6 +1871,36 @@ async def agent_chat_stream(payload: dict = Body(...)):
             task.cancel()
 
     return StreamingResponse(sse(), media_type="text/event-stream")
+
+
+@app.post("/api/oc/action")
+def oc_action_endpoint(payload: dict = Body(...)):
+    """Encola una acción de interfaz emitida por las herramientas de OpenCode."""
+    from core.opencode_engine import push_action
+    sid = str(payload.get("session_id", "_"))
+    act = payload.get("action", {})
+    push_action(sid, act)
+    return {"ok": True}
+
+
+@app.get("/api/oc/status")
+def oc_status_endpoint():
+    """Estado de tareas en curso del servidor para el agente OpenCode."""
+    return {
+        "server_tasks": summarize_active_tasks(),
+        "status": "online",
+        "engine": "opencode",
+    }
+
+
+@app.post("/api/oc/permission/reply")
+def oc_permission_reply_endpoint(payload: dict = Body(...)):
+    """Responde a una solicitud de confirmación de permiso de OpenCode."""
+    from core.opencode_engine import resolve_permission
+    rid = str(payload.get("request_id", ""))
+    reply = str(payload.get("reply", "reject"))
+    ok = resolve_permission(rid, reply)
+    return {"ok": ok}
 
 
 @app.get("/api/agent/chats")

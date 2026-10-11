@@ -25,6 +25,7 @@ export class AgentCopilot {
 
         // Persistencia de chats
         this.chatId = null;
+        this.ocSessionId = null;
 
         this.modelsMeta = {
             "gemini":      { name: "Gemini 2.5 Flash",  color: "#f59e0b", badge: "⚡ Recomendado" },
@@ -265,7 +266,8 @@ export class AgentCopilot {
     resetChat() {
         if (!this.messagesContainer) return;
         this.history = [];
-        this.chatId = null;  // el siguiente guardado crea un chat nuevo
+        this.chatId = null;
+        this.ocSessionId = null;  // el siguiente guardado crea un chat nuevo
         this.loadSavedChatsList();
         this.messagesContainer.innerHTML = `
             <div class="agent-message agent-msg-bot">
@@ -812,6 +814,7 @@ export class AgentCopilot {
                     model_id: this.activeModel,
                     app_context: appContext,
                     history: historyToSend,
+                    oc_session_id: this.ocSessionId || null,
                 }),
             });
             if (!resp.ok || !resp.body) {
@@ -831,6 +834,10 @@ export class AgentCopilot {
                 } else if (ev.type === "reasoning") {
                     liveReasoning = ev.text || liveReasoning;
                     this.updateThinkingReasoning(this.currentThinkingId, liveReasoning);
+                } else if (ev.type === "tool") {
+                    const toolName = ev.title || ev.tool || "Herramienta";
+                    const isDone = (ev.status === "completed" || ev.status === "done" || ev.status === "success");
+                    this.updateThinkingStatus(this.currentThinkingId, isDone ? `✓ ${toolName}` : `⚙️ ${toolName}…`);
                 } else if (ev.type === "final") {
                     finalPayload = ev.payload || {};
                 } else if (ev.type === "error") {
@@ -874,6 +881,7 @@ export class AgentCopilot {
                             model_id: this.activeModel,
                             app_context: appContext,
                             history: historyToSend,
+                            oc_session_id: this.ocSessionId || null,
                         }),
                     });
                     const data = await resp2.json();
@@ -908,6 +916,9 @@ export class AgentCopilot {
         if (thinkEl) thinkEl.remove();
         this.currentThinkingId = null;
 
+        if (data.extra && data.extra.oc_session_id) {
+            this.ocSessionId = data.extra.oc_session_id;
+        }
         const modelLabel = this.modelsMeta[data.model_used]?.name || this.modelsMeta[this.activeModel]?.name || data.model_used;
         // Si el pensamiento ya se mostró en vivo, no se re-escribe con typewriter.
         this.appendBotResponse(data.reply, data.actions, data.extra, modelLabel, reasoning || "", {
