@@ -36,9 +36,9 @@ class LLMClient:
     # Una petición multimodal sana responde antes de este límite. Si el modelo
     # queda en espera, se intenta 3.7 y luego otro proyecto en lugar de mostrar
     # una edición aparentemente congelada durante varios minutos.
-    RESPONSE_TIMEOUT_MS = 35_000
+    RESPONSE_TIMEOUT_MS = 65_000
     UPLOAD_TIMEOUT_MS = 180_000
-    REQUEST_DEADLINE_SEC = 50
+    REQUEST_DEADLINE_SEC = 120
     PROJECT_FAILOVER_STATUSES = {401, 403, 408, 429, 500, 502, 503, 504}
     _key_cycles = {}
     _key_lock = threading.Lock()
@@ -155,12 +155,13 @@ class LLMClient:
                     if cancel_event is not None and cancel_event.is_set():
                         raise CancellationRequested()
                     remaining = deadline - time.monotonic()
-                    if remaining <= 0:
+                    if remaining <= 10.0:
                         break
                     try:
                         report(f"Enviando solicitud a Gemini ({model}, intento {attempt}/{attempts_per_model}).")
+                        timeout_val = max(25_000, min(self.RESPONSE_TIMEOUT_MS, int(remaining * 1000)))
                         request_client = self._client_with_timeout(
-                            active_client, min(self.RESPONSE_TIMEOUT_MS, int(remaining * 1000)))
+                            active_client, timeout_val)
                         response = request_client.models.generate_content(model=model, contents=contents, config=config)
                         text = response.text
                         if not text:

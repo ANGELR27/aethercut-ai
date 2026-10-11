@@ -406,9 +406,9 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
         )
 
         try:
-            gen_timeout = max(45.0, min(420.0 if dur > 1200 else 180.0, float(dur * 0.15)))
+            gen_timeout = max(110.0, min(420.0 if dur > 1200 else 240.0, float(dur * 0.6)))
             raw = await asyncio.wait_for(
-                asyncio.to_thread(self.llm.generate, prompt, json_mode=True, max_models=2, deadline_sec=gen_timeout),
+                asyncio.to_thread(self.llm.generate, prompt, json_mode=True, max_models=3, deadline_sec=gen_timeout),
                 timeout=gen_timeout,
             )
             cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
@@ -476,33 +476,51 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
             return self._build_fallback_plan(topic, style, duration_target)
 
     def _build_fallback_plan(self, topic: str, style: str, duration_target: int) -> DirectorBroadcastPlan:
-        """Plan de dirección de respaldo con speeches proporcionales a la duración objetivo."""
+        """Plan de dirección de respaldo con progresión narrativa real sin repeticiones y tarjetas informativas ricas."""
         dur = max(30, duration_target)
         num_scenes = 5
         sec_per_scene = round(dur / num_scenes)
-        words_per_scene = max(24, round(sec_per_scene * 2.0))
+        words_per_scene = max(26, round(sec_per_scene * 2.15))
 
-        # Generar párrafos extensos proporcionales al objetivo
-        def _expand(base: str, target_words: int) -> str:
-            """Repite y expande el texto base hasta alcanzar el mínimo de palabras."""
-            result = base
-            filler_phrases = [
-                f"Es fundamental que comprendamos la magnitud de lo que estamos viendo con {topic}. ",
-                "Los datos más recientes confirman una tendencia que no podemos ignorar. ",
-                "Múltiples fuentes internacionales y centros de investigación avalan estos hallazgos. ",
-                "Esto significa un cambio de paradigma que impacta a millones de personas en todo el mundo. ",
-                "Las implicaciones económicas, sociales y tecnológicas son enormes y debemos analizarlas con rigor. ",
-                "Hay quienes cuestionan estos avances, y es válido preguntarse cuáles son los riesgos reales. ",
-                "Pero también hay evidencia contundente de beneficios tangibles y medibles que no podemos negar. ",
-                "La clave está en encontrar el equilibrio entre innovación responsable y precaución fundamentada. ",
-                "Y como siempre les digo: dato mata relato, así que veamos qué nos dicen los números oficiales. ",
-                "Comparemos con lo que ocurría hace apenas un año y notaremos la aceleración exponencial. ",
-            ]
-            idx = 0
-            while len(result.split()) < target_words:
-                result += filler_phrases[idx % len(filler_phrases)]
-                idx += 1
-            return result
+        # Banco de frases temáticas progresivas e independientes por cada escena (CERO repeticiones)
+        scene1_phrases = [
+            f"Presten mucha atención, porque los datos duros en torno a {topic} rompen por completo los mitos más extendidos. ",
+            "Lo que parecía una teoría marginal acaba de recibir confirmación tangible en los últimos registros analizados. ",
+            "Acompáñenme a desglosar paso a paso por qué esto cambia todo lo que dábamos por sentado en la materia. ",
+            "Vamos a revisar las pruebas reales, lejos de la especulación y con rigor documental absoluto. ",
+        ]
+        scene2_phrases = [
+            "La brecha entre lo que se especula habitualmente y la evidencia comprobada es sencillamente descomunal. ",
+            "Los equipos de investigación en el terreno contrastaron los patrones iniciales con modelos predictivos avanzados. ",
+            "Cada capa analizada aporta un nivel de precisión que descarta anomalías estadísticas fortuitas o coincidencias. ",
+            "Los antecedentes históricos demuestran que este fenómeno no surgió de la noche a la mañana. ",
+        ]
+        scene3_phrases = [
+            "Las cifras hablan por sí solas y confirman una transformación estructural de escala global sin precedentes. ",
+            "Al contrastar la serie histórica con los indicadores presentes, la discrepancia matemática resulta indiscutible. ",
+            "Dato mata relato: las mediciones estandarizadas confirman un salto cuantitativo que ningún experto esperaba. ",
+            "Los registros oficiales avalan que los puntos de quiebre están ocurriendo a un ritmo mucho más acelerado. ",
+        ]
+        scene4_phrases = [
+            "¿Hasta qué punto debemos acelerar sin control, y quién asume los riesgos reales que este cambio conlleva? ",
+            "Mientras un sector defiende explicaciones convencionales, la nueva evidencia obliga a replantear el marco teórico. ",
+            "No se trata de opiniones ni creencias, sino de comprobar qué modelo resiste el escrutinio del método experimental. ",
+            "El dilema ético y operativo está sobre la mesa y los principales referentes mundiales ya están tomando postura. ",
+        ]
+        scene5_phrases = [
+            "Este es un tema crucial que nos involucra a todos, y la discusión apenas está comenzando en los círculos de vanguardia. ",
+            "El panorama que se abre a partir de aquí marcará la agenda de los próximos debates y publicaciones especializadas. ",
+            "Quiero leer su perspectiva honesta en el chat y en los comentarios: ¿estamos ante el inicio de una nueva era? ",
+            "Nos vemos en la próxima emisión en vivo con más análisis, más datos verificados y más verdad sin filtros. ",
+        ]
+
+        def _build_speech(intro: str, pool: list, target_w: int) -> str:
+            res = intro
+            for phrase in pool:
+                if len(res.split()) >= target_w:
+                    break
+                res += phrase
+            return res
 
         scenes = [
             DirectorScene(
@@ -511,46 +529,55 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
                 type="avatar_cam",
                 emotion="excited",
                 camera="hero_center",
-                speech=_expand(
-                    f"¿Qué está ocurriendo realmente con {topic} y por qué las cifras más recientes están desconcertando a los expertos? "
-                    "Presten mucha atención, porque los datos duros que analizaremos hoy rompen por completo los mitos más extendidos. ",
+                speech=_build_speech(
+                    f"¿Qué está ocurriendo realmente con {topic} y por qué las cifras más recientes están desconcertando a los expertos? ",
+                    scene1_phrases,
                     words_per_scene
                 ),
-                visual_query="documentary cinematic evidence 4k",
+                visual_query=f"{topic} documentary evidence 4k",
+                visual_queries=[f"{topic} documentary evidence 4k", f"{topic} investigation 4k"],
                 sfx="whoosh",
                 duration_est=float(sec_per_scene),
             ),
             DirectorScene(
                 scene_id=2,
-                name="Hechos & B-Roll",
+                name="Hechos & Hallazgos de Campo",
                 type="video_reaction",
                 emotion="surprised",
                 camera="pip_corner",
-                speech=_expand(
-                    "Miren con atención lo que demuestran los registros más recientes en este ámbito: "
-                    "la brecha entre lo que se especula habitualmente y la realidad comprobada es sencillamente descomunal. ",
+                speech=_build_speech(
+                    "Miren con atención lo que demuestran los registros más recientes en este ámbito: ",
+                    scene2_phrases,
                     words_per_scene
                 ),
-                visual_query="scientific investigation high resolution 4k",
+                visual_query=f"{topic} historical scientific records 4k",
+                visual_queries=[f"{topic} scientific analysis 4k"],
+                card=SceneCard(
+                    headline=f"Registro: {topic[:32]}",
+                    body="Documentación y evidencia empírica contrastada en campo.",
+                    badge="DATO CLAVE",
+                    stat="+340%",
+                ),
                 sfx="impact",
                 duration_est=float(sec_per_scene),
             ),
             DirectorScene(
                 scene_id=3,
-                name="Datos Verificados",
+                name="Datos Verificados & Métricas",
                 type="card_focus",
                 emotion="serious",
                 camera="pip_corner",
-                speech=_expand(
-                    "Y fíjense en los números oficiales que desmienten cualquier especulación apresurada. "
-                    "Las cifras hablan por sí solas y confirman una transformación estructural sin precedentes. ",
+                speech=_build_speech(
+                    "Y fíjense en los números oficiales que desmienten cualquier especulación apresurada. ",
+                    scene3_phrases,
                     words_per_scene
                 ),
-                visual_query="data analytics matrix",
+                visual_query=f"{topic} data analysis charts 4k",
+                visual_queries=[f"{topic} official metrics 4k"],
                 card=SceneCard(
-                    headline="Evidencia Verificada",
-                    body="Cifras y análisis técnico respaldados por fuentes internacionales.",
-                    badge="DATO CLAVE",
+                    headline="Evidencia Verificada 2026",
+                    body="Auditoría técnica independiente y registros oficiales consolidados.",
+                    badge="EVIDENCIA DOCUMENTAL",
                     stat="2026",
                 ),
                 sfx="chime",
@@ -558,31 +585,39 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
             ),
             DirectorScene(
                 scene_id=4,
-                name="Debate y Dilemas",
+                name="Debate y Contraste de Hipótesis",
                 type="chat_debate",
                 emotion="skeptical",
                 camera="pip_corner",
-                speech=_expand(
-                    "Pero también debemos plantearnos las precauciones necesarias: ¿hasta qué punto debemos acelerar sin control? "
-                    "¿Quién se beneficia realmente y quién asume los riesgos que esto conlleva? ",
+                speech=_build_speech(
+                    "Pero también debemos plantearnos las preguntas incómodas y los dilemas de fondo: ",
+                    scene4_phrases,
                     words_per_scene
                 ),
-                visual_query="cyberpunk ethics digital dilemma",
+                visual_query=f"{topic} critical debate controversy 4k",
+                visual_queries=[f"{topic} dilemma 4k"],
+                card=SceneCard(
+                    headline="Realidad vs Hipótesis",
+                    body="Contraste de modelos explicativos frente a las pruebas empíricas.",
+                    badge="COMPARATIVA",
+                    stat="Demostrado vs Especulación",
+                ),
                 sfx="whoosh",
                 duration_est=float(sec_per_scene),
             ),
             DirectorScene(
                 scene_id=5,
-                name="Cierre de la Emisión",
+                name="Conclusiones y Cierre",
                 type="avatar_cam",
                 emotion="confident",
                 camera="hero_center",
-                speech=_expand(
-                    "Dejen su postura en el chat. Los leo a todos porque este es un tema que nos involucra a cada uno de nosotros. "
-                    "Nos vemos en la próxima emisión en vivo con más datos, más análisis y más verdad sin filtros. ",
+                speech=_build_speech(
+                    "Dejen su postura en el chat. Los leo a todos porque este es un tema que nos involucra a cada uno de nosotros. ",
+                    scene5_phrases,
                     words_per_scene
                 ),
-                visual_query="studio stream lighting",
+                visual_query="studio stream lighting 4k",
+                visual_queries=["broadcast stream outro 4k"],
                 sfx="chime",
                 duration_est=float(sec_per_scene),
             ),
@@ -594,8 +629,8 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
             scenes=scenes,
             chat_comments=[
                 {"user": "AstroTech", "badge": "VIP", "text": "¡Impresionante dato KAI!"},
-                {"user": "CodeMaster", "badge": "SUB", "text": "Totalmente de acuerdo."},
+                {"user": "CodeMaster", "badge": "SUB", "text": "Totalmente de acuerdo con el análisis."},
+                {"user": "NexusViewer", "badge": "VERIFIED", "text": "Las fuentes no dejan dudas."},
             ],
             total_est_duration=float(duration_target),
         )
-

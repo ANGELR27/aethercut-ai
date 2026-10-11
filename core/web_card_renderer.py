@@ -6,6 +6,7 @@ Produce tarjetas Bento cuadradas y rectangulares de estándar profesional 2026.
 from __future__ import annotations
 
 import os
+import base64
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -14,14 +15,19 @@ from typing import Optional, Dict, Any
 HTML_FONTS = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Playfair+Display:ital,wght@1,700;1,900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&family=Syne:wght@700;800&family=Playfair+Display:ital,wght@1,700;1,900&display=swap" rel="stylesheet">
 """
 
 # Paletas bicolor firma para la tipografía cinética viral (degradado de dos colores).
 KINETIC_DUOTONES = [
-    ("#F7C873", "#FF6B9D"),  # Oro → Coral (cálido, editorial)
-    ("#7DE3F4", "#A78BFA"),  # Cian → Violeta (tech, elegante)
-    ("#9BE15D", "#00B3A4"),  # Lima → Teal (energía, fresco)
+    ("#FFB703", "#FB8500"),  # Ámbar Eléctrico → Oro Solar (impacto de firma)
+    ("#00F5D4", "#7B2CBF"),  # Cyber Mint → Ultravioleta Neón
+    ("#FF007F", "#7928CA"),  # Magenta Neón → Violeta Profundo
+    ("#CCFF00", "#00E5FF"),  # Acid Lime → Cian Aqua Eléctrico
+    ("#E0AAFF", "#3A86FF"),  # Lavanda Holográfica → Azul Cobalto
+    ("#FF4D00", "#FF0055"),  # Solar Flare → Carmesí Viral
+    ("#7DE3F4", "#A78BFA"),  # Tech Sky → Violeta Suave Editorial
+    ("#05FFA1", "#00B4D8"),  # Emerald Spark → Tropical Océano
 ]
 
 
@@ -64,63 +70,76 @@ class WebCardRenderer:
         factors = [0.55, 0.68, 0.80, 0.90, 1.0]
         return [max(8, round(val * f)) for f in factors]
 
+    def _resolve_image_data_uri(self, image_path: Optional[Union[str, Path]]) -> Optional[str]:
+        """Convierte una ruta de imagen o video local en un Data URI base64 seguro para Chromium."""
+        if not image_path:
+            return None
+        try:
+            p = Path(image_path)
+            if not p.exists():
+                s = str(image_path)
+                if s.startswith("data:image/") or s.startswith("http"):
+                    return s
+                return None
+
+            # Si es un video, extraer un fotograma nítido con FFmpeg
+            if p.suffix.lower() in (".mp4", ".mov", ".mkv", ".webm", ".avi"):
+                frame_out = p.parent / f"_card_frame_{p.stem}.jpg"
+                if not frame_out.exists() or frame_out.stat().st_size == 0:
+                    cmd = ["ffmpeg", "-y", "-ss", "00:00:01", "-i", str(p), "-vframes", "1", "-q:v", "2", str(frame_out)]
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                if frame_out.exists() and frame_out.stat().st_size > 0:
+                    p = frame_out
+                else:
+                    return None
+
+            # Leer bytes y codificar a Base64
+            mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
+            b64 = base64.b64encode(p.read_bytes()).decode("utf-8")
+            return f"data:{mime};base64,{b64}"
+        except Exception:
+            return None
+
     def generate_html(
         self,
         headline: str,
-        stat_value: str = "95%",
-        stat_label: str = "Métrica Clave",
+        stat_value: str = "",
+        stat_label: str = "",
         body: str = "",
-        badge: str = "Dato Verificado",
+        badge: str = "INFO",
         source: str = "Registro Oficial 2026",
-        style: str = "obsidian_bento",
+        style: str = "auto",
+        image_path: Optional[Union[str, Path]] = None,
+        step_number: Optional[str] = None,
+        meta_pill: Optional[str] = None,
+        trend_text: Optional[str] = None,
+        progress_pct: Optional[float] = None,
     ) -> str:
-        """Genera el HTML5 + CSS de alta gama para la tarjeta seleccionada."""
-
+        """Genera HTML5/CSS3 de alta gama: Matte Dark Obsidian Glass con acento Ámbar Glow.
+        
+        Diseño unificado 2026 que sustituye a las tarjetas antiguas. Soporta 7 variantes
+        visuales con máscara de fusión fotográfica suave hacia el fondo negro mate.
+        """
         # Sanitizar textos
-        headline = headline.replace("<", "&lt;").replace(">", "&gt;")
-        stat_value = stat_value.replace("<", "&lt;").replace(">", "&gt;")
-        stat_label = stat_label.replace("<", "&lt;").replace(">", "&gt;")
-        body = body.replace("<", "&lt;").replace(">", "&gt;")
-        badge = badge.replace("<", "&lt;").replace(">", "&gt;")
-        source = source.replace("<", "&lt;").replace(">", "&gt;")
+        headline = (headline or "").replace("<", "&lt;").replace(">", "&gt;")
+        stat_value = (stat_value or "").replace("<", "&lt;").replace(">", "&gt;")
+        stat_label = (stat_label or "").replace("<", "&lt;").replace(">", "&gt;")
+        body = (body or "").replace("<", "&lt;").replace(">", "&gt;")
+        badge = (badge or "INFO").replace("<", "&lt;").replace(">", "&gt;").upper()
+        source = (source or "Registro Oficial 2026").replace("<", "&lt;").replace(">", "&gt;")
 
-        # Las barras del Bento representan el dato real: la ultima barra (activa)
-        # marca el valor exacto del porcentaje; sin porcentaje interpretable se
-        # dibujan planas (textura neutra), nunca una tendencia inventada.
-        bar_heights = self._bento_bar_heights(stat_value)
-
-        if style in ("quote", "cita"):
-            return self.generate_quote_html(
-                quote_text=body or headline,
-                highlight_words=stat_value if (stat_value and stat_value not in ("95%", "DATO CLAVE")) else "",
-                author=headline,
-                badge=badge or "ÉNFASIS CLAVE",
-            )
-        if style in ("flag", "pais", "entidad"):
-            # Detectar país y código ISO oficial
+        # Si el estilo solicita explícitamente bandera geopolítica
+        if style in ("flag", "pais", "entidad") or any(k in badge for k in ("PAIS", "BANDERA", "GEOPOLITICA")):
             c_code = "us"
             low_h = (headline + " " + body).lower()
-            if any(k in low_h for k in ["china", "pekin", "pekín"]):
-                c_code = "cn"
-            elif any(k in low_h for k in ["rusia", "moscu", "moscú"]):
-                c_code = "ru"
-            elif any(k in low_h for k in ["ucrania", "kiev"]):
-                c_code = "ua"
-            elif any(k in low_h for k in ["europa", "unión europea", "ue"]):
-                c_code = "eu"
-            elif any(k in low_h for k in ["taiwan", "taiwán"]):
-                c_code = "tw"
-            elif any(k in low_h for k in ["españa", "espana", "madrid"]):
-                c_code = "es"
-            elif any(k in low_h for k in ["méxico", "mexico"]):
-                c_code = "mx"
-            elif any(k in low_h for k in ["israel", "jerusalén", "tel aviv"]):
-                c_code = "il"
-            elif any(k in low_h for k in ["turquía", "turquia", "ankara"]):
-                c_code = "tr"
-            elif any(k in low_h for k in ["otan", "nato"]):
-                c_code = "un"
-
+            for k, code in [
+                ("china", "cn"), ("rusia", "ru"), ("ucrania", "ua"), ("europa", "eu"),
+                ("taiwan", "tw"), ("españa", "es"), ("mexico", "mx"), ("méxico", "mx"),
+                ("israel", "il"), ("turquía", "tr"), ("turquia", "tr"), ("otan", "un")
+            ]:
+                if k in low_h:
+                    c_code = code
+                    break
             return self.generate_entity_flag_html(
                 country_name=headline,
                 country_code=c_code,
@@ -129,423 +148,255 @@ class WebCardRenderer:
                 detail=body,
             )
 
-        if style == "tactical_amber":
-            # Estilo 2: Táctico Ámbar / Cuadrado HUD
-            return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-{HTML_FONTS}
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-  }}
-  .card {{
-    width: 600px;
-    background: linear-gradient(145deg, rgba(9, 10, 13, 0.98) 0%, rgba(4, 5, 7, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.95), 0 0 40px rgba(12, 24, 48, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    padding: 26px;
-    color: #f8fafc;
-    position: relative;
-  }}
-  .corner-tl {{ position: absolute; top: 4px; left: 4px; width: 10px; height: 10px; border-top: 2px solid #f59e0b; border-left: 2px solid #f59e0b; }}
-  .corner-br {{ position: absolute; bottom: 4px; right: 4px; width: 10px; height: 10px; border-bottom: 2px solid #f59e0b; border-right: 2px solid #f59e0b; }}
-  .top-row {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 18px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    padding-bottom: 12px;
-  }}
-  .badge {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
-    color: #f59e0b;
-    letter-spacing: 1px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    text-transform: uppercase;
-  }}
-  .dot {{ width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 10px #f59e0b; }}
-  .source {{ font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #64748b; }}
-  .split-metric {{
-    display: flex;
-    align-items: stretch;
-    gap: 24px;
-    margin-bottom: 20px;
-    background: rgba(0, 0, 0, 0.45);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    padding: 20px 24px;
-  }}
-  .metric-badge-box {{
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    min-width: 150px;
-    max-width: 220px;
-    padding-right: 22px;
-    border-right: 1px solid rgba(255, 255, 255, 0.12);
-  }}
-  .stat-val {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 34px;
-    font-weight: 800;
-    line-height: 1.1;
-    color: #fbbf24;
-    text-shadow: 0 0 20px rgba(245, 158, 11, 0.35);
-    letter-spacing: -0.5px;
-  }}
-  .stat-lbl {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-top: 6px;
-    font-weight: 600;
-  }}
-  .metric-info {{
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }}
-  .metric-info h3 {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 22px;
-    color: #ffffff;
-    font-weight: 700;
-    line-height: 1.25;
-    margin-bottom: 6px;
-  }}
-  .metric-info p {{
-    font-size: 14px;
-    color: #cbd5e1;
-    line-height: 1.5;
-  }}
-  .footer-row {{
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: #94a3b8;
-    font-family: 'JetBrains Mono', monospace;
-    margin-top: 10px;
-  }}
-</style>
-</head>
-<body>
-  <div class="card">
-    <div class="corner-tl"></div>
-    <div class="corner-br"></div>
-    <div class="top-row">
-      <div class="badge"><span class="dot"></span>{badge}</div>
-      <div class="source">{source}</div>
-    </div>
-    <div class="split-metric">
-      <div class="metric-badge-box">
-        <div class="stat-val">{stat_value}</div>
-        <div class="stat-lbl">{stat_label}</div>
-      </div>
-      <div class="metric-info">
-        <h3>{headline}</h3>
-        <p>{body}</p>
-      </div>
-    </div>
-    <div class="footer-row">
-      <span>REF: EVIDENCIA ARQUEOLÓGICA & TÉCNICA</span>
-      <span>ESTATUS: AUDITADO</span>
-    </div>
-  </div>
-</body>
-</html>"""
+        # Resolver imagen si fue provista
+        img_uri = self._resolve_image_data_uri(image_path)
 
-        elif style == "square_emerald":
-            # Estilo 3: Cuadrado Compacto 1:1
-            return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-{HTML_FONTS}
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-  }}
-  .card {{
-    width: 440px;
-    height: 440px;
-    background: linear-gradient(160deg, rgba(9, 10, 13, 0.98) 0%, rgba(4, 5, 7, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.95), 0 0 40px rgba(12, 24, 48, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 30px;
-    color: #f8fafc;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    position: relative;
-    overflow: hidden;
-  }}
-  .card::after {{
-    content: '';
-    position: absolute;
-    bottom: -60px; right: -60px;
-    width: 180px; height: 180px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, transparent 70%);
-    pointer-events: none;
-  }}
-  .sq-badge {{
-    align-self: flex-start;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    border-radius: 6px;
-    background: rgba(16, 185, 129, 0.12);
-    border: 1px solid rgba(16, 185, 129, 0.35);
-    color: #34d399;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
-  }}
-  .sq-big-stat {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 60px;
-    font-weight: 800;
-    line-height: 1;
-    color: #ffffff;
-    letter-spacing: -1.5px;
-    margin: 14px 0 4px;
-  }}
-  .sq-stat-lbl {{
-    font-size: 13px;
-    color: #34d399;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }}
-  .sq-title {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 22px;
-    font-weight: 700;
-    color: #ffffff;
-    line-height: 1.25;
-    margin-bottom: 8px;
-  }}
-  .sq-desc {{
-    font-size: 13px;
-    color: #94a3b8;
-    line-height: 1.45;
-  }}
-  .sq-footer {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 14px;
-    font-size: 11px;
-    color: #64748b;
-  }}
-</style>
-</head>
-<body>
-  <div class="card">
-    <div>
-      <div class="sq-badge">● {badge}</div>
-      <div class="sq-big-stat">{stat_value}</div>
-      <div class="sq-stat-lbl">{stat_label}</div>
-    </div>
-    <div>
-      <div class="sq-title">{headline}</div>
-      <div class="sq-desc">{body}</div>
-    </div>
-    <div class="sq-footer">
-      <span>{source}</span>
-      <span>✓ Certificado</span>
-    </div>
-  </div>
-</body>
-</html>"""
+        # Detección inteligente de variante según contenido
+        variant = style
+        if variant in ("auto", "matte_amber", "obsidian_bento", "tactical_amber", "default"):
+            b_up = badge.upper()
+            h_up = headline.upper()
+            if step_number or "PASO" in b_up or "PASO" in h_up:
+                variant = "step"
+            elif "TIP" in b_up or "CONSEJO" in b_up:
+                variant = "tip"
+            elif "HECHO" in b_up or "SABÍAS" in h_up or "SABIAS" in h_up or "CURIOSIDAD" in b_up:
+                variant = "fact"
+            elif "DEFINICIÓN" in b_up or "DEFINICION" in b_up or "CONCEPTO" in b_up or "QUÉ ES" in h_up or "QUE ES" in h_up:
+                variant = "definition"
+            elif "CITA" in b_up or "QUOTE" in b_up:
+                variant = "quote"
+            elif stat_value and (any(c.isdigit() for c in stat_value) or "%" in stat_value or "ESTADÍSTICA" in b_up or "ESTADISTICA" in b_up or "CIFRA" in b_up):
+                variant = "statistic"
+            elif img_uri:
+                variant = "info_image"
+            else:
+                variant = "info_image"
 
-        else:
-            # Estilo 1 por defecto: Obsidian Bento Pro (Rectangular Cuadrado Moderno)
-            return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-{HTML_FONTS}
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-  }}
-  .card {{
-    width: 580px;
-    background: linear-gradient(145deg, rgba(9, 10, 13, 0.98) 0%, rgba(4, 5, 7, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.95), 0 0 40px rgba(12, 24, 48, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 28px;
-    color: #f8fafc;
-    position: relative;
-    overflow: hidden;
-  }}
-  .card::before {{
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #38bdf8, #818cf8, transparent);
-  }}
-  .top-row {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-  }}
-  .badge {{
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    border-radius: 6px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    background: rgba(56, 189, 248, 0.12);
-    border: 1px solid rgba(56, 189, 248, 0.35);
-    color: #38bdf8;
-    text-transform: uppercase;
-  }}
-  .badge-dot {{
-    width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 8px #38bdf8;
-  }}
-  .source-tag {{
-    font-size: 11px;
-    color: #94a3b8;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }}
-  .metric-box {{
-    background: rgba(2, 6, 23, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    padding: 16px 20px;
-    margin-bottom: 18px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }}
-  .metric-val {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 38px;
-    font-weight: 800;
-    color: #38bdf8;
-    line-height: 1;
-    letter-spacing: -0.5px;
-  }}
-  .metric-label {{
-    font-size: 12px;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-top: 4px;
-    font-weight: 600;
-  }}
-  .chart-bars {{
-    display: flex;
-    align-items: flex-end;
-    gap: 5px;
-    height: 44px;
-  }}
-  .c-bar {{
-    width: 8px;
-    border-radius: 2px;
-    background: rgba(56, 189, 248, 0.25);
-  }}
-  .c-bar.active {{
-    background: linear-gradient(180deg, #38bdf8, #0284c7);
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
-  }}
-  .headline {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 22px;
-    font-weight: 700;
-    line-height: 1.25;
-    color: #ffffff;
-    margin-bottom: 10px;
-  }}
-  .body-text {{
-    font-size: 13.5px;
-    line-height: 1.5;
-    color: #cbd5e1;
-  }}
-</style>
-</head>
-<body>
-  <div class="card">
-    <div class="top-row">
-      <div class="badge"><span class="badge-dot"></span>{badge}</div>
-      <div class="source-tag">{source}</div>
-    </div>
-    <div class="metric-box">
-      <div>
-        <div class="metric-val">{stat_value}</div>
-        <div class="metric-label">{stat_label}</div>
-      </div>
-      <div class="chart-bars">
-        <div class="c-bar" style="height: {bar_heights[0]}%;"></div>
-        <div class="c-bar" style="height: {bar_heights[1]}%;"></div>
-        <div class="c-bar" style="height: {bar_heights[2]}%;"></div>
-        <div class="c-bar" style="height: {bar_heights[3]}%;"></div>
-        <div class="c-bar active" style="height: {bar_heights[4]}%;"></div>
-      </div>
-    </div>
-    <div class="headline">{headline}</div>
-    <div class="body-text">{body}</div>
-  </div>
-</body>
-</html>"""
+        # Pip y resplandor en el borde superior según variante
+        pip_left = {
+            "info_image": "58%",
+            "statistic": "48%",
+            "tip": "70%",
+            "definition": "52%",
+            "fact": "58%",
+            "step": "64%",
+            "quote": "54%",
+        }.get(variant, "56%")
 
-    def generate_quote_html(
-        self,
-        quote_text: str,
-        highlight_words: str = "",
-        author: str = "Afirmación Destacada",
-        badge: str = "ÉNFASIS CLAVE",
-    ) -> str:
-        """Tarjeta grande referencial para énfasis en frases (Kinetic Impact Quote)."""
-        safe_q = quote_text.replace("<", "&lt;").replace(">", "&gt;")
-        if highlight_words and highlight_words.lower() in safe_q.lower():
-            # Resaltar la palabra o frase con glow
-            import re
-            pattern = re.compile(re.escape(highlight_words), re.IGNORECASE)
-            safe_q = pattern.sub(f'<span class="hl">{highlight_words}</span>', safe_q)
+        glow_left = {
+            "info_image": "46%",
+            "statistic": "36%",
+            "tip": "58%",
+            "definition": "40%",
+            "fact": "46%",
+            "step": "52%",
+            "quote": "42%",
+        }.get(variant, "44%")
+
+        content_html = ""
+        visual_html = ""
+
+        # --- 1. VARIANTE info_image: Entidad / Tópico con imagen real fundida ---
+        if variant == "info_image":
+            tag_text = badge if badge not in ("DATO VERIFICADO", "DATO CLAVE") else "INFO"
+            pill_txt = meta_pill or (f"{stat_value} · {stat_label}" if stat_value and stat_label else "Dato verificado · 2026")
+            content_html = f"""
+            <div class="text-col">
+              <div class="card-tag"><span class="card-tag-dot"></span> {tag_text}</div>
+              <div class="card-title">{headline}</div>
+              <div class="card-desc">{body}</div>
+              <div class="card-meta-pill">
+                <span class="card-meta-icon">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                  </svg>
+                </span>
+                <span>{pill_txt}</span>
+              </div>
+            </div>
+            """
+            if img_uri:
+                visual_html = f"""
+                <div class="card-image-wrap">
+                  <img src="{img_uri}" alt="{headline}">
+                </div>
+                """
+            else:
+                visual_html = """
+                <div class="card-ambient-orb">
+                  <div class="orb-core"></div>
+                </div>
+                """
+
+        # --- 2. VARIANTE statistic: Cifra gigante, barra de progreso naranja, tendencia ---
+        elif variant == "statistic":
+            tag_text = badge if badge not in ("DATO VERIFICADO", "DATO CLAVE") else "ESTADÍSTICA"
+            stat_big = stat_value or "8.1B"
+            unit_lbl = stat_label or "personas"
+            pct = progress_pct if progress_pct is not None else 52.0
+            trend = trend_text or "+0.9% vs. 2023"
+            content_html = f"""
+            <div class="text-col">
+              <div class="card-tag"><span class="card-tag-dot"></span> {tag_text}</div>
+              <div class="card-title">{headline}</div>
+              <div class="card-stat-row">
+                <span class="card-stat-big">{stat_big}</span>
+                <span class="card-stat-unit">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#94a3b8" stroke-width="2" style="display:inline; vertical-align:middle; margin-right:2px;">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                  </svg>
+                  {unit_lbl}
+                </span>
+              </div>
+              <div class="card-stat-progress">
+                <div class="card-stat-bar" style="width: {pct}%;"></div>
+              </div>
+              <div>
+                <span class="card-stat-trend">↑ {trend}</span>
+              </div>
+            </div>
+            """
+            visual_html = """
+            <div class="globe-visual-wrap">
+              <div class="globe-orbit-ring"></div>
+              <div class="globe-sphere">
+                <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="#ffa048" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 10px rgba(255,140,40,0.5));">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                  <path d="M2 12h20"/>
+                </svg>
+              </div>
+            </div>
+            """
+
+        # --- 3. VARIANTE tip: Dato útil con tile de bombilla ---
+        elif variant == "tip":
+            tag_text = badge if badge not in ("DATO VERIFICADO", "DATO CLAVE") else "TIP"
+            content_html = f"""
+            <div class="text-col">
+              <div class="card-tag"><span class="card-tag-dot"></span> {tag_text}</div>
+              <div class="card-title">{headline}</div>
+              <div class="card-desc">{body}</div>
+            </div>
+            """
+            visual_html = """
+            <div class="card-icon-tile">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#ff9436" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 18h6M10 22h4M12 2v1M12 7a5 5 0 0 0-3 9h6a5 5 0 0 0-3-9z"/>
+              </svg>
+            </div>
+            """
+
+        # --- 4. VARIANTE definition: Definición / Concepto / IA ---
+        elif variant == "definition":
+            tag_text = badge if badge not in ("DATO VERIFICADO", "DATO CLAVE") else "DEFINICIÓN"
+            content_html = f"""
+            <div class="text-col">
+              <div class="card-tag"><span class="card-tag-dot"></span> {tag_text}</div>
+              <div class="card-title">{headline}</div>
+              <div class="card-desc">{body}</div>
+            </div>
+            """
+            if img_uri:
+                visual_html = f"""
+                <div class="card-image-wrap">
+                  <img src="{img_uri}" alt="{headline}">
+                </div>
+                """
+            else:
+                visual_html = """
+                <div class="neural-visual-wrap">
+                  <svg viewBox="0 0 48 48" fill="none" stroke="#ff9436" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:44px; height:44px; filter: drop-shadow(0 0 14px rgba(255,120,20,0.6));">
+                    <path d="M20 10c-3-2-8-1-10 3s-1 8 2 11c-3 2-3 6 0 9s7 4 10 2"/>
+                    <path d="M28 10c3-2 8-1 10 3s1 8-2 11c3 2 3 6 0 9s-7 4-10 2"/>
+                    <circle cx="17" cy="18" r="2" fill="#ff9436"/>
+                    <circle cx="31" cy="18" r="2" fill="#ff9436"/>
+                    <circle cx="16" cy="28" r="2" fill="#ff9436"/>
+                    <circle cx="32" cy="28" r="2" fill="#ff9436"/>
+                    <circle cx="24" cy="24" r="2.5" fill="#ff9436"/>
+                    <path d="M17 18l7 6 7-6M16 28l8-4 8 4" stroke-width="1.5" stroke-dasharray="2 2"/>
+                  </svg>
+                </div>
+                """
+
+        # --- 5. VARIANTE fact: Hecho / ¿Sabías que? con icono elefante outline ---
+        elif variant == "fact":
+            tag_text = badge if badge not in ("DATO VERIFICADO", "DATO CLAVE") else "HECHO"
+            content_html = f"""
+            <div class="text-col">
+              <div class="card-tag"><span class="card-tag-dot"></span> {tag_text}</div>
+              <div class="card-title">{headline}</div>
+              <div class="card-desc">{body}</div>
+            </div>
+            """
+            visual_html = """
+            <div class="card-icon-tile" style="width:72px; height:72px; border-radius:20px;">
+              <svg viewBox="0 0 48 48" fill="none" stroke="#ff9436" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:42px; height:42px; filter: drop-shadow(0 0 10px rgba(255,140,40,0.5));">
+                <path d="M16 14C10 14 5 18 5 25c0 7 6 12 11 11"/>
+                <path d="M32 14c6 0 11 4 11 11 0 7-6 12-11 11"/>
+                <path d="M16 16c0-6 3.5-10 8-10s8 4 8 10c0 5-1.5 9-3 15v8c0 2-1 3-2.5 3s-2.5-1-2.5-3v-8c-1.5-6-3-10-3-15z"/>
+                <path d="M17 32c-2 2-3 4-3 6"/>
+                <path d="M31 32c2 2 3 4 3 6"/>
+                <circle cx="20" cy="20" r="1.5" fill="#ff9436"/>
+                <circle cx="28" cy="20" r="1.5" fill="#ff9436"/>
+              </svg>
+            </div>
+            """
+
+        # --- 6. VARIANTE step: Paso numerado con insignia 03 e icono sol ---
+        elif variant == "step":
+            tag_text = badge if badge not in ("DATO VERIFICADO", "DATO CLAVE") else "PASO"
+            st_match = re.search(r"[0-9]+", headline)
+            st_num = step_number or (st_match.group(0) if st_match else "01")
+            st_num = f"{int(st_num):02d}" if st_num.isdigit() else st_num
+            content_html = f"""
+            <div style="display:flex; align-items:center; gap:18px; z-index:5;">
+              <div>
+                <div class="card-tag" style="margin-bottom:6px;"><span class="card-tag-dot"></span> {tag_text}</div>
+                <div class="card-step-badge">{st_num}</div>
+              </div>
+              <div class="text-col" style="max-width:280px;">
+                <div class="card-title">{headline}</div>
+                <div class="card-desc">{body}</div>
+              </div>
+            </div>
+            """
+            visual_html = """
+            <div class="card-icon-tile">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#ff9436" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/>
+                <line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+            </div>
+            """
+
+        # --- 7. VARIANTE quote: Cita con comillas gigantes e icono libro ---
+        elif variant == "quote":
+            tag_text = badge if badge not in ("DATO VERIFICADO", "DATO CLAVE") else "DATO"
+            quote_body = body or headline
+            content_html = f"""
+            <div class="text-col">
+              <div class="card-tag"><span class="card-tag-dot"></span> {tag_text}</div>
+              <span class="card-quote-mark">“</span>
+              <div class="card-quote-text">{quote_body}”</div>
+            </div>
+            """
+            visual_html = """
+            <div class="card-icon-tile">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#ff9436" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+            </div>
+            """
 
         return f"""<!DOCTYPE html>
 <html>
@@ -560,84 +411,303 @@ class WebCardRenderer:
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #fff;
   }}
-  .quote-card {{
-    width: 660px;
-    background: linear-gradient(145deg, rgba(9, 10, 13, 0.98) 0%, rgba(4, 5, 7, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-left: 4px solid #38bdf8;
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.95), 0 0 40px rgba(12, 24, 48, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 30px 34px;
-    color: #f8fafc;
+
+  .card-container {{
+    width: 600px;
+    min-height: 205px;
+    background: linear-gradient(145deg, #101217 0%, #0a0b0e 100%);
+    border: 1px solid rgba(255, 140, 40, 0.26);
+    box-shadow: 0 24px 56px rgba(0, 0, 0, 0.90),
+                0 0 32px rgba(255, 120, 20, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12),
+                inset 0 0 20px rgba(255, 120, 20, 0.03);
+    border-radius: 24px;
+    padding: 24px 28px;
     position: relative;
-  }}
-  .quote-mark {{
-    position: absolute;
-    top: 16px; right: 24px;
-    font-family: 'Outfit', sans-serif;
-    font-size: 80px;
-    line-height: 1;
-    color: rgba(56, 189, 248, 0.12);
-    user-select: none;
-  }}
-  .q-badge {{
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    border-radius: 4px;
-    background: rgba(56, 189, 248, 0.15);
-    border: 1px solid rgba(56, 189, 248, 0.35);
-    color: #38bdf8;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    margin-bottom: 16px;
-  }}
-  .q-text {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 26px;
-    font-weight: 700;
-    line-height: 1.35;
-    color: #ffffff;
-    margin-bottom: 20px;
-    letter-spacing: -0.3px;
-  }}
-  .hl {{
-    color: #38bdf8;
-    text-shadow: 0 0 16px rgba(56, 189, 248, 0.6);
-  }}
-  .q-footer {{
+    overflow: hidden;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 14px;
+  }}
+
+  /* Punto brillante naranja en el borde superior */
+  .card-top-pip {{
+    position: absolute;
+    top: -4px;
+    left: {pip_left};
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ff7a18;
+    box-shadow: 0 0 10px #ff7a18, 0 0 4px #ffb060;
+    z-index: 10;
+  }}
+  .card-top-glow {{
+    position: absolute;
+    top: -1px;
+    left: {glow_left};
+    width: 140px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 140, 40, 0.65), #ff7a18, rgba(255, 140, 40, 0.65), transparent);
+    pointer-events: none;
+    z-index: 9;
+  }}
+
+  .text-col {{
+    z-index: 5;
+    position: relative;
+    max-width: 320px;
+  }}
+
+  /* Tag superior */
+  .card-tag {{
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    color: #ff8a34;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }}
+  .card-tag-dot {{
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #ff7a18;
+    box-shadow: 0 0 6px #ff7a18;
+    display: inline-block;
+  }}
+
+  /* Título y texto */
+  .card-title {{
+    font-size: 22px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    margin-bottom: 8px;
+  }}
+  .card-desc {{
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: #94a3b8;
+    font-weight: 400;
+  }}
+
+  /* Píldora inferior de metadatos */
+  .card-meta-pill {{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 5px 14px 5px 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    font-size: 12px;
+    color: #cbd5e1;
+  }}
+  .card-meta-icon {{
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #ff7a18;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+  }}
+
+  /* MÁSCARA DE FUSIÓN SUAVE: imagen real a la derecha con fundido perfecto */
+  .card-image-wrap {{
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 48%;
+    overflow: hidden;
+    border-top-right-radius: 24px;
+    border-bottom-right-radius: 24px;
+    pointer-events: none;
+    z-index: 2;
+  }}
+  .card-image-wrap img {{
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0,0,0,0.15) 16%, rgba(0,0,0,0.85) 45%, black 75%);
+    mask-image: linear-gradient(to right, transparent 0%, rgba(0,0,0,0.15) 16%, rgba(0,0,0,0.85) 45%, black 75%);
+  }}
+
+  /* Tile de vidrio oscuro para iconos (Tip, Step, Quote) */
+  .card-icon-tile {{
+    width: 62px;
+    height: 62px;
+    border-radius: 18px;
+    background: rgba(255, 122, 24, 0.05);
+    border: 1px solid rgba(255, 140, 40, 0.28);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 16px rgba(255, 122, 24, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ff9436;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 5;
+  }}
+  .card-icon-tile svg {{
+    width: 28px;
+    height: 28px;
+  }}
+
+  /* Estadísticas */
+  .card-stat-big {{
+    font-size: 38px;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }}
+  .card-stat-row {{
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 8px 0 12px;
+  }}
+  .card-stat-unit {{
     font-size: 12px;
     color: #94a3b8;
-    font-family: 'JetBrains Mono', monospace;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }}
-  .q-author {{
-    color: #e2e8f0;
-    font-weight: 600;
+  .card-stat-progress {{
+    width: 210px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    margin-bottom: 12px;
+  }}
+  .card-stat-bar {{
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #ff6b10 0%, #ffa048 100%);
+    box-shadow: 0 0 10px rgba(255, 120, 20, 0.6);
+  }}
+  .card-stat-trend {{
+    font-size: 12px;
+    color: #ff9436;
+    font-weight: 700;
+  }}
+
+  /* Globo / Visual de datos */
+  .globe-visual-wrap {{
+    position: relative;
+    width: 130px;
+    height: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 4;
+  }}
+  .globe-orbit-ring {{
+    position: absolute;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 1px dashed rgba(255,140,40,0.32);
+  }}
+  .globe-sphere {{
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #2a2c36 0%, #0d0e14 80%);
+    border: 1px solid rgba(255,140,40,0.4);
+    box-shadow: 0 0 25px rgba(255,120,20,0.22), inset 0 0 15px rgba(255,120,20,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+
+  /* Holograma Neural */
+  .neural-visual-wrap {{
+    position: relative;
+    width: 120px;
+    height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 4;
+    background: radial-gradient(circle, rgba(255,120,20,0.15) 0%, transparent 70%);
+  }}
+
+  /* Paso */
+  .card-step-badge {{
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255, 140, 40, 0.55);
+    box-shadow: 0 0 16px rgba(255, 122, 24, 0.25), inset 0 0 8px rgba(255, 122, 24, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 800;
+    color: #ffffff;
+    flex-shrink: 0;
+  }}
+
+  /* Cita */
+  .card-quote-mark {{
+    font-size: 38px;
+    line-height: 0.7;
+    color: #ff7a18;
+    font-family: Georgia, serif;
+    margin-bottom: 8px;
+    display: block;
+    text-shadow: 0 0 10px rgba(255, 122, 24, 0.4);
+  }}
+  .card-quote-text {{
+    font-size: 18px;
+    font-style: italic;
+    color: #f8fafc;
+    line-height: 1.4;
+    font-weight: 500;
   }}
 </style>
 </head>
 <body>
-  <div class="quote-card">
-    <div class="quote-mark">“</div>
-    <div class="q-badge">● {badge}</div>
-    <div class="q-text">«{safe_q}»</div>
-    <div class="q-footer">
-      <span class="q-author">— {author}</span>
-      <span>DECLARACIÓN VERIFICADA</span>
-    </div>
+  <div class="card-container">
+    <div class="card-top-pip"></div>
+    <div class="card-top-glow"></div>
+    {content_html}
+    {visual_html}
   </div>
 </body>
 </html>"""
+
+    def generate_quote_html(
+        self,
+        quote_text: str,
+        highlight_words: str = "",
+        author: str = "Afirmación Destacada",
+        badge: str = "DATO",
+    ) -> str:
+        """Tarjeta de cita estilizada según la referencia Matte Dark + Ámbar Glow."""
+        return self.generate_html(
+            headline=author,
+            body=quote_text,
+            badge=badge or "DATO",
+            style="quote"
+        )
+
 
     def generate_entity_flag_html(
         self,
@@ -951,12 +1021,17 @@ class WebCardRenderer:
         self,
         headline: str,
         out_png: Path,
-        stat_value: str = "95%",
-        stat_label: str = "Tasa de Precisión",
+        stat_value: str = "",
+        stat_label: str = "",
         body: str = "",
-        badge: str = "Dato Verificado",
+        badge: str = "DATO VERIFICADO",
         source: str = "Registro Oficial 2026",
-        style: str = "obsidian_bento",
+        style: str = "auto",
+        image_path: Optional[Union[str, Path]] = None,
+        step_number: Optional[str] = None,
+        meta_pill: Optional[str] = None,
+        trend_text: Optional[str] = None,
+        progress_pct: Optional[float] = None,
     ) -> Path:
         """Renderiza la tarjeta a un archivo PNG con fondo transparente utilizando Headless Chromium."""
         out_png = Path(out_png)
@@ -971,6 +1046,11 @@ class WebCardRenderer:
             badge=badge,
             source=source,
             style=style,
+            image_path=image_path,
+            step_number=step_number,
+            meta_pill=meta_pill,
+            trend_text=trend_text,
+            progress_pct=progress_pct,
         )
         html_file.write_text(html_content, encoding="utf-8")
 
@@ -1463,49 +1543,61 @@ class WebCardRenderer:
   }}
   .free-tag {{
     font-family: 'JetBrains Mono', monospace;
-    font-size: 16px;
+    font-size: 14.5px;
     font-weight: 800;
     letter-spacing: 4px;
-    color: {accent_color};
-    text-shadow: 0 0 20px {accent_color}, 0 2px 10px rgba(0,0,0,0.9);
+    color: #ffffff;
+    background: rgba(8, 11, 16, 0.85);
+    border: 1px solid {accent_color}88;
+    border-radius: 999px;
+    padding: 6px 20px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.85), 0 0 20px {accent_color}44;
+    text-shadow: 0 0 10px {accent_color};
     text-transform: uppercase;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     display: inline-block;
   }}
   .free-num {{
     font-family: 'Outfit', sans-serif;
-    font-size: 136px;
+    font-size: 144px;
     font-weight: 900;
-    line-height: 0.92;
-    background: linear-gradient(180deg, #ffffff 10%, {accent_color} 100%);
+    line-height: 0.90;
+    background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 30%, {accent_color} 75%, {accent_color}cc 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 15px 40px rgba(0,0,0,0.95)) drop-shadow(0 0 35px {accent_color}66);
-    letter-spacing: -4px;
-    margin-bottom: 8px;
+    -webkit-text-stroke: 2px rgba(255, 255, 255, 0.35);
+    filter: drop-shadow(0 18px 50px rgba(0,0,0,0.98)) drop-shadow(0 0 40px {accent_color}99);
+    letter-spacing: -5px;
+    margin-bottom: 10px;
   }}
   .free-title {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 70px;
-    font-weight: 800;
-    line-height: 1.08;
+    font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+    font-size: 74px;
+    font-weight: 900;
+    line-height: 1.05;
     color: #ffffff;
-    text-shadow: 0 8px 45px rgba(0,0,0,0.95), 0 3px 12px rgba(0,0,0,0.85);
-    letter-spacing: -1.2px;
+    text-shadow: 0 12px 50px rgba(0,0,0,0.98), 0 4px 18px rgba(0,0,0,0.92);
+    letter-spacing: -1.6px;
     text-transform: uppercase;
   }}
   .hl {{
     color: {accent_color};
-    text-shadow: 0 0 35px {accent_color}, 0 4px 30px rgba(0,0,0,0.9);
+    text-shadow: 0 0 30px {accent_color}, 0 0 60px {accent_color}aa, 0 4px 20px rgba(0,0,0,0.95);
   }}
   .free-sub {{
     font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 700;
-    color: #ffffff;
-    text-shadow: 0 4px 20px rgba(0, 0, 0, 0.95), 0 2px 8px rgba(0, 0, 0, 0.9);
-    margin-top: 14px;
-    letter-spacing: 0.4px;
+    color: #f1f5f9;
+    background: rgba(8, 11, 16, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    padding: 8px 24px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+    margin-top: 16px;
+    letter-spacing: 0.3px;
+    display: inline-block;
   }}
 </style>
 </head>
@@ -1552,23 +1644,26 @@ class WebCardRenderer:
             "--hide-scrollbars",
             "--default-background-color=00000000",
             f"--screenshot={out_png.resolve()}",
-            "--window-size=1600,900",
+            "--window-size=1920,1080",
             file_uri,
         ]
         subprocess.run(args, capture_output=True, check=True, timeout=15)
         self._crop_transparent(out_png)
         return out_png
 
-    def generate_kinetic_word_html(self, word: str, duo_a: str = "#F7C873", duo_b: str = "#FF6B9D") -> str:
-        """Una palabra gigante estilo tipografía cinética viral.
-
-        - Serif elegante en itálica (Playfair Display 900): el contraste editorial
-          que domina los formatos virales de divulgación.
-        - Degradado BICOLOR de firma (background-clip:text): la mitad superior en
-          un tono y la inferior en otro, con brillo propio.
-        - Sin cajas ni fondos: flota sobre el video con sombra profunda.
-        """
+    def generate_kinetic_word_html(self, word: str, duo_a: str = "#FFB703", duo_b: str = "#FB8500") -> str:
+        """Una palabra gigante estilo tipografía cinética viral moderna con tamaño adaptativo anti-recorte."""
         w_clean = str(word or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        w_len = len(w_clean)
+        if w_len >= 13:
+            f_size = 135
+        elif w_len >= 9:
+            f_size = 165
+        elif w_len >= 6:
+            f_size = 190
+        else:
+            f_size = 215
+
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1584,20 +1679,19 @@ class WebCardRenderer:
     min-height: 100vh;
   }}
   .word {{
-    font-family: 'Playfair Display', Georgia, serif;
-    font-style: italic;
+    font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
     font-weight: 900;
-    font-size: 200px;
-    line-height: 0.95;
+    text-transform: uppercase;
+    font-size: {f_size}px;
+    line-height: 0.94;
     letter-spacing: -2px;
     white-space: nowrap;
-    /* Degradado bicolor de firma */
-    background: linear-gradient(165deg, {duo_a} 12%, {duo_b} 88%);
+    background: linear-gradient(180deg, #ffffff 0%, {duo_a} 45%, {duo_b} 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 10px 34px rgba(0,0,0,0.85)) drop-shadow(0 0 26px {duo_b}55);
-    padding: 0 30px;
+    filter: drop-shadow(0 14px 35px rgba(0,0,0,0.96)) drop-shadow(0 0 28px {duo_a}77) drop-shadow(0 0 55px {duo_b}44);
+    padding: 20px 60px;
   }}
 </style>
 </head>
@@ -1641,7 +1735,7 @@ class WebCardRenderer:
                     "--default-background-color=00000000",
                     "--force-device-scale-factor=2",
                     f"--screenshot={out_png.resolve()}",
-                    "--window-size=1300,420",
+                    "--window-size=2600,600",
                     html_file.resolve().as_uri(),
                 ]
                 subprocess.run(args, capture_output=True, check=True, timeout=15)

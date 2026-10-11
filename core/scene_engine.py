@@ -36,7 +36,7 @@ from core.llm import safe_log
 SUBTITLE_STYLES: Dict[str, str] = {
     "classic": "FontName=Segoe UI,Bold=1,PrimaryColour=&H00FFFFFF,BorderStyle=3,OutlineColour=&HB2000000",
     "outline": "FontName=Segoe UI,Bold=1,PrimaryColour=&H00FFFFFF,BorderStyle=1,Outline=3,Shadow=0,OutlineColour=&H00000000",
-    "viral": "FontName=Segoe UI Black,Bold=1,PrimaryColour=&H0000E0FF,BorderStyle=1,Outline=4,Shadow=1,OutlineColour=&H00000000",
+    "viral": "FontName=Segoe UI Black,Bold=1,PrimaryColour=&H0000F5D4,BorderStyle=1,Outline=4,Shadow=1,OutlineColour=&H00000000",
     "hormozi": "FontName=Segoe UI Black,Bold=1,PrimaryColour=&H0000FFFF,BorderStyle=1,Outline=4,Shadow=2,OutlineColour=&H00000000",
     "mrbeast": "FontName=Segoe UI Black,Bold=1,PrimaryColour=&H0000FFFF,SecondaryColour=&H0038BDF8,BorderStyle=1,Outline=5,Shadow=2,OutlineColour=&H00000000",
     "cyber_glow": "FontName=Segoe UI,Bold=1,PrimaryColour=&H00F8BD38,BorderStyle=1,Outline=3,Shadow=2,OutlineColour=&H80000000",
@@ -408,12 +408,13 @@ class SceneEngine:
                     self.web_renderer.render_to_image(
                         headline=c_headline,
                         out_png=card_img_path,
-                        stat_value=c_stat or "DATO CLAVE",
+                        stat_value=c_stat or "",
                         stat_label="Cifra Verificada",
                         body=c_body,
-                        badge=c_badge or "DATO VERIFICADO",
+                        badge=c_badge or "INFO",
                         source="Registro Oficial 2026",
-                        style=c_style,
+                        style="auto",
+                        image_path=broll_img,
                     )
                     safe_log(f"[SceneEngine] 🎨 Tarjeta Bento moderna WebCardRenderer generada para escena {scene.scene_id}")
             except Exception as _we:
@@ -643,7 +644,12 @@ class SceneEngine:
         # fijos: la card se volvía un adorno permanente tapando el video.
         if card_img_path and card_img_path.exists():
             card_words = len(f"{getattr(scene.card, 'headline', '') or ''} {getattr(scene.card, 'body', '') or ''}".split())
-            card_duration = max(4.0, min(6.5, 0.35 * card_words + 1.2))
+            if getattr(scene, "type", "") == "card_focus":
+                # En escenas card_focus la tarjeta es el protagonista principal: permanecer visible y legible
+                card_duration = max(7.0, min(max(7.0, duration - 1.2), 0.50 * card_words + 5.0))
+            else:
+                # En otras escenas, dar tiempo de lectura holgado y fluido
+                card_duration = max(5.5, min(max(5.5, duration - 1.2), 0.40 * card_words + 3.0))
         else:
             card_duration = 0.0
         # Duración del texto libre: con serie cinética la ventana cubre el
@@ -765,9 +771,11 @@ class SceneEngine:
             filter_parts.append(
                 f"[{ft_idx}:v]format=rgba,fade=t=in:st=0.4:d=0.25:alpha=1,fade=t=out:st={ft_fo:.2f}:d=0.35:alpha=1[ft_animated]"
             )
-            # Centrado cinemático flotante perfecto (sin caja)
+            # Entrada con movimiento cinemático flotante (rise suave de 24px hacia el centro)
+            ft_calc = f"min(max((t-0.4)/0.35\\,0)\\,1)"
+            ft_y_expr = f"(H-h)/2 + 24*(1-pow({ft_calc}\\,3))"
             filter_parts.append(
-                f"[{cur_v}][ft_animated]overlay=x='(W-w)/2':y='(H-h)/2':enable='between(t,0.4,{ft_end:.2f})'[v_ft]"
+                f"[{cur_v}][ft_animated]overlay=x='(W-w)/2':y='{ft_y_expr}':enable='between(t,0.4,{ft_end:.2f})'[v_ft]"
             )
             cur_v = "v_ft"
 
