@@ -40,6 +40,17 @@ TITLE_STYLES = (
 
 YEAR_STYLES = ("stack_gold", "wide_outline", "split_tone")
 
+KEYWORD_STYLES = ("badge_glow", "contrast_split", "editorial_punch")
+
+KEYWORD_DUOTONES = (
+    ("#ff9436", "#ff5500"),  # naranja vibrante fuego
+    ("#38bdf8", "#0284c7"),  # azul elÃ©ctrico neÃ³n
+    ("#a855f7", "#ec4899"),  # pÃºrpura / magenta moderno
+    ("#10b981", "#059669"),  # esmeralda tecno
+    ("#f59e0b", "#d97706"),  # Ã¡mbar oro
+    ("#3b82f6", "#1d4ed8"),  # cobalto intenso
+)
+
 # Palabras que, justo después de un número de 4 cifras, indican que NO es un año.
 _NOT_YEAR_NEXT = {
     "personas", "millones", "mil", "usuarios", "dolares", "dólares", "euros",
@@ -361,5 +372,204 @@ body{{width:1500px;height:1000px;display:flex;align-items:center;justify-content
             self._screenshot(self._year_html(year, style), out_png, 1500, 1000, budget_ms=4000)
             self._tight_crop(out_png, pad=24, alpha_min=6)
             return out_png, style
+        except Exception:
+            return None
+
+    @staticmethod
+    def find_keywords(speech: str, scene_name: str = "", card_headline: str = "") -> List[Dict[str, Any]]:
+        """
+        Extrae palabras clave de alto impacto o datos cuantitativos para rÃ³tulos flotantes de Ã©nfasis.
+        Devuelve lista de dicts ordenados por posiciÃ³n:
+          [{"text": "40% MENOS", "tag": "DATO CLAVE", "frac": 0.35, "kind": "stat", "style": "badge_glow"}, ...]
+        """
+        res: List[Dict[str, Any]] = []
+        seen = set()
+        text = speech or ""
+        total_len = max(1, len(text))
+        ignore_set = set(re.findall(r"\w+", (scene_name + " " + card_headline).lower()))
+
+        # 1. Datos cuantitativos y mÃ©tricas de impacto
+        stat_patterns = [
+            r"\b\d+(?:[.,]\d+)?%\s*(?:menos|mas|mÃ¡s|de aumento|de caÃ­da|de caida)?\b",
+            r"\b\d+(?:[.,]\d+)?\s*(?:veces|x|horas|minutos|segundos|millones|miles)\b",
+        ]
+        for pat in stat_patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                raw = m.group(0).strip()
+                if raw.lower() not in seen:
+                    seen.add(raw.lower())
+                    res.append({
+                        "text": raw.upper(),
+                        "tag": "DATO CLAVE",
+                        "frac": m.start() / total_len,
+                        "kind": "stat",
+                        "style": "badge_glow"
+                    })
+
+        # 2. Conceptos clave de alto impacto psicolÃ³gico / tecnolÃ³gico / hÃ¡bitos
+        high_impact_concepts = [
+            ("dopamina", "NEUROCIENCIA", "badge_glow"),
+            ("cortisol", "NEUROCIENCIA", "badge_glow"),
+            ("neurociencia", "NEUROCIENCIA", "contrast_split"),
+            ("algoritmo", "SISTEMA", "contrast_split"),
+            ("atencion secuestrada", "ALERTA", "editorial_punch"),
+            ("atenciÃ³n secuestrada", "ALERTA", "editorial_punch"),
+            ("sobreestimulacion", "ALERTA", "editorial_punch"),
+            ("sobreestimulaciÃ³n", "ALERTA", "editorial_punch"),
+            ("multitarea", "ERROR", "contrast_split"),
+            ("disciplina", "MÃ‰TODO", "editorial_punch"),
+            ("habito atomico", "MÃ‰TODO", "editorial_punch"),
+            ("hÃ¡bito atÃ³mico", "MÃ‰TODO", "editorial_punch"),
+            ("productividad", "CLAVE", "contrast_split"),
+            ("enfoque profundo", "CLAVE", "editorial_punch"),
+            ("enfoque", "ENFOQUE", "badge_glow"),
+            ("distraccion", "ALERTA", "contrast_split"),
+            ("distracciÃ³n", "ALERTA", "contrast_split"),
+            ("error critico", "ERROR CRÃTICO", "contrast_split"),
+            ("error crÃ­tico", "ERROR CRÃTICO", "contrast_split"),
+            ("regla de oro", "REGLA DE ORO", "editorial_punch"),
+            ("secreto", "SECRETO", "editorial_punch"),
+            ("exito", "CLAVE", "badge_glow"),
+            ("Ã©xito", "CLAVE", "badge_glow"),
+            ("resultados", "IMPACTO", "contrast_split"),
+        ]
+        for term, tag, st in high_impact_concepts:
+            for m in re.finditer(r"\b" + re.escape(term) + r"\b", text, re.IGNORECASE):
+                raw = m.group(0).strip()
+                if raw.lower() not in seen and raw.lower() not in ignore_set:
+                    seen.add(raw.lower())
+                    res.append({
+                        "text": raw.upper(),
+                        "tag": tag,
+                        "frac": m.start() / total_len,
+                        "kind": "concept",
+                        "style": st
+                    })
+
+        # 3. Palabras completas en MAYÃšSCULAS sostenidas (3-16 caracteres) en el texto
+        for m in re.finditer(r"\b[A-ZÃÃ‰ÃÃ“ÃšÃ‘]{3,16}\b", text):
+            raw = m.group(0).strip()
+            if raw.lower() not in seen and raw.lower() not in _NOT_YEAR_NEXT and raw.lower() not in ignore_set:
+                if len(raw) >= 4 and not raw.isdigit():
+                    seen.add(raw.lower())
+                    res.append({
+                        "text": raw,
+                        "tag": "CLAVE",
+                        "frac": m.start() / total_len,
+                        "kind": "caps",
+                        "style": "contrast_split"
+                    })
+
+        res.sort(key=lambda x: x["frac"])
+        return res
+
+    def _keyword_html(self, text: str, style: str, tag: str, duo: Tuple[str, str]) -> str:
+        c1, c2 = duo
+        base_head = f"""<!DOCTYPE html><html><head><meta charset="utf-8">{FONTS_LINK}
+        <style>
+          * {{ margin:0; padding:0; box-sizing:border-box; }}
+          body {{ background: transparent; padding: 40px; display: inline-block; }}
+          .wrap {{ display: inline-flex; flex-direction: column; align-items: flex-start; }}
+        """
+        if style == "badge_glow":
+            return base_head + f"""
+          .tag {{
+            display: inline-flex; align-items: center; gap: 6px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 13px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+            color: {c1}; margin-bottom: 8px;
+            background: {_rgba(c1, 0.12)}; border: 1px solid {_rgba(c1, 0.35)};
+            padding: 4px 14px; border-radius: 999px;
+            box-shadow: 0 0 16px {_rgba(c1, 0.25)};
+          }}
+          .tag-dot {{ width: 6px; height: 6px; border-radius: 50%; background: {c1}; box-shadow: 0 0 8px {c1}; }}
+          .word {{
+            font-family: 'Anton', sans-serif;
+            font-size: 84px;
+            line-height: 0.95;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+            background: linear-gradient(175deg, #ffffff 15%, {c1} 65%, {c2} 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 12px 28px rgba(0,0,0,0.9)) drop-shadow(0 0 35px {_rgba(c1, 0.45)});
+          }}
+        </style></head><body>
+          <div class="wrap">
+            <div class="tag"><span class="tag-dot"></span>{tag}</div>
+            <div class="word">{text}</div>
+          </div>
+        </body></html>"""
+        elif style == "contrast_split":
+            return base_head + f"""
+          .tag {{
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 12px; font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase;
+            color: rgba(255,255,255,0.7); margin-bottom: 6px;
+          }}
+          .word {{
+            font-family: 'Archivo Black', sans-serif;
+            font-size: 78px;
+            line-height: 0.95;
+            letter-spacing: -0.01em;
+            text-transform: uppercase;
+            color: #ffffff;
+            -webkit-text-stroke: 2px {c1};
+            filter: drop-shadow(0 14px 30px rgba(0,0,0,0.95)) drop-shadow(0 0 25px {_rgba(c1, 0.5)});
+          }}
+          .bar {{
+            width: 100%; height: 4px; border-radius: 999px; margin-top: 10px;
+            background: linear-gradient(90deg, {c1}, {c2}, transparent);
+            box-shadow: 0 0 12px {c1};
+          }}
+        </style></head><body>
+          <div class="wrap">
+            <div class="tag">// {tag}</div>
+            <div class="word">{text}</div>
+            <div class="bar"></div>
+          </div>
+        </body></html>"""
+        else:  # editorial_punch
+            return base_head + f"""
+          .tag {{
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 13px; font-weight: 700; letter-spacing: 0.20em; text-transform: uppercase;
+            color: {c1}; margin-bottom: 8px;
+          }}
+          .word {{
+            font-family: 'Playfair Display', serif;
+            font-style: italic;
+            font-weight: 900;
+            font-size: 82px;
+            line-height: 1.0;
+            background: linear-gradient(135deg, #ffffff 20%, {c1} 70%, {c2} 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 14px 28px rgba(0,0,0,0.9)) drop-shadow(0 0 30px {_rgba(c1, 0.4)});
+          }}
+        </style></head><body>
+          <div class="wrap">
+            <div class="tag"># {tag}</div>
+            <div class="word">{text}</div>
+          </div>
+        </body></html>"""
+
+    def render_keyword_callout(
+        self,
+        text: str,
+        out_png: Path,
+        style: str = "badge_glow",
+        tag: str = "DATO CLAVE",
+        duo: Tuple[str, str] = ("#ff9436", "#ff5500")
+    ) -> Optional[Path]:
+        """Renderiza un rÃ³tulo flotante recortado de palabra clave con estilo premium."""
+        try:
+            if style not in KEYWORD_STYLES:
+                style = KEYWORD_STYLES[0]
+            out_png = Path(out_png)
+            html = self._keyword_html(text, style, tag, duo)
+            self._screenshot(html, out_png, 1200, 420, budget_ms=4500)
+            self._tight_crop(out_png, pad=20, alpha_min=6)
+            return out_png if out_png.exists() else None
         except Exception:
             return None

@@ -282,6 +282,39 @@ class SceneEngine:
             except Exception as _e:
                 safe_log(f"[SceneEngine] Fallback en segundo clip: {_e}")
 
+        # 2c. Enriquecer ritmo visual: evitar permanecer demasiado tiempo en un mismo clip estatico
+        # Salvo escenas de reaccion pura o avatar cam, garantizar variacion visual dinamica cada ~4.0 - 5.0s
+        if scene.type not in ("video_reaction", "avatar_cam") and duration >= 6.5:
+            existing_times = [t for _, t in bg_clips]
+            all_pts = sorted(existing_times + [duration])
+            max_gap = max((all_pts[i+1] - all_pts[i] for i in range(len(all_pts)-1)), default=duration)
+
+            if max_gap > 5.2:
+                target_cut = 4.5
+                while target_cut <= duration - 2.2 and len(bg_clips) < 4:
+                    if not any(abs(t - target_cut) < 2.0 for t in existing_times):
+                        sub_q = ""
+                        if sentence_boundaries:
+                            for s_st, _s_en, s_txt in sentence_boundaries:
+                                if abs(s_st - target_cut) <= 2.5:
+                                    words = [w for w in re.findall(r"\w+", s_txt) if len(w) > 3]
+                                    if words:
+                                        sub_q = " ".join(words[:4]) + " 4k cinematic"
+                                    break
+                        if not sub_q:
+                            base_q = scene.visual_query or scene.name
+                            sub_q = f"{base_q} cinematic perspective 4k"
+
+                        try:
+                            supp_clip = await self._get_scene_visual(sub_q, scene_dir, is_video_scene=True)
+                            if supp_clip and supp_clip.exists():
+                                bg_clips.append((supp_clip, round(target_cut, 2)))
+                                existing_times.append(round(target_cut, 2))
+                                safe_log(f"[SceneEngine] Variacion B-Roll enriquecida en t={target_cut:.1f}s: '{sub_q}'")
+                        except Exception as _esup:
+                            safe_log(f"[SceneEngine] Fallback en B-Roll complementario: {_esup}")
+                    target_cut += 4.5
+
         # Ordenar clips de fondo por segundo de inicio
         bg_clips.sort(key=lambda x: x[1])
 
@@ -320,10 +353,10 @@ class SceneEngine:
         card_img_path = None
         if scene.card:
             card_img_path = scene_dir / f"card_{scene.scene_id}.png"
-            c_badge = (scene.card.badge or "").upper()
-            c_headline = scene.card.headline or ""
-            c_body = scene.card.body or c_headline
-            c_stat = scene.card.stat or ""
+            c_badge = str(scene.card.get("badge") if isinstance(scene.card, dict) else getattr(scene.card, "badge", "") or "").upper()
+            c_headline = str(scene.card.get("headline") if isinstance(scene.card, dict) else getattr(scene.card, "headline", "") or "")
+            c_body = str(scene.card.get("body") if isinstance(scene.card, dict) else getattr(scene.card, "body", "") or c_headline)
+            c_stat = str(scene.card.get("stat") if isinstance(scene.card, dict) else getattr(scene.card, "stat", "") or "")
 
             try:
                 # 1. Mapa Geopolítico / Satelital Táctico GeoIntel (si aplica específicamente)
@@ -400,15 +433,15 @@ class SceneEngine:
                     safe_log(f"[SceneEngine] Fallback final a CardRenderer: {_fe}")
                     card_obj = InfoCard(
                         card_id=f"sc_card_{scene.scene_id}",
-                        headline=scene.card.headline,
-                        claim=scene.card.body or scene.card.headline,
-                        search_query=scene.card.headline,
-                        body=scene.card.body,
+                        headline=c_headline,
+                        claim=c_body or c_headline,
+                        search_query=c_headline,
+                        body=c_body,
                         start_sec=0.8,
                         end_sec=max(3.0, duration - 0.5),
-                        stat_value=scene.card.stat or "",
+                        stat_value=c_stat,
                         verdict="supported",
-                        kind="cifra" if scene.card.stat else "dato",
+                        kind="cifra" if c_stat else "dato",
                     )
                     self.card_renderer.render(card_obj, card_img_path)
 
@@ -566,6 +599,58 @@ class SceneEngine:
                     kinetic_word_paths = []
 
         # 4. Generar subtítulos para la escena
+                # 3f. Rotulos flotantes cinematicos de palabras clave y anos (enfasis sin cards)
+        keyword_callout_overlays: List[Dict[str, Any]] = []
+        try:
+            from core.kinetic_titles import KEYWORD_DUOTONES
+            kw_duo = KEYWORD_DUOTONES[int(scene.scene_id) % len(KEYWORD_DUOTONES)]
+
+            found_years = self.title_renderer.find_years(speech_text)
+            found_kws = self.title_renderer.find_keywords(
+                speech=speech_text,
+                scene_name=scene.name,
+                card_headline=getattr(scene.card, "headline", "") or ""
+            )
+
+            candidates = []
+            for y_val, y_frac in found_years[:1]:
+                candidates.append({"type": "year", "text": y_val, "frac": y_frac, "tag": "ANO HISTORICO"})
+            for kw_item in found_kws[:2]:
+                candidates.append({
+                    "type": "keyword",
+                    "text": kw_item["text"],
+                    "frac": kw_item["frac"],
+                    "tag": kw_item["tag"],
+                    "style": kw_item.get("style", "badge_glow")
+                })
+
+            candidates.sort(key=lambda c: c["frac"])
+            candidates = candidates[:2]
+
+            for idx_c, cand in enumerate(candidates):
+                kw_png = scene_dir / f"kw_{scene.scene_id}_{idx_c}.png"
+                rendered_path = None
+                if cand["type"] == "year":
+                    res_y = self.title_renderer.render_year_callout(cand["text"], kw_png, style_idx=int(scene.scene_id) + idx_c)
+                    if res_y:
+                        rendered_path = res_y[0]
+                else:
+                    rendered_path = self.title_renderer.render_keyword_callout(
+                        text=cand["text"],
+                        out_png=kw_png,
+                        style=cand.get("style", "badge_glow"),
+                        tag=cand.get("tag", "CLAVE"),
+                        duo=kw_duo,
+                    )
+                if rendered_path and rendered_path.exists():
+                    keyword_callout_overlays.append({
+                        "path": rendered_path,
+                        "frac": cand["frac"],
+                        "text": cand["text"],
+                    })
+        except Exception as _kwe:
+            safe_log(f"[SceneEngine] Fallback en palabras clave flotantes: {_kwe}")
+
         srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
 
         # 5. Montar filtergraph de FFmpeg específico para el layout de la escena
@@ -586,8 +671,8 @@ class SceneEngine:
                 # Ken Burns: overscan 110% → zoom lento de 1.0x a 1.08x + paneo sutil hacia arriba
                 kb_frames = max(1, int(float(dur_str) * 25))
                 filter_parts.append(
-                    f"[0:v]scale={self.W * 2}:{self.H * 2}:force_original_aspect_ratio=increase,"
-                    f"crop={self.W * 2}:{self.H * 2},"
+                    f"[0:v]scale={int(self.W * 1.12)}:{int(self.H * 1.12)}:force_original_aspect_ratio=increase,"
+                    f"crop={int(self.W * 1.12)}:{int(self.H * 1.12)},"
                     f"zoompan=z='min(zoom+0.0003,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)-{self.H//10}*on/{kb_frames}':d={kb_frames}:s={self.W}x{self.H}:fps=25,"
                     f"setsar=1[v_bg0]"
                 )
@@ -619,8 +704,8 @@ class SceneEngine:
                 if sub_is_image:
                     kb_frames_sub = max(1, int(float(dur_str) * 25))
                     filter_parts.append(
-                        f"[{clip_in_idx}:v]scale={self.W * 2}:{self.H * 2}:force_original_aspect_ratio=increase,"
-                        f"crop={self.W * 2}:{self.H * 2},"
+                        f"[{clip_in_idx}:v]scale={int(self.W * 1.12)}:{int(self.H * 1.12)}:force_original_aspect_ratio=increase,"
+                        f"crop={int(self.W * 1.12)}:{int(self.H * 1.12)},"
                         f"zoompan=z='min(zoom+0.0003,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25,"
                         f"setsar=1[{v_scaled}];"
                         f"[{cur_v}][{v_scaled}]overlay=0:0:enable='gte(t,{cut_sec:.2f})'[{v_next}]"
@@ -643,13 +728,11 @@ class SceneEngine:
         # palabra + 1.2s de animación/buffer, acotado 4-6.5s). Antes usaba hasta 9.5s
         # fijos: la card se volvía un adorno permanente tapando el video.
         if card_img_path and card_img_path.exists():
-            card_words = len(f"{getattr(scene.card, 'headline', '') or ''} {getattr(scene.card, 'body', '') or ''}".split())
-            if getattr(scene, "type", "") == "card_focus":
-                # En escenas card_focus la tarjeta es el protagonista principal: permanecer visible y legible
-                card_duration = max(7.0, min(max(7.0, duration - 1.2), 0.50 * card_words + 5.0))
-            else:
-                # En otras escenas, dar tiempo de lectura holgado y fluido
-                card_duration = max(5.5, min(max(5.5, duration - 1.2), 0.40 * card_words + 3.0))
+            c_hl = scene.card.get("headline") if isinstance(scene.card, dict) else getattr(scene.card, "headline", "")
+            c_bd = scene.card.get("body") if isinstance(scene.card, dict) else getattr(scene.card, "body", "")
+            card_words = len(f"{c_hl or ''} {c_bd or ''}".split())
+            # Tarjeta: acotada estrictamente a MAXIMO 4.0 SEGUNDOS (y sale antes del corte de escena)
+            card_duration = max(2.2, min(4.0, min(max(2.0, duration - 0.8), 0.20 * card_words + 1.8)))
         else:
             card_duration = 0.0
         # Duración del texto libre: con serie cinética la ventana cubre el
@@ -798,13 +881,12 @@ class SceneEngine:
             # Entrada con slide suave (deslizamiento ease-out de 30px hacia el centro perfecto)
             # En formato 16:9 horizontal, centrar la tarjeta horizontalmente para máxima presencia y elegancia
             # card_w = 1060 + margen = ~1120px -> centrado en (1920 - 1120)/2 = ~400px
-            slide_dist = 28
-            slide_calc = f"min(max((t-0.5)/0.4\\,0)\\,1)"
-            # Coordenada X centrada: (self.W - overlay_w) / 2 en horizontal, o 30 en vertical
-            card_base_x = "((W-w)/2)" if not self.is_vertical else "30"
-            ease_x = f"{card_base_x}-{slide_dist}*(1-pow({slide_calc}\\,3))" if not self.is_vertical else f"30-{slide_dist}*(1-pow({slide_calc}\\,3))"
-            card_y = 110 if not self.is_vertical else int(self.H * 0.32)
-            filter_parts.append(f"[{cur_v}][card_animated]overlay=x='{ease_x}':y={card_y}:enable='between(t,0.5,{card_end:.2f})'[v_card]")
+            slide_dist = 26
+            slide_calc = f"min(max((t-0.5)/0.35\\,0)\\,1)"
+            # Centrado perfecto en pantalla (X y Y) con elevacion ease-out hacia el centro
+            card_base_x = "((W-w)/2)"
+            ease_y = f"((H-h)/2)+{slide_dist}*(1-pow({slide_calc}\\,3))"
+            filter_parts.append(f"[{cur_v}][card_animated]overlay=x='{card_base_x}':y='{ease_y}':enable='between(t,0.5,{card_end:.2f})'[v_card]")
             cur_v = "v_card"
 
         elif popup_img_path and popup_img_path.exists():
@@ -924,7 +1006,41 @@ class SceneEngine:
             filter_parts.append(f"[{cur_v}][chips_animated]overlay=x={chip_x}:y='{chip_y}':enable='between(t,{chip_start_time:.2f},{chip_end:.2f})'[v_chips]")
             cur_v = "v_chips"
 
-        # Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
+                # Superposicion de palabras clave / anos flotantes (rotulos de enfasis sin cards)
+        if keyword_callout_overlays:
+            kw_dur = 2.1
+            for k_i, k_data in enumerate(keyword_callout_overlays):
+                k_path = k_data["path"]
+                k_frac = k_data["frac"]
+                # Determinar momento idoneo evitando colision con card o free_title
+                ideal_t = max(0.8, min(duration - kw_dur - 0.4, k_frac * duration))
+                if card_img_path and card_img_path.exists() and card_duration > 0:
+                    c_exit = 0.5 + card_duration
+                    if duration >= c_exit + kw_dur + 0.6:
+                        ideal_t = max(c_exit + 0.6, ideal_t)
+                elif free_title_img_path and free_title_img_path.exists() and free_title_dur > 0:
+                    f_exit = 0.4 + free_title_dur
+                    if duration >= f_exit + kw_dur + 0.6:
+                        ideal_t = max(f_exit + 0.6, ideal_t)
+
+                kw_start = ideal_t
+                kw_end = min(duration - 0.2, kw_start + kw_dur)
+                if kw_end - kw_start >= 1.2:
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(k_path)])
+                    kw_in_idx = num_in
+                    num_in += 1
+                    fo_st = max(kw_start + 0.2, kw_end - 0.28)
+                    filter_parts.append(
+                        f"[{kw_in_idx}:v]format=rgba,fade=t=in:st={kw_start:.2f}:d=0.22:alpha=1,fade=t=out:st={fo_st:.2f}:d=0.28:alpha=1[kwo_{k_i}]"
+                    )
+                    kw_slide = f"min(max((t-{kw_start:.2f})/0.25\\,0)\\,1)"
+                    kw_y_expr = f"((H-h)/2)+24*(1-pow({kw_slide}\\,3))"
+                    filter_parts.append(
+                        f"[{cur_v}][kwo_{k_i}]overlay=x='(W-w)/2':y='{kw_y_expr}':enable='between(t,{kw_start:.2f},{kw_end:.2f})'[v_kwo_{k_i}]"
+                    )
+                    cur_v = f"v_kwo_{k_i}"
+
+# Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
         if srt_path and srt_path.exists() and self.subs_enabled:
             esc_srt = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
             sub_size = 18 if self.is_vertical else 14
@@ -1022,7 +1138,7 @@ class SceneEngine:
             "-crf", str(scene_crf),
             "-pix_fmt", "yuv420p",
             "-r", str(scene_fps),
-            "-x264-params", f"threads=4:rc-lookahead=20:me=umh",
+            "-x264-params", f"threads=2:rc-lookahead=10",
             "-c:a", "aac",
             "-b:a", "256k",
             "-ar", "48000",
