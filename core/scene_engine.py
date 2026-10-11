@@ -121,6 +121,8 @@ class SceneEngine:
         self.card_renderer = InfoCardRenderer(self.W, self.H, theme=card_theme)
         from core.web_card_renderer import WebCardRenderer
         self.web_renderer = WebCardRenderer()
+        from core.kinetic_titles import KineticTitleRenderer
+        self.title_renderer = KineticTitleRenderer(self.web_renderer)
         self.chat_renderer = LiveChatRenderer(width=340 if not self.is_vertical else 300)
         self.orchestrator = AssetOrchestrator(target_dir=self.workdir / "assets")
 
@@ -504,9 +506,11 @@ class SceneEngine:
                     "blur_bg": True,
                 }
 
+        kinetic_layered = False
         if free_data:
             out_free_path = scene_dir / f"free_title_{scene.scene_id}.png"
             kinetic_word_paths = []
+            kinetic_layered = False
             try:
                 free_title_img_path = self.web_renderer.render_free_kinetic_text_to_image(
                     main_title=free_data.get("title") or scene.name,
@@ -531,12 +535,31 @@ class SceneEngine:
                 try:
                     from core.web_card_renderer import KINETIC_DUOTONES
                     duo = KINETIC_DUOTONES[int(scene.scene_id) % len(KINETIC_DUOTONES)]
-                    kinetic_word_paths = self.web_renderer.render_kinetic_word_series(
-                        title=free_data.get("title") or scene.name,
-                        out_dir=scene_dir / f"kinetic_{scene.scene_id}",
-                        duo=duo,
-                        max_words=4,
-                    )
+                    from core.kinetic_titles import TITLE_STYLES
+                    _tstyle = free_data.get("style")
+                    if _tstyle not in TITLE_STYLES:
+                        _tstyle = TITLE_STYLES[int(scene.scene_id) % len(TITLE_STYLES)]
+                    _eyebrow = " · ".join([x for x in (str(free_data.get("number", "") or ""), str(free_data.get("tag", "") or "")) if x])
+                    try:
+                        kinetic_word_paths = self.title_renderer.render_title_layers(
+                            title=free_data.get("title") or scene.name,
+                            out_dir=scene_dir / f"kt_{scene.scene_id}",
+                            style=_tstyle,
+                            duo=duo,
+                            eyebrow=_eyebrow,
+                            canvas=(self.W, self.H),
+                            max_words=4,
+                        )
+                        kinetic_layered = bool(kinetic_word_paths)
+                    except Exception:
+                        kinetic_word_paths = []
+                    if not kinetic_word_paths:
+                        kinetic_word_paths = self.web_renderer.render_kinetic_word_series(
+                            title=free_data.get("title") or scene.name,
+                            out_dir=scene_dir / f"kinetic_{scene.scene_id}",
+                            duo=duo,
+                            max_words=4,
+                        )
                     if kinetic_word_paths:
                         safe_log(f"[SceneEngine] ⚡ {len(kinetic_word_paths)} palabras cinéticas bicolor listas (escena {scene.scene_id})")
                 except Exception as _ke:
@@ -722,8 +745,9 @@ class SceneEngine:
                 num_in += 1
                 st = ft_start + i_w * stagger
                 # PNG a 2x: reducir al tamaño objetivo (palabra ~200px de alto en pantalla)
+                _sc = "" if kinetic_layered else "scale=iw*0.5:ih*0.5,"
                 filter_parts.append(
-                    f"[{w_idx}:v]scale=iw*0.5:ih*0.5,format=rgba,"
+                    f"[{w_idx}:v]{_sc}format=rgba,"
                     f"fade=t=in:st={st:.2f}:d=0.20:alpha=1,"
                     f"fade=t=out:st={ft_end - 0.35:.2f}:d=0.35:alpha=1[kw{i_w}_a]"
                 )
@@ -731,9 +755,14 @@ class SceneEngine:
                 # centrada como bloque (offset vertical por índice de palabra).
                 pop_calc = f"min(max((t-{st:.2f})/0.30\\,0)\\,1)"
                 row_off = (i_w - (n_words - 1) / 2.0)
-                y_expr = f"(H-h)/2 + {row_off:.2f}*(h+14) + 34*(1-pow({pop_calc}\\,3))"
+                if kinetic_layered:
+                    y_expr = f"34*(1-pow({pop_calc}\\,3))"
+                    _kx = "0"
+                else:
+                    y_expr = f"(H-h)/2 + {row_off:.2f}*(h+14) + 34*(1-pow({pop_calc}\\,3))"
+                    _kx = "(W-w)/2"
                 filter_parts.append(
-                    f"[{cur_v}][kw{i_w}_a]overlay=x='(W-w)/2':y='{y_expr}':"
+                    f"[{cur_v}][kw{i_w}_a]overlay=x='{_kx}':y='{y_expr}':"
                     f"enable='between(t,{st:.2f},{ft_end:.2f})'[v_kw{i_w}]"
                 )
                 cur_v = f"v_kw{i_w}"
@@ -825,6 +854,53 @@ class SceneEngine:
             cy = int(self.H - 330) if not self.is_vertical else int(self.H * 0.72)
             filter_parts.append(f"[{cur_v}][{ch_idx}:v]overlay={cx}:{cy}:enable='between(t,0.5,{duration-0.3:.2f})'[v_chat]")
             cur_v = "v_chat"
+
+        # ── AÑOS FLOTANTES: cuando la locución menciona un año, aparece suelto
+        # (sin tarjeta) con estilo tipográfico rotativo. Nunca rompe la escena.
+        try:
+            if card_duration <= 0:
+                _yrs = self.title_renderer.find_years(speech_text or "")[:2]
+                _busy_until = (0.4 + free_title_dur + 0.3) if free_title_dur > 0 else 0.0
+                _last_end = 0.0
+                for _yi, (_year, _frac) in enumerate(_yrs):
+                    _t = _frac * duration
+                    for (_s0, _s1, _stext) in (sentence_boundaries or []):
+                        if _year in (_stext or ""):
+                            _pos = (_stext.find(_year) / max(1, len(_stext)))
+                            _t = float(_s0) + _pos * (float(_s1) - float(_s0))
+                            break
+                    _t = max(_t, _busy_until, _last_end + 0.2, 0.6)
+                    _yd = 2.6
+                    if _t + _yd > duration - 0.2:
+                        _t = duration - 0.2 - _yd
+                    if _t < _busy_until or _t < _last_end:
+                        continue
+                    _ypng = scene_dir / f"year_{scene.scene_id}_{_yi}.png"
+                    _res = self.title_renderer.render_year_callout(_year, _ypng, style_idx=int(scene.scene_id) + _yi)
+                    if not _res:
+                        continue
+                    _ypath = _res[0]
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(_ypath)])
+                    _y_idx = num_in
+                    num_in += 1
+                    _t_end = _t + _yd
+                    _maxw = int(self.W * (0.30 if not self.is_vertical else 0.55))
+                    filter_parts.append(
+                        f"[{_y_idx}:v]scale=w=min(iw\\,{_maxw}):h=-2,format=rgba,"
+                        f"fade=t=in:st={_t:.2f}:d=0.35:alpha=1,"
+                        f"fade=t=out:st={_t_end - 0.4:.2f}:d=0.4:alpha=1[yr{_yi}_a]"
+                    )
+                    _ycalc = f"min(max((t-{_t:.2f})/0.5\\,0)\\,1)"
+                    _yx = int(self.W * 0.06) if not self.is_vertical else int(self.W * 0.06)
+                    _yy = f"(H-h)/2 + 30*(1-pow({_ycalc}\\,3))" if not self.is_vertical else f"{int(self.H * 0.14)} + 30*(1-pow({_ycalc}\\,3))"
+                    filter_parts.append(
+                        f"[{cur_v}][yr{_yi}_a]overlay=x={_yx}:y='{_yy}':"
+                        f"enable='between(t,{_t:.2f},{_t_end:.2f})'[v_yr{_yi}]"
+                    )
+                    cur_v = f"v_yr{_yi}"
+                    _last_end = _t_end
+        except Exception as _ye:
+            safe_log(f"[SceneEngine] Año flotante omitido: {_ye}")
 
         # Overlay de chips / pastillas referenciales dinámicas sincronizadas con la locución (popup de 3.5s a 4.5s)
         if chips_img_path and chips_img_path.exists():
