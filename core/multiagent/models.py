@@ -23,7 +23,7 @@ class AgentModelConnector:
         self.client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=self.api_key,
-            timeout=180.0,
+            timeout=45.0,
         )
         self.last_reasoning: str = ""
         self.last_content: str = ""
@@ -176,22 +176,24 @@ class AgentModelConnector:
 
 
 def get_architect_model() -> AgentModelConnector:
-    """GLM-5.3: Diseñador de arquitectura, división de tareas y decisiones estructurales."""
+    """Diseñador de arquitectura y decisiones estructurales (Kimi-k3 / GLM-5.3)."""
     key = getattr(settings, "GLM_API_KEY", "") or getattr(settings, "NVIDIA_API_KEY", "")
+    model_name = "z-ai/glm-5.3" if getattr(settings, "GLM_API_KEY", "") else getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
     return AgentModelConnector(
-        model_name="z-ai/glm-5.3",
+        model_name=model_name,
         api_key=key,
-        role_title="Arquitecto Líder (GLM-5.3)",
+        role_title="Arquitecto Líder (Kimi-k3 / GLM)",
     )
 
 
 def get_implementer_model() -> AgentModelConnector:
-    """GLM-5.3-flash: Implementador veloz de componentes, lógica y correcciones."""
+    """Implementador veloz de componentes, lógica y correcciones con razonamiento profundo."""
     key = getattr(settings, "GLM_FLASH_API_KEY", "") or getattr(settings, "NVIDIA_API_KEY", "")
+    model_name = "z-ai/glm-5.3-flash" if getattr(settings, "GLM_FLASH_API_KEY", "") else getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
     return AgentModelConnector(
-        model_name="z-ai/glm-5.3-flash",
+        model_name=model_name,
         api_key=key,
-        role_title="Implementador Developer (GLM-5.3-flash)",
+        role_title="Implementador Developer (Kimi-k3)",
     )
 
 
@@ -206,6 +208,6 @@ def get_auditor_model() -> AgentModelConnector:
 
 
 def get_planner_model() -> AgentModelConnector:
-    """Alias para GLM-5.3-flash como planificador ágil."""
+    """Planificador ágil con razonamiento."""
     return get_implementer_model()
 

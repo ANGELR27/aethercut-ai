@@ -17,8 +17,8 @@ logger = logging.getLogger("aethercut.glm_motion")
 class GLMMotionDirector:
     def __init__(self):
         self.api_key = getattr(settings, "NVIDIA_API_KEY", "")
-        self.model = "z-ai/glm-5.3-flash"
-        self.fallback_model = "z-ai/glm-5.3"
+        self.model = getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
+        self.fallback_model = "moonshotai/kimi-k3"
         self._client: Optional[OpenAI] = None
 
     @property
@@ -27,7 +27,7 @@ class GLMMotionDirector:
             self._client = OpenAI(
                 base_url="https://integrate.api.nvidia.com/v1",
                 api_key=self.api_key,
-                timeout=40.0,
+                timeout=12.0,
             )
         return self._client
 

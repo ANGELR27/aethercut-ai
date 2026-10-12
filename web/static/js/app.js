@@ -1,6 +1,6 @@
 import { $, fmtDuration, ageLabel, eventTime, esc, percent, waitForEvent } from "./modules/utils.js";
 import { setupHudPlayer } from "./modules/player.js";
-import { AgentCopilot } from "./modules/agent_copilot.js";
+import { AgentCopilot } from "./modules/agent_copilot.js?v=2";
 import { initPublishStudio } from "./modules/publish_studio.js";
 import { initTrendRadar } from "./modules/trend_radar.js";
 
@@ -671,6 +671,9 @@ document.addEventListener("DOMContentLoaded", () => {
             renderStudio(data.editor, previewUrl);
         }
 
+        currentStudioProjectId = projectId;
+        loadStudioClips(projectId);
+
         const url = new URL(window.location.href);
         url.searchParams.delete("task");
         url.searchParams.set("project", projectId);
@@ -695,6 +698,139 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     let currentModalProjectId = null;
+    let currentStudioProjectId = null;
+
+    function showToast(message, level = "info") {
+        if (typeof window.showToast === "function") {
+            window.showToast(message, level);
+            return;
+        }
+        const colors = { success: "#10b981", error: "#ef4444", warning: "#f59e0b", info: "#38bdf8" };
+        const icons = { success: "✅", error: "❌", warning: "⚠️", info: "ℹ️" };
+        const color = colors[level] || colors.info;
+        const el = document.createElement("div");
+        el.style.cssText = `position: fixed; bottom: 88px; right: 24px; z-index: 99999;
+            background: #1e293b; border: 1px solid ${color}55; border-left: 3px solid ${color};
+            color: #e2e8f0; padding: 12px 18px; border-radius: 10px; font-size: 13px; font-weight: 500;
+            max-width: 380px; box-shadow: 0 8px 32px rgba(0,0,0,.45); display: flex; gap: 10px; align-items: center;
+            pointer-events: none; transition: opacity .4s ease, transform .4s ease;`;
+        el.innerHTML = `<span>${icons[level] || icons.info}</span><span>${esc(message)}</span>`;
+        document.body.appendChild(el);
+        setTimeout(() => { el.style.opacity = "0"; el.style.transform = "translateX(20px)"; setTimeout(() => el.remove(), 450); }, 4200);
+    }
+
+    async function loadStudioClips(projectId) {
+        if (!projectId) return;
+        currentStudioProjectId = projectId;
+        const grid = $("studioClipsGrid");
+        const badge = $("studioClipsCountBadge");
+        if (!grid) return;
+
+        try {
+            const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/clips`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const clips = data.clips || [];
+
+            if (badge) {
+                badge.textContent = `${clips.length} ${clips.length === 1 ? "clip" : "clips"}`;
+            }
+
+            if (clips.length > 0) {
+                grid.innerHTML = clips.map((c, i) => `
+                    <article class="studio-clip-card">
+                        <div class="studio-clip-media-wrap">
+                            <video src="${c.url}" preload="metadata" playsinline controls></video>
+                            <span class="studio-clip-badge-pill">📱 Short #${i + 1}</span>
+                            <span class="studio-clip-size-badge">${c.size_mb || 0} MB</span>
+                        </div>
+                        <div class="studio-clip-body">
+                            <h5 class="studio-clip-title" title="${esc(c.name || '')}">${esc(c.name || `Clip #${i+1}`)}</h5>
+                            <div class="studio-clip-meta">
+                                <span>⚡ 9:16 Vertical</span>
+                                <span>·</span>
+                                <span>TikTok &amp; Reels</span>
+                            </div>
+                        </div>
+                        <div class="studio-clip-actions">
+                            <a href="${c.url}" target="_blank" class="studio-clip-btn view" title="Ver en nueva ventana">
+                                ▶ Ver Completo
+                            </a>
+                            <a href="${c.url}" download="${esc(c.filename || `short_${i+1}.mp4`)}" class="studio-clip-btn download" title="Descargar video vertical 9:16">
+                                📥 Descargar .mp4
+                            </a>
+                        </div>
+                    </article>
+                `).join("");
+            } else {
+                grid.innerHTML = `
+                    <div class="studio-clips-empty">
+                        <div style="font-size: 32px;">📱✂️</div>
+                        <strong style="color: #f1f5f9; font-size: 14px;">Aún no se han generado clips 9:16 de este video</strong>
+                        <p style="color: #94a3b8; font-size: 12px; margin: 0; max-width: 480px;">
+                            KAI puede analizar la línea de tiempo y recortar automáticamente ganchos y momentos clave en formato vertical 9:16 listos para TikTok, Instagram Reels y YouTube Shorts.
+                        </p>
+                        <button type="button" class="subcard-pill-btn active" id="studioClipsEmptyExtractBtn" style="background: linear-gradient(135deg, #a855f7, #6366f1); color: #fff; font-weight: 700; border: none; padding: 8px 18px; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 14px rgba(168,85,247,0.35); margin-top: 6px;">
+                            ⚡ Extraer Clips 9:16 con IA ahora
+                        </button>
+                    </div>
+                `;
+                $("studioClipsEmptyExtractBtn")?.addEventListener("click", () => extractStudioClipsHandler(projectId));
+            }
+        } catch (e) {
+            console.error("Error loading studio clips:", e);
+        }
+    }
+
+    async function extractStudioClipsHandler(projectId) {
+        const targetId = projectId || currentStudioProjectId || observedTaskId;
+        if (!targetId) {
+            showToast("No hay un proyecto activo para extraer clips.", "warning");
+            return;
+        }
+
+        const btn = $("studioExtractClipsBtn");
+        const emptyBtn = $("studioClipsEmptyExtractBtn");
+        const loading = $("studioClipsLoading");
+
+        if (btn) btn.disabled = true;
+        if (emptyBtn) emptyBtn.disabled = true;
+        if (loading) {
+            loading.hidden = false;
+            loading.style.display = "flex";
+        }
+
+        showToast("✂️ Extrayendo y recortando clips 9:16 con subtítulos dinámicos...", "info");
+
+        try {
+            const resp = await fetch(`/api/projects/${encodeURIComponent(targetId)}/extract-clips`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                showToast(`🎉 ¡${data.clips?.length || 0} clips verticales 9:16 generados con éxito!`, "success");
+                await loadStudioClips(targetId);
+            } else {
+                showToast(data.detail || data.message || "No se pudieron extraer clips.", "error");
+            }
+        } catch (err) {
+            showToast("Error de conexión al extraer clips.", "error");
+        } finally {
+            if (btn) btn.disabled = false;
+            if (emptyBtn) emptyBtn.disabled = false;
+            if (loading) {
+                loading.hidden = true;
+                loading.style.display = "none";
+            }
+        }
+    }
+
+    // Botón de extracción de clips en la Mesa & Timeline
+    $("studioExtractClipsBtn")?.addEventListener("click", () => extractStudioClipsHandler());
+
+    window.loadStudioClips = loadStudioClips;
+    window.extractStudioClips = extractStudioClipsHandler;
 
     async function loadProjectClips(projectId) {
         const grid = $("modalClipsGrid");
@@ -1049,13 +1185,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 openVideoModal(project);
             });
 
-            // Botón Abrir en Estudio (Editar)
+            // Botón Abrir en Estudio (Editar y ver Clips)
             const editStudioBtn = document.createElement("button");
             editStudioBtn.type = "button";
-            editStudioBtn.className = "yt-card-del-btn";
-            editStudioBtn.style.color = "#94a3b8";
-            editStudioBtn.title = "Cargar en mesa de edición y controles";
-            editStudioBtn.innerHTML = `⚙️`;
+            editStudioBtn.className = "yt-open-pill-btn";
+            editStudioBtn.style.color = "#38bdf8";
+            editStudioBtn.style.borderColor = "rgba(56, 189, 248, 0.35)";
+            editStudioBtn.style.background = "rgba(56, 189, 248, 0.12)";
+            editStudioBtn.title = "Cargar en la mesa de edición y ver sus clips generados debajo";
+            editStudioBtn.innerHTML = `<span>Mesa &amp; Clips</span> <span style="font-size:11px;">🛠️</span>`;
             editStudioBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 openProject(project.id).catch((error) => console.error("Error abriendo en estudio:", error));
@@ -1195,7 +1333,11 @@ document.addEventListener("DOMContentLoaded", () => {
             emptyFeed.hidden = false;
             $("activityCount").textContent = "0 eventos";
             const consoleFeed = $("telemetryConsoleFeed");
+            const consoleFeedStudio = $("telemetryConsoleFeedStudio");
             if (consoleFeed) consoleFeed.innerHTML = '<div class="terminal-empty">Esperando el primer evento de la transmisión...</div>';
+            if (consoleFeedStudio) consoleFeedStudio.innerHTML = '<div class="terminal-empty">Esperando el primer evento de la transmisión...</div>';
+            const studioEvCount = $("studioEventCount");
+            if (studioEvCount) studioEvCount.textContent = "0";
             return;
         }
         emptyFeed.hidden = true;
@@ -1223,16 +1365,17 @@ document.addEventListener("DOMContentLoaded", () => {
         $("activityCount").textContent = `${list.length} ${list.length === 1 ? "evento" : "eventos"}`;
         feed.scrollTop = feed.scrollHeight;
 
-        // ALIMENTAR EL TERMINAL DEDICADO DE MISSION CONTROL
+        // ALIMENTAR EL TERMINAL DEDICADO DE MISSION CONTROL Y STUDIO SIDEBOARD
         const consoleFeed = $("telemetryConsoleFeed");
+        const consoleFeedStudio = $("telemetryConsoleFeedStudio");
         const eventCountTag = $("telemetryEventCount");
+        const studioEventCountTag = $("studioEventCount");
         if (eventCountTag) eventCountTag.textContent = `${list.length} eventos`;
-        if (consoleFeed) {
-            consoleFeed.replaceChildren();
+        if (studioEventCountTag) studioEventCountTag.textContent = `${list.length}`;
+        if (consoleFeed || consoleFeedStudio) {
+            if (consoleFeed) consoleFeed.replaceChildren();
+            if (consoleFeedStudio) consoleFeedStudio.replaceChildren();
             list.forEach((event, idx) => {
-                const entry = document.createElement("div");
-                entry.className = "terminal-log-entry" + (idx === list.length - 1 ? " entry-highlight" : "");
-                
                 const stepIcons = {
                     research: "🔍",
                     script: "📝",
@@ -1245,23 +1388,33 @@ document.addEventListener("DOMContentLoaded", () => {
                     cancelled: "⏹️",
                 };
                 const icon = stepIcons[event.step] || "⚡";
+                const isHighlight = idx === list.length - 1;
 
-                const timeSpan = document.createElement("span");
-                timeSpan.className = "terminal-log-time";
-                timeSpan.textContent = `[${eventTime(event.at)}]`;
+                function createEntry() {
+                    const entry = document.createElement("div");
+                    entry.className = "terminal-log-entry" + (isHighlight ? " entry-highlight" : "");
 
-                const iconSpan = document.createElement("span");
-                iconSpan.className = "terminal-log-icon";
-                iconSpan.textContent = icon;
+                    const timeSpan = document.createElement("span");
+                    timeSpan.className = "terminal-log-time";
+                    timeSpan.textContent = `[${eventTime(event.at)}]`;
 
-                const textSpan = document.createElement("span");
-                textSpan.className = "terminal-log-text";
-                textSpan.textContent = event.message || "Procesando...";
+                    const iconSpan = document.createElement("span");
+                    iconSpan.className = "terminal-log-icon";
+                    iconSpan.textContent = icon;
 
-                entry.append(timeSpan, iconSpan, textSpan);
-                consoleFeed.appendChild(entry);
+                    const textSpan = document.createElement("span");
+                    textSpan.className = "terminal-log-text";
+                    textSpan.textContent = event.message || "Procesando...";
+
+                    entry.append(timeSpan, iconSpan, textSpan);
+                    return entry;
+                }
+
+                if (consoleFeed) consoleFeed.appendChild(createEntry());
+                if (consoleFeedStudio) consoleFeedStudio.appendChild(createEntry());
             });
-            consoleFeed.scrollTop = consoleFeed.scrollHeight;
+            if (consoleFeed) consoleFeed.scrollTop = consoleFeed.scrollHeight;
+            if (consoleFeedStudio) consoleFeedStudio.scrollTop = consoleFeedStudio.scrollHeight;
         }
 
         // EXTRAER Y ACTUALIZAR TABLERO VISUAL DE ESCENAS Y MONITOR EN VIVO
@@ -1640,8 +1793,13 @@ document.addEventListener("DOMContentLoaded", () => {
         const telemetryCard = $("liveTelemetryCard");
         const streamerPane = $("streamerTabPane");
         if (telemetryCard) {
+            const studioSec = $("studioSection");
+            const studioCancelBtn = $("studioCancelBtn");
+
             if (active) {
-                telemetryCard.hidden = false;
+                // Unificamos en la mesa de estudio (studioSection) para evitar tener 2 secciones gigantes duplicadas
+                telemetryCard.hidden = true;
+                if (studioSec) studioSec.hidden = false;
                 if (streamerPane && !window._userMinimizedTelemetry) {
                     streamerPane.hidden = true;
                 }
@@ -1671,6 +1829,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
 
                 // Sincronizar el Tablero de Telemetría integrado en la Mesa & Timeline
+                const studioTitle = $("studioTitle");
+                if (studioTitle && state.file_name) {
+                    studioTitle.textContent = state.file_name;
+                }
                 const studioStepBadge = $("studioTelemetryStepBadge");
                 if (studioStepBadge) {
                     studioStepBadge.textContent = (stageLabels[step] || step).toUpperCase();
@@ -1679,9 +1841,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (studioPct) {
                     studioPct.textContent = `${Math.round(percent)}%`;
                 }
+                const studioBarFill = $("studioBarFill");
+                if (studioBarFill) {
+                    studioBarFill.style.width = `${percent}%`;
+                }
                 const studioMsg = $("studioTelemetryMsg");
                 if (studioMsg) {
                     studioMsg.textContent = state.message || "KAI procesando en vivo...";
+                }
+                if (studioCancelBtn) {
+                    studioCancelBtn.style.display = "inline-flex";
                 }
 
                 // Si la Mesa & Timeline no tiene pistas cargadas todavía, intentar poblar provisionalmente desde /api/projects/{taskId}/broadcast-plan
@@ -1730,6 +1899,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             } else {
                 telemetryCard.hidden = true;
+                if (studioCancelBtn) {
+                    studioCancelBtn.style.display = "none";
+                }
                 if (streamerPane) {
                     streamerPane.hidden = false;
                 }
@@ -2213,6 +2385,18 @@ document.addEventListener("DOMContentLoaded", () => {
             };
         }
 
+        // Estado de Publicación Automática
+        if (result.youtube_upload && result.youtube_upload.video_url) {
+            if ($("topbarSaveStatus")) {
+                $("topbarSaveStatus").innerHTML = `<a href="${result.youtube_upload.video_url}" target="_blank" style="color:#22c55e; text-decoration:none; font-weight:700;">🚀 PUBLICADO EN YOUTUBE</a>`;
+            }
+        } else if (result.auto_publish_prepared) {
+            const chName = (result.auto_publish_prepared.channel && result.auto_publish_prepared.channel.name) || "Canal";
+            if ($("topbarSaveStatus")) {
+                $("topbarSaveStatus").innerHTML = `<span style="color:#38bdf8; font-weight:600;">🧭 Listo para ${chName}</span>`;
+            }
+        }
+
         // 12. Comprobar Cola de Transmisiones (Broadcast Queue)
         if (window.__aetherQueue && window.__aetherQueue.length > 0) {
             const nextTopic = window.__aetherQueue.shift();
@@ -2241,6 +2425,10 @@ document.addEventListener("DOMContentLoaded", () => {
         // En lugar del diseño viejo, mantener results oculto y sincronizar Mesa & Timeline
         results.hidden = true;
         switchMode("studio");
+        if (taskId) {
+            currentStudioProjectId = taskId;
+            loadStudioClips(taskId);
+        }
         setTimeout(() => {
             const studioSec = $("studioSection");
             if (studioSec) {
@@ -3326,6 +3514,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 audio_normalize: audioNormalize,
                 outro_enabled: outroEnabled,
                 crf: crfQuality,
+                auto_publish: $("kaiAutoPublish") ? $("kaiAutoPublish").checked : false,
             };
 
             try {
@@ -3595,38 +3784,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Interactividad de pestañas del tablero de telemetría en la Mesa
     const btnSbTabScenes = $("btnSbTabScenes");
+    const btnSbTabTerminal = $("btnSbTabTerminal");
     const btnSbTabCards = $("btnSbTabCards");
     const btnSbTabFacts = $("btnSbTabFacts");
     const studioSbPaneScenes = $("studioSbPaneScenes");
+    const studioSbPaneTerminal = $("studioSbPaneTerminal");
     const studioSbPaneCards = $("studioSbPaneCards");
     const studioSbPaneFacts = $("studioSbPaneFacts");
 
-    if (btnSbTabScenes && btnSbTabCards && btnSbTabFacts) {
-        btnSbTabScenes.addEventListener("click", () => {
-            btnSbTabScenes.classList.add("active");
-            btnSbTabCards.classList.remove("active");
-            btnSbTabFacts.classList.remove("active");
-            if (studioSbPaneScenes) { studioSbPaneScenes.hidden = false; studioSbPaneScenes.classList.add("active"); }
-            if (studioSbPaneCards) { studioSbPaneCards.hidden = true; studioSbPaneCards.classList.remove("active"); }
-            if (studioSbPaneFacts) { studioSbPaneFacts.hidden = true; studioSbPaneFacts.classList.remove("active"); }
-        });
-        btnSbTabCards.addEventListener("click", () => {
-            btnSbTabCards.classList.add("active");
-            btnSbTabScenes.classList.remove("active");
-            btnSbTabFacts.classList.remove("active");
-            if (studioSbPaneCards) { studioSbPaneCards.hidden = false; studioSbPaneCards.classList.add("active"); }
-            if (studioSbPaneScenes) { studioSbPaneScenes.hidden = true; studioSbPaneScenes.classList.remove("active"); }
-            if (studioSbPaneFacts) { studioSbPaneFacts.hidden = true; studioSbPaneFacts.classList.remove("active"); }
-        });
-        btnSbTabFacts.addEventListener("click", () => {
-            btnSbTabFacts.classList.add("active");
-            btnSbTabScenes.classList.remove("active");
-            btnSbTabCards.classList.remove("active");
-            if (studioSbPaneFacts) { studioSbPaneFacts.hidden = false; studioSbPaneFacts.classList.add("active"); }
-            if (studioSbPaneScenes) { studioSbPaneScenes.hidden = true; studioSbPaneScenes.classList.remove("active"); }
-            if (studioSbPaneCards) { studioSbPaneCards.hidden = true; studioSbPaneCards.classList.remove("active"); }
+    function setStudioSideboardTab(activeTab) {
+        const tabs = [
+            { btn: btnSbTabScenes, pane: studioSbPaneScenes, id: "scenes" },
+            { btn: btnSbTabTerminal, pane: studioSbPaneTerminal, id: "terminal" },
+            { btn: btnSbTabCards, pane: studioSbPaneCards, id: "cards" },
+            { btn: btnSbTabFacts, pane: studioSbPaneFacts, id: "facts" },
+        ];
+        tabs.forEach(t => {
+            const isMatch = t.id === activeTab;
+            if (t.btn) t.btn.classList.toggle("active", isMatch);
+            if (t.pane) {
+                t.pane.hidden = !isMatch;
+                t.pane.classList.toggle("active", isMatch);
+            }
         });
     }
+
+    if (btnSbTabScenes) btnSbTabScenes.addEventListener("click", () => setStudioSideboardTab("scenes"));
+    if (btnSbTabTerminal) btnSbTabTerminal.addEventListener("click", () => setStudioSideboardTab("terminal"));
+    if (btnSbTabCards) btnSbTabCards.addEventListener("click", () => setStudioSideboardTab("cards"));
+    if (btnSbTabFacts) btnSbTabFacts.addEventListener("click", () => setStudioSideboardTab("facts"));
 
     // Framer Motion Micro-Animations
     if (window.Motion) {

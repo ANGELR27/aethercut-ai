@@ -90,6 +90,31 @@ export const ui_action = tool({
   },
 })
 
+export const live_reload = tool({
+  description:
+    "Muestra EN VIVO en la interfaz de AetherCut un archivo que ya editaste en disco. " +
+    "Con .css recarga los estilos sin refrescar la página (el usuario no pierde el estado); " +
+    "con .js/.html recarga la página completa. Llámala justo después de cada edit/write en web/. " +
+    "Ejemplo path: web/static/css/theme/matte-dark.css",
+  args: {
+    path: tool.schema.string().describe("Ruta relativa del archivo editado en disco"),
+    css_code: tool.schema
+      .string()
+      .optional()
+      .describe("Contenido CSS nuevo para inyección inmediata además del refresco de hojas de estilo (solo .css)"),
+    reload: tool.schema.boolean().optional().describe("Fuerza recarga completa de la página (por defecto: true si no es .css)"),
+  },
+  async execute(args, ctx) {
+    const isCss = args.path.toLowerCase().endsWith(".css")
+    return enqueue(ctx.sessionID, {
+      type: "edit_file",
+      path: args.path,
+      css_code: isCss ? args.css_code : undefined,
+      reload: args.reload ?? !isCss,
+    })
+  },
+})
+
 export const list_projects = tool({
   description: "Lista los proyectos de video existentes (id, nombre, estado).",
   args: {},

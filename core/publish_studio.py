@@ -146,6 +146,15 @@ class PublishStudio:
         topic = result.get("topic") or (document.get("options") or {}).get("topic") or ""
         title = document.get("original_name") or result.get("title") or topic or "Producción KAI"
         duration = result.get("duration") or (self._probe_duration(video) if video else 0.0)
+        channel_classification = None
+        all_channels = []
+        try:
+            from core.channel_manager import ChannelManager
+            channel_classification = ChannelManager.classify_content(topic=topic or title)
+            all_channels = ChannelManager.list_channels()
+        except Exception:
+            pass
+
         return {
             "project_id": self.project_id,
             "video_found": bool(video),
@@ -155,6 +164,8 @@ class PublishStudio:
             "topic": topic,
             "duration": duration,
             "thumbnail_url": self.current_thumbnail_url(),
+            "channel_classification": channel_classification,
+            "channels": all_channels,
         }
 
     # ------------------------------------------------------- metadatos con IA

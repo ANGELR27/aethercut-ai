@@ -52,6 +52,23 @@
 
             <!-- COLUMNA DERECHA: CANAL + METADATOS + PUBLICACIÓN -->
             <section class="publish-right-col">
+                <!-- SELECTOR MULTI-CANAL INTELIGENTE (ENRUTAMIENTO IA) -->
+                <div class="pub-block" style="margin-bottom: 12px; background: rgba(12, 13, 18, 0.7); border: 1px solid rgba(255, 148, 54, 0.3); border-radius: 10px; padding: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #ff9436; text-transform: uppercase; letter-spacing: 0.5px;">🎯 Canal de Destino</span>
+                        <span id="pubChannelBadge" class="pub-counter" style="color: #cbd5e1; font-weight: 600;">Detectando nicho...</span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <select id="pubChannelSelect" class="select-input" style="flex: 1; font-size: 13px; font-weight: 600; background: #0c0d12; border-color: rgba(255, 148, 54, 0.4); color: #fff;">
+                            <option value="divulgacion">🔬 Divulgación & Descubrimientos</option>
+                            <option value="curiosidades">💡 Curiosidades & Tops</option>
+                            <option value="reacciones">🎙️ Reacciones & Casos Virales</option>
+                            <option value="tecnologia">⚡ Tecnología & Futuro IA</option>
+                        </select>
+                        <span id="pubClassifyChip" style="font-size: 11px; padding: 4px 8px; border-radius: 6px; background: rgba(255, 148, 54, 0.15); border: 1px solid rgba(255, 148, 54, 0.4); color: #ff9436; white-space: nowrap;">✨ IA Sugerido</span>
+                    </div>
+                </div>
+
                 <!-- ESTADO DEL CANAL -->
                 <div id="pubChannelBox" class="pub-channel-box">
                     <div class="pub-channel-info" id="pubChannelInfo">

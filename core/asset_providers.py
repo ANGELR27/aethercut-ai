@@ -311,14 +311,23 @@ class YouTubeReactionAssetProvider(AssetProvider):
                 start_slice = 8 + (abs(hash(query)) % 15)
                 end_slice = start_slice + 14
                 ydl_opts = {
-                    'format': 'bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+                    'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]/best',
                     'outtmpl': str(target_path.with_suffix('')) + '.%(ext)s',
                     'download_ranges': yt_dlp.utils.download_range_func(None, [(start_slice, end_slice)]),
                     'force_keyframes_at_cuts': False,
                     'quiet': True,
                     'no_warnings': True,
                     'socket_timeout': 18,
+                    'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
+                    'postprocessor_args': {'ffmpeg': ['-threads', '2']},
                 }
+                # Si el usuario colocó un cookies.txt en storage o base, cargarlo automáticamente
+                for c_cand in [settings.STORAGE_DIR / "cookies.txt", settings.BASE_DIR / "cookies.txt", settings.BASE_DIR / "assets" / "cookies.txt"]:
+                    if c_cand.is_file() and c_cand.stat().st_size > 10:
+                        ydl_opts['cookiefile'] = str(c_cand.resolve())
+                        print(f"[YouTubeReactionProvider] 🍪 Usando archivo de cookies: {c_cand.name}", flush=True)
+                        break
+
                 # Priorizar material reciente en actualidad
                 import datetime as _dt
                 cur_yr = _dt.date.today().year
@@ -346,6 +355,20 @@ class YouTubeReactionAssetProvider(AssetProvider):
                         final_mp4 = target_path.with_suffix(".mp4")
                         chosen.replace(final_mp4)
                         chosen = final_mp4
+
+                    # Validar que el video contenga frames decodificables reales
+                    try:
+                        import subprocess
+                        chk = subprocess.run(
+                            ["ffmpeg", "-i", str(chosen), "-t", "0.5", "-f", "null", "-"],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if "Output file is empty" in chk.stderr:
+                            print(f"[YouTubeReactionProvider] Clip descargado no contiene frames decodificables, descartando: {chosen.name}", flush=True)
+                            chosen.unlink(missing_ok=True)
+                            return None
+                    except Exception:
+                        pass
 
                     print(f"[YouTubeReactionProvider] Clip H.264 limpio obtenido: {chosen.name} ({chosen.stat().st_size // 1024} KB)", flush=True)
                     return chosen

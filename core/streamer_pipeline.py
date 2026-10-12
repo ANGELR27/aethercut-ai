@@ -84,6 +84,34 @@ STYLE_PROMPTS: Dict[str, str] = {
 - Tono: Competitivo, de cuenta regresiva emocionante (ej. Puesto 10 al Puesto 1).
 - Estructura: Cada posición tiene nombre claro, motivo del puesto, datos o cifras específicas que justifican su lugar, y sorpresa para el podio.""",
 
+    "reaccion": """ESTILO DE COMUNICACIÓN: REACCIÓN & ANÁLISIS EN VIVO (MÓDULO A)
+- Tono: Espontáneo, atento, crítico y analítico.
+- Dinámica: Presenta el clip o noticia, reacciona genuinamente y aporta análisis propio sustancial. No se limita a narrar lo que ya se ve; descubre detalles que el espectador pasó por alto.""",
+
+    "review": """ESTILO DE COMUNICACIÓN: REVIEW, PRUEBA & COMPARATIVA (MÓDULO E)
+- Tono: Imparcial, técnico, transparente y orientado a resolver la duda del consumidor.
+- Estructura: Problema a resolver, criterios de evaluación, ventajas, desventajas, limitaciones reales y recomendación final honesta.""",
+
+    "gaming": """ESTILO DE COMUNICACIÓN: GAMING, GAMEPLAY & DESAFÍO (MÓDULO F)
+- Tono: Enérgico, inmersivo, competitivo y emocionante.
+- Estructura: Objetivo claro, reglas del desafío, obstáculos inesperados, decisiones bajo presión y desenlace épico.""",
+
+    "tutorial": """ESTILO DE COMUNICACIÓN: TUTORIAL & GUÍA EDUCATIVA (MÓDULO H)
+- Tono: Didáctico, claro, paciente y práctico.
+- Estructura: Resultado prometido, requisitos previos, pasos secuenciales comprobables, errores comunes a evitar y demostración de éxito verificable.""",
+
+    "biografia": """ESTILO DE COMUNICACIÓN: BIOGRAFÍA, HISTORIAS & CASOS REALES (MÓDULO G)
+- Tono: Documental, humano, reflexivo y riguroso.
+- Estructura: Contexto y protagonistas, decisiones críticas documentadas, consecuencias históricas y legado perdurable sin inventar hechos.""",
+
+    "misterio": """ESTILO DE COMUNICACIÓN: MISTERIOS, ENIGMAS & INVESTIGACIÓN (MÓDULO C)
+- Tono: Intrigante, analítico, atmosférico y basado en evidencias.
+- Estructura: Incógnita inicial, pistas progresivas, contraste de hipótesis rivales y revelación de lo que la ciencia y la historia pueden confirmar.""",
+
+    "shorts": """ESTILO DE COMUNICACIÓN: SHORT VIRAL VERTICAL (MÓDULO K)
+- Tono: Dinámico, directo, ultracompacto y visual.
+- Estructura: Gancho visual instantáneo en el segundo 1, una sola idea contundente desarrollada al grano y remate satisfactorio sin relleno.""",
+
     "hibrido": """ESTILO DE COMUNICACIÓN: COMBO MULTI-ESTILO (DIRECTO + HUMOR + SARCASMO + NARRATIVA)
 - Tono: Una mezcla explosiva y súper entretenida: arranca directo al grano, mete comentarios sarcásticos y cómicos, y relata los hechos con tensión inmersiva."""
 }
@@ -135,6 +163,7 @@ class StreamerOptions:
     intro_style: str = "kai"       # none | kai | minimal | broadcast
     outro_enabled: bool = True     # Agregar segmento de cierre con pantalla de like/sub
     bgm_track: str = "default"     # default | tension | upbeat | ambient | silent
+    auto_publish: bool = False     # Publicar automáticamente en YouTube al finalizar renderizado
 
 
 def build_creative_hints(options: "StreamerOptions") -> str:
@@ -288,6 +317,16 @@ class StreamerPipeline:
         self._state("render", 60.0, f"Scene Engine dirigiendo y grabando {len(plan.scenes)} escenas...", live_scenes=scenes_preview_data)
         output_file = settings.OUTPUTS_DIR / f"{self.task_id}_master.mp4"
 
+        # Director de Estilos: definir paleta y tipografía automáticamente según el tono del tema
+        from core.ai_remotion_generator import AIStyleDirector
+        style_director = AIStyleDirector(self.llm)
+        theme_spec = style_director.determine_style(
+            topic=self.options.topic,
+            style_mode=self.options.style,
+            extra_notes=getattr(self.options, "extra_notes", ""),
+        )
+        safe_log(f"[StyleDirector] 🎨 Paleta seleccionada: {theme_spec['name']} ({theme_spec['primary']} / {theme_spec['accent']}) | Tipografía/Subtítulos: {theme_spec['sub_style']}")
+
         scene_engine = SceneEngine(
             workdir=self.workdir,
             aspect_ratio=self.options.aspect_ratio,
@@ -302,6 +341,7 @@ class StreamerPipeline:
             color_grade=getattr(self.options, 'color_grade', 'cinema'),
             bgm_volume=getattr(self.options, 'bgm_volume', 0.06),
             bgm_track=getattr(self.options, 'bgm_track', 'default'),
+            style_spec=theme_spec,
         )
 
         def scene_progress(pct: float, msg: str):
@@ -396,12 +436,13 @@ class StreamerPipeline:
             if not candidate_scene and plan.scenes:
                 candidate_scene = self.workdir / "scene_1" / "scene_1.mp4"
 
-            if candidate_scene and candidate_scene.exists():
                 import subprocess
                 subprocess.run([
                     "ffmpeg", "-y", "-i", str(candidate_scene),
                     "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
+                    "-threads", "2",
+                    "-max_muxing_queue_size", "1024",
                     "-c:a", "aac", "-b:a", "192k", str(short_output)
                 ], capture_output=True, timeout=30)
         except Exception as exc:
@@ -451,6 +492,44 @@ class StreamerPipeline:
             "thumbnail_url": f"/media/{thumb_output.name}" if thumb_output.exists() else None,
             "short_video_url": f"/media/{short_output.name}" if short_output.exists() else None,
         }
+
+        # 7. Publicación automática desatendida o preparación autónoma multi-canal
+        if getattr(self.options, 'auto_publish', False) or getattr(settings, 'AUTO_PUBLISH', False):
+            try:
+                from core.publish_studio import PublishStudio
+                from core.channel_manager import ChannelManager
+                import core.youtube_oauth as yt
+                
+                studio = PublishStudio(self.task_id)
+                classification = ChannelManager.classify_content(self.options.topic)
+                target_ch = classification.get("channel") or {}
+                meta = studio.generate_metadata()
+                
+                safe_log(f"[AutoPublish] 🎯 Canal clasificado: {target_ch.get('name')} (Confianza: {classification.get('confidence', 0):.0%})")
+                
+                if yt.is_connected():
+                    self._state("publish", 98.0, f"Publicando automáticamente en YouTube ({target_ch.get('name')})...")
+                    upload_res = yt.upload_video(
+                        video_path=output_file,
+                        title=meta["title"],
+                        description=meta["description"],
+                        tags=meta["tags"],
+                        category_id=str(target_ch.get("category_id", "28")),
+                    )
+                    if thumb_output.exists():
+                        yt.set_thumbnail(upload_res["video_id"], thumb_output)
+                    result_payload["youtube_upload"] = upload_res
+                    safe_log(f"[AutoPublish] 🚀 ¡Video publicado en YouTube con éxito! {upload_res.get('video_url')}")
+                else:
+                    result_payload["auto_publish_prepared"] = {
+                        "channel": target_ch,
+                        "metadata": meta,
+                        "status": "ready_for_assisted",
+                    }
+                    safe_log(f"[AutoPublish] 🧭 Paquete SEO y miniatura preparados para publicación asistida en {target_ch.get('name')}")
+            except Exception as _ap_err:
+                safe_log(f"[AutoPublish] No se pudo completar subida desatendida: {_ap_err}")
+
         self.project_store.set_status("done", result=result_payload, preview_file=str(output_file))
         self._state("done", 100.0, "¡Transmisión de KAI masterizada exitosamente!", result=result_payload)
         return result_payload
@@ -508,17 +587,21 @@ class StreamerPipeline:
                 def do_download():
                     import yt_dlp
                     opts = {
-                        # Mismo encadenado de formatos que el proveedor B-Roll
-                        # (bestvideo+bestaudio): el formato simple 'best[height<=1080]'
-                        # falla sin runtime JavaScript disponible.
-                        "format": "bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+                        "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]/best",
                         "outtmpl": str(video_file),
                         "quiet": True,
                         "no_warnings": True,
                         "noplaylist": True,
                         "noprogress": True,
-                        "socket_timeout": 18,
+                        "socket_timeout": 20,
+                        "extractor_args": {"youtube": {"player_client": ["android", "ios"]}},
+                        "postprocessor_args": {"ffmpeg": ["-threads", "2"]},
                     }
+                    for c_cand in [settings.STORAGE_DIR / "cookies.txt", settings.BASE_DIR / "cookies.txt", settings.BASE_DIR / "assets" / "cookies.txt"]:
+                        if c_cand.is_file() and c_cand.stat().st_size > 10:
+                            opts["cookiefile"] = str(c_cand.resolve())
+                            safe_log(f"[Streamer] 🍪 Usando archivo de cookies: {c_cand.name}")
+                            break
                     with yt_dlp.YoutubeDL(opts) as ydl:
                         ydl.download([source_url])
 

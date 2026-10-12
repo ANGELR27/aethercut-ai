@@ -13,7 +13,7 @@ from cancellation import CancellationRequested
 # modelo que respondió y conservamos los demás para recuperarnos de una caída.
 # 3.8 agotó el tiempo incluso con una consulta mínima durante la comprobación
 # del 2026-10-05. Se excluye del camino crítico para no atascar cada proyecto.
-FALLBACK_MODELS = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
+FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
 
 
 def safe_log(msg: str) -> None:
@@ -59,7 +59,7 @@ class LLMClient:
         # We don't initialize a single client, we will initialize it per request 
         # or grab the next one to distribute the load.
         
-        primary = primary_model or settings.GEMINI_MODEL or "gemini-3.6-flash"
+        primary = primary_model or settings.GEMINI_MODEL or "gemini-flash-lite-latest"
         self.models: List[str] = [primary] + [m for m in FALLBACK_MODELS if m != primary]
         self.last_model_used: Optional[str] = None
         self._active_client = None
@@ -126,7 +126,7 @@ class LLMClient:
     def generate(self, contents: Any, json_mode: bool = False, attempts_per_model: int = 1,
                  use_search: bool = False, progress: Optional[Callable[[str], None]] = None,
                  client=None, cancel_event=None, max_models: Optional[int] = None,
-                 deadline_sec: Optional[float] = None) -> str:
+                 deadline_sec: Optional[float] = None, thinking_budget: Optional[int] = None) -> str:
         def report(message: str) -> None:
             if progress:
                 try:
@@ -134,10 +134,16 @@ class LLMClient:
                 except Exception as exc:
                     safe_log(f"[LLM] No se pudo actualizar el progreso: {exc}")
 
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json" if json_mode else None,
-            tools=[{"google_search": {}}] if use_search else None
-        )
+        config_kwargs: dict = {
+            "response_mime_type": "application/json" if json_mode else None,
+            "tools": [{"google_search": {}}] if use_search else None,
+        }
+        if thinking_budget is not None:
+            try:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+            except Exception as _e:
+                safe_log(f"[LLM] Aviso: thinking_config no admitido en entorno actual: {_e}")
+        config = types.GenerateContentConfig(**config_kwargs)
         last_exc: Optional[Exception] = None
         req_deadline = deadline_sec if deadline_sec is not None else self.REQUEST_DEADLINE_SEC
         deadline = time.monotonic() + req_deadline

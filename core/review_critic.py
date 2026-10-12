@@ -24,30 +24,25 @@ class FlashContentReviewer:
             self.model = get_implementer_model()
             self.available = bool(self.model.api_key)
         except Exception as e:
-            safe_log(f"[FlashReviewer] No disponible: {e}")
             self.model = None
             self.available = False
 
     def review_and_optimize_plan(self, plan_dict: Dict[str, Any], topic: str) -> Dict[str, Any]:
-        """Audita el plan del director: pule la locución TTS, afina queries visuales y corrige incoherencias."""
-        if not self.available or not self.model:
-            safe_log("[FlashReviewer] GLM-5.3-flash no configurado, manteniendo plan original.")
-            return plan_dict
-
+        """Audita el plan del director: pule la locución TTS, afina queries visuales y corrige incoherencias con razonamiento profundo."""
         scenes = plan_dict.get("scenes", [])
         if not scenes:
             return plan_dict
 
-        safe_log(f"[FlashReviewer] ⚡ GLM-5.3-flash auditando guión y recursos de {len(scenes)} escenas...")
+        safe_log(f"[FlashReviewer] ⚡ Auditando y razonando guión de {len(scenes)} escenas para máxima retención...")
 
-        prompt_review = f"""Eres el Auditor y Editor Jefe de Producción Audiovisual (GLM-5.3-flash).
+        prompt_review = f"""Eres el Auditor y Editor Jefe de Producción Audiovisual de élite.
 Tu objetivo es elevar la calidad de este plan de video sobre el tema: "{topic}".
 
 REVISA Y OPTIMIZA CADA ESCENA:
 1. "speech" (Locución para síntesis de voz):
    - Elimina muletillas o frases acartonadas.
    - Corrige puntuación y ritmo para que la voz neuronal suene natural, fluida y sin frenazos.
-   - Si una escena tiene números o siglas complejas, escríbelas en formato fonético fácil para locución (ej: "diez por ciento" en vez de "10%", "la N-A-S-A" en vez de "NASA" si conviene).
+   - Números y siglas: Escribe números en palabras si conviene (ej: "diez por ciento" en vez de "10%"). NUNCA uses guiones entre las letras de una sigla (escribe "ADN", "NASA", "IA", NUNCA "A-D-N" ni "N-A-S-A", ya que los guiones hacen que la voz neuronal de Microsoft tartamudee o suene robótica con pausas forzadas).
 2. "visual_query" y "visual_query2":
    - Asegura que estén en inglés, sean HIPER-ESPECÍFICOS (evita términos vagos como 'abstract 4k' o 'cinematic background').
    - Deben reflejar exactamente la entidad, lugar o acción concreta mencionada en ese segundo.
@@ -65,37 +60,66 @@ RESPONDE EXCLUSIVAMENTE CON UN JSON VÁLIDO conteniendo el array de escenas opti
 }}
 """
 
+        # 1. Intentar auditoría de alta velocidad con razonamiento profundo (Gemini 3.1 Flash Lite / Kimi-k3)
         try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                fut = ex.submit(
-                    self.model.generate,
-                    system_prompt="Eres un auditor editorial experto. Devuelve únicamente JSON válido.",
-                    user_prompt=prompt_review,
-                    temperature=0.2,
-                    json_mode=True,
-                )
-                raw = fut.result(timeout=12.0)
+            from core.llm import LLMClient
+            client = LLMClient()
+            raw = client.generate(prompt_review, json_mode=True, deadline_sec=20)
             cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
             data = json.loads(cleaned)
             opt_scenes = data.get("optimized_scenes")
             if opt_scenes and isinstance(opt_scenes, list) and len(opt_scenes) == len(scenes):
-                # Forzar la conservación de case_frame: el auditor puede olvidarse
-                # de copiarlo aunque el prompt lo pida — sin esto, el modo análisis
-                # de caso pierde el anclaje a los fotogramas reales del video fuente.
                 for i, orig in enumerate(scenes):
                     if isinstance(orig, dict) and orig.get("case_frame") is not None:
                         if isinstance(opt_scenes[i], dict) and opt_scenes[i].get("case_frame") is None:
                             opt_scenes[i]["case_frame"] = orig["case_frame"]
-                safe_log(f"[FlashReviewer] ✓ {len(opt_scenes)} escenas auditadas y optimizadas exitosamente por GLM-5.3-flash.")
+                from utils.speech_normalizer import clean_hyphenated_acronyms
+                for sc in opt_scenes:
+                    if isinstance(sc, dict):
+                        if "speech" in sc and isinstance(sc["speech"], str):
+                            sc["speech"] = clean_hyphenated_acronyms(sc["speech"])
+                        c = sc.get("card")
+                        if isinstance(c, dict):
+                            for k in ("headline", "body", "stat"):
+                                if k in c and isinstance(c[k], str):
+                                    c[k] = clean_hyphenated_acronyms(c[k])
+
+                reviewer_tag = getattr(client, "last_model_used", "gemini-3.1-flash-lite")
+                safe_log(f"[FlashReviewer] ✓ {len(opt_scenes)} escenas auditadas y optimizadas exitosamente con razonamiento ({reviewer_tag}).")
                 plan_dict["scenes"] = opt_scenes
-                plan_dict["reviewed_by"] = "z-ai/glm-5.3-flash"
+                plan_dict["reviewed_by"] = reviewer_tag
+                return plan_dict
             else:
                 safe_log("[FlashReviewer] La respuesta no coincidió en número de escenas, conservando plan original.")
-        except concurrent.futures.TimeoutError:
-            safe_log("[FlashReviewer] Timeout de 12s alcanzado, continuando con el plan actual.")
         except Exception as err:
-            safe_log(f"[FlashReviewer] Fallback suave: {err}")
+            safe_log(f"[FlashReviewer] Fallback en auditor principal: {err}")
+
+        # 2. Respaldo secundario si fuera necesario
+        if self.available and self.model:
+            try:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    fut = ex.submit(
+                        self.model.generate,
+                        system_prompt="Eres un auditor editorial experto. Devuelve únicamente JSON válido.",
+                        user_prompt=prompt_review,
+                        temperature=0.2,
+                        json_mode=True,
+                    )
+                    raw = fut.result(timeout=6.0)
+                cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
+                data = json.loads(cleaned)
+                opt_scenes = data.get("optimized_scenes")
+                if opt_scenes and isinstance(opt_scenes, list) and len(opt_scenes) == len(scenes):
+                    for i, orig in enumerate(scenes):
+                        if isinstance(orig, dict) and orig.get("case_frame") is not None:
+                            if isinstance(opt_scenes[i], dict) and opt_scenes[i].get("case_frame") is None:
+                                opt_scenes[i]["case_frame"] = orig["case_frame"]
+                    safe_log(f"[FlashReviewer] ✓ {len(opt_scenes)} escenas auditadas por implementador secundario.")
+                    plan_dict["scenes"] = opt_scenes
+                    plan_dict["reviewed_by"] = "secondary-implementer"
+            except Exception as sec_err:
+                safe_log(f"[FlashReviewer] Fallback secundario omitido: {sec_err}")
 
         return plan_dict
 

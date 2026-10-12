@@ -1955,9 +1955,9 @@ body::before {
 }
 
 .agent-model-card.active {
-    background: rgba(168, 85, 247, 0.12);
-    border-color: rgba(168, 85, 247, 0.45);
-    box-shadow: inset 0 0 12px rgba(168, 85, 247, 0.15);
+    background: rgba(148, 163, 184, 0.12);
+    border-color: rgba(148, 163, 184, 0.45);
+    box-shadow: inset 0 0 12px rgba(148, 163, 184, 0.08);
 }
 
 .agent-model-card-top {
@@ -1971,12 +1971,13 @@ body::before {
     height: 7px;
     border-radius: 50%;
     flex-shrink: 0;
+    background: #64748b;
 }
 
 .agent-model-name {
     font-size: 12px;
     font-weight: 700;
-    color: #f8fafc;
+    color: #e2e8f0;
 }
 
 .agent-model-badge {
@@ -1985,8 +1986,8 @@ body::before {
     font-weight: 700;
     padding: 1px 6px;
     border-radius: 8px;
-    background: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
+    background: rgba(148, 163, 184, 0.14);
+    color: #94a3b8;
 }
 
 .agent-model-desc {
@@ -2020,6 +2021,22 @@ body::before {
     flex-direction: column;
     gap: 4px;
     padding-right: 2px;
+}
+
+/* Desvanecimiento animado de los chats recientes al scrollear (solo si hay muchos) */
+.agent-saved-chats.is-scrollable.fade-top {
+    mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 100%);
+}
+
+.agent-saved-chats.is-scrollable.fade-bottom {
+    mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 16px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 16px), transparent 100%);
+}
+
+.agent-saved-chats.is-scrollable.fade-top.fade-bottom {
+    mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
 }
 
 .agent-chats-empty {
@@ -2149,23 +2166,50 @@ body::before {
     gap: 12px;
 }
 
+.agent-header-model-select {
+    position: relative;
+    flex-shrink: 0;
+}
+
 .agent-model-indicator-pill {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 7px;
-    padding: 4px 10px;
+    padding: 5px 12px;
     border-radius: 9999px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     font-size: 12px;
     font-weight: 700;
     color: #f1f5f9;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.18s ease;
+}
+
+.agent-model-indicator-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.agent-header-model-select.open .agent-model-indicator-pill {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(148, 163, 184, 0.5);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.06);
+}
+
+.agent-header-model-select.open .agent-model-caret {
+    transform: rotate(180deg);
 }
 
 .agent-pill-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
+    flex-shrink: 0;
 }
 
 .agent-header-status {
@@ -2455,12 +2499,206 @@ body::before {
 }
 
 .agent-prompt-model-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 10.5px;
     font-weight: 700;
-    color: #a855f7;
-    background: rgba(168, 85, 247, 0.1);
-    padding: 2px 8px;
+    color: #cbd5e1;
+    background: rgba(148, 163, 184, 0.1);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    padding: 3px 9px;
     border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.agent-prompt-model-tag:hover {
+    background: rgba(148, 163, 184, 0.16);
+    border-color: rgba(148, 163, 184, 0.4);
+    color: #f1f5f9;
+}
+
+.agent-model-select {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.agent-model-select-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #94a3b8;
+    flex-shrink: 0;
+}
+
+.agent-model-caret {
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.agent-model-select.open .agent-prompt-model-tag {
+    background: rgba(148, 163, 184, 0.18);
+    border-color: rgba(148, 163, 184, 0.45);
+    color: #f1f5f9;
+}
+
+.agent-model-select.open .agent-model-caret {
+    transform: rotate(180deg);
+}
+
+/* Dropdown de modelos (se abre hacia arriba desde el prompt o hacia abajo desde el header) */
+.agent-model-dropdown {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 0;
+    min-width: 260px;
+    background: rgba(13, 16, 23, 0.98);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 255, 255, 0.1);
+    padding: 6px;
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+    transform-origin: bottom left;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 1200;
+}
+
+.agent-model-select.open .agent-model-dropdown {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+/* Dropdown anclado en el Header (se abre hacia abajo) */
+.agent-header-model-dropdown {
+    top: calc(100% + 8px);
+    bottom: auto;
+    left: 0;
+    min-width: 285px;
+    transform: translateY(-8px) scale(0.97);
+    transform-origin: top left;
+}
+
+.agent-header-model-select.open .agent-header-model-dropdown {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+.agent-model-dropdown .agent-model-badge {
+    background: rgba(148, 163, 184, 0.14);
+    color: #cbd5e1;
+}
+
+.agent-model-dropdown .agent-model-card[data-model="gemini"],
+.agent-model-dropdown .agent-model-card[data-model="gemini"].active {
+    background: rgba(148, 163, 184, 0.12) !important;
+    border-color: rgba(148, 163, 184, 0.45) !important;
+    box-shadow: none !important;
+}
+
+/* ── SUBIDA DE ARCHIVOS / MULTIMEDIA (clip junto al nombre del modelo) ── */
+
+.agent-prompt-tools-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.agent-btn-attach {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.agent-btn-attach:hover {
+    background: rgba(168, 85, 247, 0.15);
+    border-color: rgba(168, 85, 247, 0.45);
+    color: #d8b4fe;
+    transform: scale(1.08);
+}
+
+.agent-prompt-box.agent-dragover {
+    border-color: rgba(168, 85, 247, 0.6);
+    background: rgba(168, 85, 247, 0.06);
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.2);
+}
+
+.agent-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.agent-attach-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.28);
+    color: #cbd5e1;
+    border-radius: 9px;
+    padding: 3px 6px 3px 8px;
+    font-size: 11px;
+    max-width: 100%;
+}
+
+.agent-attach-icon {
+    font-size: 12px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.agent-attach-name {
+    font-weight: 600;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-attach-size {
+    color: #64748b;
+    font-size: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.agent-attach-remove {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.agent-attach-remove:hover {
+    background: #ef4444;
+    color: #fff;
 }
 
 .agent-btn-send {
@@ -2864,16 +3102,6 @@ body.ren-inspector-active * {
 @keyframes slideInRight {
     from { transform: translateX(40px); opacity: 0; }
     to   { transform: translateX(0);    opacity: 1; }
-}
-
-/* ─── MODELO GEMINI como tarjeta activa por defecto ─── */
-.agent-model-card[data-model="gemini"] {
-    border-color: rgba(245, 158, 11, 0.35) !important;
-}
-.agent-model-card[data-model="gemini"].active {
-    background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05)) !important;
-    border-color: rgba(245, 158, 11, 0.6) !important;
-    box-shadow: 0 0 20px rgba(245, 158, 11, 0.2) !important;
 }
 
 /* ─── BADGE RECOMENDADO ─── */
@@ -3722,4 +3950,252 @@ css
     border-color: rgba(56, 189, 248, 0.45) !important;
     box-shadow: 0 4px 18px rgba(37, 99, 235, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
     color: #ffffff !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SIDEBAR REFINED — "Calm Premium" (refs: Pinterest / Dribbble sidebars)
+   Superficies: misma familia tonal que el canvas, sin gradientes duros.
+   Profundidad: borders-only — sin glows, sin sombras dramáticas.
+   Acento: azul único (#3b82f6), reservado al ítem activo.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.prism-sidebar {
+    background: #090b11 !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+    box-shadow: none !important;
+    padding: 22px 12px !important;
+}
+
+/* ── Marca: sin tarjeta, sin bordes, sin decoración ── */
+.prism-sidebar-brand {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    padding: 6px 8px !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+    margin-bottom: 20px !important;
+    backdrop-filter: none !important;
+    transition: none !important;
+}
+
+.prism-sidebar-brand::before,
+.prism-sidebar-brand::after {
+    display: none !important;
+}
+
+.prism-sidebar-brand:hover {
+    border-color: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+.prism-sidebar-brand:hover .prism-brand-icon {
+    transform: none !important;
+}
+
+.prism-brand-icon {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 10px !important;
+    background: linear-gradient(135deg, #1e40af 0%, #2563eb 60%, #3b82f6 100%) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+    transition: none !important;
+}
+
+.prism-brand-text h2 {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    background: none !important;
+    -webkit-background-clip: initial !important;
+    -webkit-text-fill-color: #f1f5f9 !important;
+    color: #f1f5f9 !important;
+    letter-spacing: -0.01em !important;
+    line-height: 1.2 !important;
+    text-shadow: none !important;
+}
+
+.prism-brand-text h2::after {
+    display: none !important;
+}
+
+.prism-brand-text span {
+    font-size: 9px !important;
+    font-weight: 600 !important;
+    color: #5b6575 !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    letter-spacing: 0.16em !important;
+}
+
+/* ── Encabezados de sección: susurro ── */
+.prism-section-heading {
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    color: #5b6575 !important;
+    letter-spacing: 0.14em !important;
+    padding: 12px 10px 6px !important;
+}
+
+/* ── Ítems: transparentes, hover susurrado, sin escala ni glow ── */
+.prism-nav-item {
+    height: 38px !important;
+    border-radius: 9px !important;
+    color: #8b95a7 !important;
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    box-shadow: none !important;
+    transition: background-color 0.15s ease, color 0.15s ease !important;
+}
+
+.prism-nav-item:hover {
+    background: rgba(255, 255, 255, 0.045) !important;
+    border-color: transparent !important;
+    color: #e2e8f0 !important;
+    box-shadow: none !important;
+}
+
+.prism-nav-item:hover svg {
+    color: #aab4c5 !important;
+    filter: none !important;
+    transform: none !important;
+}
+
+.prism-nav-item.active {
+    background: rgba(59, 130, 246, 0.10) !important;
+    border-color: transparent !important;
+    color: #f1f5f9 !important;
+    box-shadow: none !important;
+}
+
+.prism-sidebar .prism-nav-item.active::before {
+    width: 2px !important;
+    height: 16px !important;
+    border-radius: 0 2px 2px 0 !important;
+    background: #3b82f6 !important;
+    opacity: 1 !important;
+    box-shadow: none !important;
+}
+
+.prism-sidebar .prism-nav-item.active svg {
+    color: #60a5fa !important;
+    filter: none !important;
+    transform: none !important;
+}
+
+.prism-sidebar .prism-nav-item.active .prism-nav-label {
+    color: #f1f5f9 !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+}
+
+.prism-active-dot {
+    background: #60a5fa !important;
+    box-shadow: none !important;
+    opacity: 0.75 !important;
+    animation: none !important;
+}
+
+/* ── Tonos suaves para Radar y Agente (antes inline agresivos) ── */
+#dockRadar { background: rgba(239, 68, 68, 0.06) !important; }
+#dockRadar svg { color: #f87171 !important; }
+#dockRadar .prism-nav-label { color: #eba7a7 !important; font-weight: 600 !important; }
+#dockAgentLauncher { background: rgba(168, 85, 247, 0.06) !important; }
+#dockAgentLauncher svg { color: #c084fc !important; }
+#dockAgentLauncher .prism-nav-label { color: #d9c2f0 !important; font-weight: 600 !important; }
+
+/* ── Pie: separación susurrada ── */
+.prism-nav-footer {
+    margin-top: auto !important;
+    padding-top: 12px !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+
+/* Indicador flotante de trabajo y botón de parada de AetherCopilot */
+#copilotWorkingIndicator {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(239, 68, 68, 0.2);
+  padding: 12px 18px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 99999;
+  backdrop-filter: blur(12px);
+  font-family: inherit;
+  color: #f8fafc;
+  animation: copilotPulse 2s infinite ease-in-out;
+}
+#copilotWorkingIndicator .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(239, 68, 68, 0.2);
+  border-top-color: #ef4444;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+#copilotWorkingIndicator button {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+#copilotWorkingIndicator button:hover {
+  background: #ef4444;
+  color: #fff;
+}
+@keyframes copilotPulse {
+  0%, 100% { border-color: rgba(239, 68, 68, 0.4); }
+  50% { border-color: rgba(239, 68, 68, 0.9); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+
+/* Optimizacion del panel de modelos y chats recientes en el Agente Copilot */
+.agent-model-selector-compact {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.agent-model-selector-compact:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #f8fafc;
+    border-color: rgba(255, 255, 255, 0.15);
+}
+.agent-recent-chats-list {
+    max-height: 280px;
+    overflow-y: auto;
+    mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.agent-recent-chats-list::-webkit-scrollbar {
+    width: 4px;
+}
+.agent-recent-chats-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
 }

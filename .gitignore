@@ -21,5 +21,9 @@ assets/verify_*.jpg
 *.log
 
 
-
 *.bak
+node_modules/
+remotion_studio/node_modules/
+remotion_studio/out/
+remotion_studio/build/
+scratch/

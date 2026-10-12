@@ -2219,12 +2219,14 @@ button { cursor: pointer; }
 .video-modal-dialog {
     width: 100%;
     max-width: 960px;
+    max-height: 92vh;
+    overflow-y: auto;
+    overflow-x: hidden;
     background: #0f172a;
     background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
     border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 20px;
     box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.95), 0 0 40px rgba(56, 189, 248, 0.2);
-    overflow: hidden;
     display: flex;
     flex-direction: column;
     animation: modalPopIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
@@ -2978,6 +2980,161 @@ button { cursor: pointer; }
     flex-wrap: wrap;
 }
 
+/* --- BARRA DE FILTROS DEL RADAR DE VIRALIDAD --- */
+.radar-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.radar-filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1 1 170px;
+    min-width: 140px;
+}
+
+.radar-filter-group.radar-search-group {
+    flex: 2 1 230px;
+    min-width: 190px;
+}
+
+.radar-filter-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #94a3b8;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.radar-filter-icon {
+    font-size: 12px;
+}
+
+.radar-filter-select {
+    appearance: none;
+    background: #0b0e17 url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2394a3b8%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E") no-repeat right 12px center;
+    background-size: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #f1f5f9;
+    border-radius: 8px;
+    padding: 8px 30px 8px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.radar-filter-select:hover {
+    border-color: rgba(56, 189, 248, 0.4);
+    background-color: #0f131f;
+}
+
+.radar-filter-select:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+}
+
+.radar-filter-select option {
+    background: #0f172a;
+    color: #f1f5f9;
+    padding: 8px;
+}
+
+.radar-search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.radar-search-input {
+    width: 100%;
+    background: #0b0e17;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #f1f5f9;
+    border-radius: 8px;
+    padding: 8px 30px 8px 12px;
+    font-size: 12px;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.radar-search-input:hover {
+    border-color: rgba(56, 189, 248, 0.4);
+}
+
+.radar-search-input:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+}
+
+.radar-search-clear {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.radar-search-clear:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.radar-filter-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    padding-bottom: 2px;
+}
+
+.radar-filter-count {
+    font-size: 11px;
+    font-weight: 600;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    padding: 4px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.radar-filter-reset-btn {
+    font-size: 11px;
+    font-weight: 600;
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.radar-filter-reset-btn:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
 .radar-video-list {
     display: flex;
     flex-direction: column;
@@ -3217,6 +3374,39 @@ button { cursor: pointer; }
 .radar-chip.urg-mid { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
 .radar-chip.urg-low { background: rgba(148, 163, 184, 0.14); color: #94a3b8; }
 .radar-chip.top1 { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+.radar-chip.fav { background: rgba(251, 191, 36, 0.18); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); }
+
+.radar-topic-fav-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #94a3b8;
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.radar-topic-fav-btn:hover {
+    background: rgba(251, 191, 36, 0.15);
+    border-color: rgba(251, 191, 36, 0.4);
+    color: #fbbf24;
+    transform: translateY(-1px);
+}
+
+.radar-topic-fav-btn.active {
+    background: rgba(251, 191, 36, 0.22);
+    border-color: #fbbf24;
+    color: #fbbf24;
+    box-shadow: 0 0 14px rgba(251, 191, 36, 0.3);
+}
 
 .radar-topic-title {
     font-size: 14.5px;
@@ -3321,5 +3511,218 @@ button { cursor: pointer; }
     }
     .radar-thumb, .radar-score-box, .radar-replicate-btn { display: none; }
 }
+
+/* =========================================================================
+   CLIPS & SHORTS 9:16 GENERADOS EN LA MESA & TIMELINE
+   ========================================================================= */
+.prism-studio-clips-section {
+    background: #090c14;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 14px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.prism-studio-clips-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.prism-studio-clips-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.prism-studio-clips-icon {
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.22), rgba(99, 102, 241, 0.16));
+    border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.prism-studio-clips-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0;
+    color: #fff;
+    letter-spacing: -0.01em;
+}
+
+.prism-studio-clips-sub {
+    font-size: 11px;
+    color: var(--prism-text-muted, #94a3b8);
+    margin: 3px 0 0;
+}
+
+.studio-clips-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.studio-clip-card {
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.studio-clip-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(168, 85, 247, 0.45);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.studio-clip-media-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 9 / 16;
+    max-height: 380px;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.studio-clip-media-wrap video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #000;
+}
+
+.studio-clip-badge-pill {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(8px);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    z-index: 2;
+}
+
+.studio-clip-size-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    color: #cbd5e1;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 7px;
+    border-radius: 6px;
+    z-index: 2;
+}
+
+.studio-clip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.studio-clip-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.studio-clip-meta {
+    font-size: 11px;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.studio-clip-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.studio-clip-btn {
+    flex: 1;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.studio-clip-btn.view {
+    background: rgba(255, 255, 255, 0.06);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.studio-clip-btn.view:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.studio-clip-btn.download {
+    background: rgba(56, 189, 248, 0.14);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.studio-clip-btn.download:hover {
+    background: rgba(56, 189, 248, 0.25);
+    color: #7dd3fc;
+}
+
+.studio-clips-empty {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    gap: 10px;
+}
+
 
 

@@ -209,6 +209,32 @@ async function openPublishModal(project) {
         }
         if (info.thumbnail_url) showThumb(info.thumbnail_url);
         renderChannelBox();
+
+        if (info.channels && $("pubChannelSelect")) {
+            const chSel = $("pubChannelSelect");
+            chSel.innerHTML = "";
+            info.channels.forEach(ch => {
+                const opt = document.createElement("option");
+                opt.value = ch.id;
+                opt.textContent = `${ch.badge || "📺"} ${ch.name}`;
+                chSel.appendChild(opt);
+            });
+            if (info.channel_classification?.channel?.id) {
+                chSel.value = info.channel_classification.channel.id;
+                if ($("pubChannelBadge")) {
+                    $("pubChannelBadge").textContent = info.channel_classification.channel.badge || "Nicho Detectado";
+                }
+                if ($("pubClassifyChip")) {
+                    $("pubClassifyChip").textContent = `✨ ${Math.round((info.channel_classification.confidence || 0.85) * 100)}% Coincidencia`;
+                }
+            }
+            chSel.onchange = () => {
+                const selected = (info.channels || []).find(c => c.id === chSel.value);
+                if (selected && $("pubChannelBadge")) {
+                    $("pubChannelBadge").textContent = selected.badge || selected.name;
+                }
+            };
+        }
     } catch (err) {
         setStatus(`⚠️ ${err.message}`);
         toast(`No se pudo preparar la publicación: ${err.message}`, "error");
@@ -319,6 +345,7 @@ async function publishDirect() {
         const { task_id } = await api("/api/publish/youtube/upload", {
             body: {
                 project_id: state.project.id,
+                channel_id: $("pubChannelSelect")?.value || "divulgacion",
                 title,
                 description: $("pubDescription")?.value || "",
                 tags: ($("pubTags")?.value || "").split(",").map(t => t.trim().replace(/^#/, "")).filter(Boolean),
@@ -416,9 +443,19 @@ async function publishAssisted() {
         const dl = $("pubThumbDownload");
         if (dl) dl.click();
     }
-    window.open("https://studio.youtube.com/channel/UC/videos/upload?d=pt", "_blank");
-    setStatus("🧳 Pega los metadatos (Ctrl+V) y arrastra la miniatura descargada en YouTube Studio.");
-    toast("🧭 YouTube Studio abierto: pega los metadatos y la miniatura.", "info");
+    let targetStudioUrl = "https://studio.youtube.com/channel/UC/videos/upload?d=pt";
+    let channelName = "YouTube Studio";
+    const selectedChId = $("pubChannelSelect")?.value;
+    if (state.info?.channels && selectedChId) {
+        const foundCh = state.info.channels.find(c => c.id === selectedChId);
+        if (foundCh) {
+            channelName = foundCh.name;
+            if (foundCh.studio_url) targetStudioUrl = foundCh.studio_url;
+        }
+    }
+    window.open(targetStudioUrl, "_blank");
+    setStatus(`🧳 Metadatos preparados para ${channelName}. Pega con Ctrl+V y sube la miniatura.`);
+    toast(`🧭 ${channelName} abierto: pega los metadatos y la miniatura.`, "info");
 }
 
 /* -------------------------------------------------------------------- init */

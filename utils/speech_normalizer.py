@@ -41,11 +41,24 @@ def refine_speech_cadence(text: str) -> str:
     return clean
 
 
+def clean_hyphenated_acronyms(text: str) -> str:
+    """
+    Convierte siglas artificialmente divididas por guiones ('A-D-N' -> 'ADN', 'I-A' -> 'IA', 'N-A-S-A' -> 'NASA')
+    para que la voz neuronal de Edge-TTS las lea de forma fluida y natural, sin deletreos
+    robóticos ni pausas incómodas entre letras.
+    """
+    if not text:
+        return ""
+    # Siglas de 2 a 6 letras mayúsculas separadas por guiones (ej. A-D-N, N-A-S-A, O-N-U, I-A)
+    return re.sub(r'\b[A-ZÁÉÍÓÚÑ](?:-[A-ZÁÉÍÓÚÑ]){1,5}\b', lambda m: m.group(0).replace("-", ""), text)
+
+
 def normalize_speech_for_tts(text: str) -> str:
     """
     Normalización limpia y de alta fidelidad para Edge-TTS:
     - Conserva 100% los acentos, tildes y entonación humana natural.
     - Convierte porcentajes fonéticamente ('25%' -> '25 por ciento').
+    - Limpia siglas con guiones para pronunciación fluida ('A-D-N' -> 'ADN').
     - Limpia comas accidentales sin insertar pausas artificiales mecánicas.
     """
     if not text:
@@ -55,6 +68,9 @@ def normalize_speech_for_tts(text: str) -> str:
     text = re.sub(r"\r?\n+", " ", text)
     text = re.sub(r"[ \t]+", " ", text).strip()
 
+    # Des-guionar siglas mayúsculas artificiales
+    text = clean_hyphenated_acronyms(text)
+
     # Normalizar porcentaje para lectura fonética correcta
     text = re.sub(r"(\d+)\s*%", r"\1 por ciento", text)
 
@@ -62,4 +78,5 @@ def normalize_speech_for_tts(text: str) -> str:
     text = refine_speech_cadence(text)
 
     return text
+
 

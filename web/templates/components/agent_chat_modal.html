@@ -2,7 +2,7 @@
 <div id="agentChatDeck" class="agent-chat-deck agent-hidden" aria-hidden="true" role="dialog" aria-label="Agente Copilot Multi-Modelo">
     <div class="agent-deck-glass">
         
-        <!-- COLUMNA 1: LISTA LATERAL DE MODELOS Y ATAJOS (ESTILO SIDEBAR CHATGPT) -->
+        <!-- COLUMNA 1: LISTA LATERAL DE CHATS RECIENTES Y ATAJOS (ESTILO SIDEBAR CHATGPT) -->
         <aside class="agent-models-sidebar">
             <div class="agent-sb-top">
                 <button type="button" class="agent-btn-new-chat" id="agentBtnNewChat" title="Nuevo Chat">
@@ -12,52 +12,6 @@
                     </svg>
                     <span>Nuevo Chat</span>
                 </button>
-            </div>
-
-            <!-- SELECTOR DE MODELOS DISPONIBLES -->
-            <div class="agent-sb-section">
-                <div class="agent-sb-heading">MODELOS DISPONIBLES</div>
-                <div class="agent-models-list" id="agentModelsList">
-                    <!-- MODELO 1: GLM 5.3 Senior -->
-                    <button type="button" class="agent-model-card" data-model="glm-5.3">
-                        <div class="agent-model-card-top">
-                            <span class="agent-model-dot" style="background:#38bdf8;"></span>
-                            <span class="agent-model-name">GLM-5.3</span>
-                            <span class="agent-model-badge">Senior</span>
-                        </div>
-                        <span class="agent-model-desc">Arquitecto y razonamiento profundo</span>
-                    </button>
-
-                    <!-- MODELO 2: GLM 5.3 Flash -->
-                    <button type="button" class="agent-model-card" data-model="glm-5.3-flash">
-                        <div class="agent-model-card-top">
-                            <span class="agent-model-dot" style="background:#a855f7;"></span>
-                            <span class="agent-model-name">GLM-5.3 Flash</span>
-                            <span class="agent-model-badge" style="background:rgba(168,85,247,0.2); color:#c084fc;">Ultra Rápido</span>
-                        </div>
-                        <span class="agent-model-desc">Acciones en vivo y UI inmediata</span>
-                    </button>
-
-                    <!-- MODELO 3: Kimi-k3 -->
-                    <button type="button" class="agent-model-card" data-model="kimi-k3">
-                        <div class="agent-model-card-top">
-                            <span class="agent-model-dot" style="background:#10b981;"></span>
-                            <span class="agent-model-name">Kimi-k3</span>
-                            <span class="agent-model-badge" style="background:rgba(16,185,129,0.2); color:#34d399;">Auditor</span>
-                        </div>
-                        <span class="agent-model-desc">Auditoría lógica y consistencia</span>
-                    </button>
-
-                    <!-- MODELO 4: Gemini Flash (ACTIVO POR DEFECTO — el nombre real se carga desde el servidor) -->
-                    <button type="button" class="agent-model-card active" data-model="gemini">
-                        <div class="agent-model-card-top">
-                            <span class="agent-model-dot" style="background:#f59e0b;"></span>
-                            <span class="agent-model-name">Gemini 3.6 Flash</span>
-                            <span class="agent-model-badge" style="background:rgba(245,158,11,0.2); color:#fbbf24;">⚡ Recomendado</span>
-                        </div>
-                        <span class="agent-model-desc">Multimodal, editorial y más rápido</span>
-                    </button>
-                </div>
             </div>
 
             <!-- CHATS GUARDADOS (persistencia: hasta 20 conversaciones) -->
@@ -109,9 +63,51 @@
             <!-- HEADER DEL CHAT -->
             <header class="agent-chat-header">
                 <div class="agent-header-left">
-                    <div class="agent-model-indicator-pill" id="agentHeaderModelPill">
-                        <span class="agent-pill-dot" id="agentHeaderDot" style="background:#f59e0b;"></span>
-                        <span class="agent-pill-name" id="agentHeaderModelName">Gemini 3.6 Flash</span>
+                    <!-- SELECTOR DE MODELO EN EL HEADER: click para expandir y elegir modelo -->
+                    <div class="agent-model-select agent-header-model-select" id="agentHeaderModelSelect">
+                        <button type="button" class="agent-model-indicator-pill agent-header-model-btn" id="agentHeaderModelPill" title="Cambiar modelo de IA (Click para expandir)" aria-haspopup="menu" aria-expanded="false">
+                            <span class="agent-pill-dot" id="agentHeaderDot" style="background:#f59e0b;"></span>
+                            <span class="agent-pill-name" id="agentHeaderModelName">Gemini Flash Lite Latest</span>
+                            <svg class="agent-model-caret" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                        </button>
+                        <div class="agent-model-dropdown agent-header-model-dropdown" id="agentHeaderModelDropdown" role="menu" aria-label="Modelos disponibles">
+                            <div class="agent-models-list" id="agentHeaderModelsList">
+                                <button type="button" class="agent-model-card active" data-model="gemini" role="menuitem">
+                                    <div class="agent-model-card-top">
+                                        <span class="agent-model-dot" style="background:#f59e0b;"></span>
+                                        <span class="agent-model-name">Gemini Flash Lite Latest</span>
+                                        <span class="agent-model-badge">⚡ Recomendado</span>
+                                    </div>
+                                    <span class="agent-model-desc">Más rápido, multimodal y editorial de alta velocidad</span>
+                                </button>
+                                <button type="button" class="agent-model-card" data-model="glm-5.3-flash" role="menuitem">
+                                    <div class="agent-model-card-top">
+                                        <span class="agent-model-dot" style="background:#a855f7;"></span>
+                                        <span class="agent-model-name">GLM-5.3 Flash</span>
+                                        <span class="agent-model-badge">Ultra Rápido</span>
+                                    </div>
+                                    <span class="agent-model-desc">Velocidad ultra-rápida para acciones en UI</span>
+                                </button>
+                                <button type="button" class="agent-model-card" data-model="glm-5.3" role="menuitem">
+                                    <div class="agent-model-card-top">
+                                        <span class="agent-model-dot" style="background:#38bdf8;"></span>
+                                        <span class="agent-model-name">GLM-5.3 Senior</span>
+                                        <span class="agent-model-badge">Arquitecto</span>
+                                    </div>
+                                    <span class="agent-model-desc">Razonamiento arquitectónico pesado</span>
+                                </button>
+                                <button type="button" class="agent-model-card" data-model="kimi-k3" role="menuitem">
+                                    <div class="agent-model-card-top">
+                                        <span class="agent-model-dot" style="background:#10b981;"></span>
+                                        <span class="agent-model-name">Kimi-k3</span>
+                                        <span class="agent-model-badge">Auditor Lógico</span>
+                                    </div>
+                                    <span class="agent-model-desc">Auditor lógico, síntesis profunda</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     <span class="agent-header-status">
                         <span class="agent-live-beacon"></span> Control de la App Activo
@@ -210,9 +206,65 @@
             <!-- ÁREA DE ENTRADA PROMPT -->
             <div class="agent-input-wrapper">
                 <form class="agent-prompt-box" id="agentPromptForm" onsubmit="return false;">
+                    <!-- CHIPS DE ARCHIVOS ADJUNTOS (subidos con el clip o arrastrados) -->
+                    <div class="agent-attachments" id="agentAttachments" style="display:none;"></div>
                     <textarea id="agentPromptInput" class="agent-prompt-textarea" rows="1" placeholder="Pídele al agente editar código, diseñar UI o controlar el estudio... (Enter para enviar)"></textarea>
                     <div class="agent-prompt-tools">
-                        <span class="agent-prompt-model-tag" id="agentInputModelTag">Gemini 3.6 Flash</span>
+                        <div class="agent-prompt-tools-left">
+                            <!-- SELECTOR DE MODELO: al presionar despliega la lista (grises) -->
+                            <div class="agent-model-select" id="agentModelSelect">
+                                <button type="button" class="agent-prompt-model-tag" id="agentInputModelTag" title="Elegir modelo de IA (Click para expandir)" aria-haspopup="menu" aria-expanded="false">
+                                    <span class="agent-model-select-dot" aria-hidden="true" style="background:#f59e0b;"></span>
+                                    <span id="agentInputModelName">Gemini Flash Lite Latest</span>
+                                    <svg class="agent-model-caret" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"/>
+                                    </svg>
+                                </button>
+                                <div class="agent-model-dropdown" id="agentModelDropdown" role="menu" aria-label="Modelos disponibles">
+                                    <div class="agent-models-list" id="agentModelsList">
+                                        <button type="button" class="agent-model-card active" data-model="gemini" role="menuitem">
+                                            <div class="agent-model-card-top">
+                                                <span class="agent-model-dot" style="background:#f59e0b;"></span>
+                                                <span class="agent-model-name">Gemini Flash Lite Latest</span>
+                                                <span class="agent-model-badge">⚡ Recomendado</span>
+                                            </div>
+                                            <span class="agent-model-desc">Más rápido, multimodal y editorial de alta velocidad</span>
+                                        </button>
+                                        <button type="button" class="agent-model-card" data-model="glm-5.3-flash" role="menuitem">
+                                            <div class="agent-model-card-top">
+                                                <span class="agent-model-dot" style="background:#a855f7;"></span>
+                                                <span class="agent-model-name">GLM-5.3 Flash</span>
+                                                <span class="agent-model-badge">Ultra Rápido</span>
+                                            </div>
+                                            <span class="agent-model-desc">Velocidad ultra-rápida para acciones en UI</span>
+                                        </button>
+                                        <button type="button" class="agent-model-card" data-model="glm-5.3" role="menuitem">
+                                            <div class="agent-model-card-top">
+                                                <span class="agent-model-dot" style="background:#38bdf8;"></span>
+                                                <span class="agent-model-name">GLM-5.3 Senior</span>
+                                                <span class="agent-model-badge">Arquitecto</span>
+                                            </div>
+                                            <span class="agent-model-desc">Razonamiento arquitectónico pesado</span>
+                                        </button>
+                                        <button type="button" class="agent-model-card" data-model="kimi-k3" role="menuitem">
+                                            <div class="agent-model-card-top">
+                                                <span class="agent-model-dot" style="background:#10b981;"></span>
+                                                <span class="agent-model-name">Kimi-k3</span>
+                                                <span class="agent-model-badge">Auditor Lógico</span>
+                                            </div>
+                                            <span class="agent-model-desc">Auditor lógico, síntesis profunda</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- BOTÓN SUBIR ARCHIVOS / MULTIMEDIA (clip) -->
+                            <button type="button" class="agent-btn-attach" id="agentBtnAttach" title="Subir archivos o multimedia (imágenes, video, audio, texto, código)">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                                </svg>
+                            </button>
+                            <input type="file" id="agentFileInput" multiple hidden />
+                        </div>
                         <button type="submit" class="agent-btn-send" id="agentBtnSend" title="Enviar mensaje">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                                 <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>

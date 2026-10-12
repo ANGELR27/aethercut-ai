@@ -72,9 +72,15 @@
                     KAI está recopilando información en la web y preparando el guión...
                 </div>
 
-                <!-- Tabs Rápidos: Escenas | Tarjetas Bento | Hechos Web -->
+                <!-- Barra de progreso unificada en el Studio -->
+                <div class="telemetry-bar-track" style="margin: 8px 0 12px; height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                    <div class="telemetry-bar-fill" id="studioBarFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #22c55e); transition: width 0.3s ease;"></div>
+                </div>
+
+                <!-- Tabs Rápidos: Escenas | Eventos | Tarjetas Bento | Hechos Web -->
                 <div class="prism-sideboard-tabs">
                     <button type="button" class="prism-sb-tab-btn active" id="btnSbTabScenes">🎬 Escenas (<span id="studioScenesCount">0</span>)</button>
+                    <button type="button" class="prism-sb-tab-btn" id="btnSbTabTerminal">📟 Terminal (<span id="studioEventCount">0</span>)</button>
                     <button type="button" class="prism-sb-tab-btn" id="btnSbTabCards">📊 Tarjetas (<span id="studioCardsCount">0</span>)</button>
                     <button type="button" class="prism-sb-tab-btn" id="btnSbTabFacts">🌐 Hechos Web</button>
                 </div>
@@ -86,20 +92,46 @@
                     </div>
                 </div>
 
-                <!-- Panel 2: Tarjetas Bento Generadas -->
+                <!-- Panel 2: Terminal de Acciones y Eventos en Vivo (Unificada) -->
+                <div class="prism-sb-pane" id="studioSbPaneTerminal" hidden>
+                    <div class="telemetry-terminal-box" style="border: none; background: transparent; padding: 0; box-shadow: none;">
+                        <div class="terminal-body" id="telemetryConsoleFeedStudio" style="max-height: 410px; overflow-y: auto; padding: 4px 0;">
+                            <div class="terminal-empty">Esperando el primer evento de la transmisión...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel 3: Tarjetas Bento Generadas -->
                 <div class="prism-sb-pane" id="studioSbPaneCards" hidden>
                     <div class="prism-sb-cards-scroll" id="studioLiveCardsList">
                         <div class="prism-sb-empty-note">Las tarjetas Bento aparecerán al redactar el guión.</div>
                     </div>
                 </div>
 
-                <!-- Panel 3: Hechos e Investigación Web -->
+                <!-- Panel 4: Hechos e Investigación Web -->
                 <div class="prism-sb-pane" id="studioSbPaneFacts" hidden>
                     <div class="prism-sb-facts-box" id="studioLiveFactsBox">
                         <div class="prism-sb-empty-note">Investigando fuentes autorizadas en internet...</div>
                     </div>
                 </div>
+
+                <!-- Mini Tarjeta de Recursos y Motores Activos -->
+                <div class="telemetry-metrics-mini" style="margin-top: auto; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06);">
+                    <div class="metric-mini-row" style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #94a3b8;">
+                        <span>Motor de Video:</span>
+                        <strong style="color: #38bdf8;">FFmpeg Multi-Thread</strong>
+                    </div>
+                    <div class="metric-mini-row" style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #94a3b8;">
+                        <span>Overlays Dinámicos:</span>
+                        <strong style="color: #a855f7;">Remotion React 4K</strong>
+                    </div>
+                    <div class="metric-mini-row" style="display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8;">
+                        <span>Lip-Sync KAI:</span>
+                        <strong style="color: #22c55e;">Sincronizado</strong>
+                    </div>
+                </div>
             </aside>
+
         </div>
 
         <!-- Barra de Controles Inferior del Monitor (Retroceder, Avanzar, Play Circular Blanco, Mute, Timecode) -->
@@ -186,6 +218,36 @@
 
         <!-- Inspector de clip seleccionado -->
         <aside id="editorInspector" style="margin-top: 10px; font-size: 11px; color: var(--prism-text-muted); padding: 10px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid var(--prism-border);"></aside>
+    </section>
+
+    <!-- SECCIÓN INFERIOR: CLIPS & SHORTS 9:16 GENERADOS PARA ESTE VIDEO -->
+    <section class="prism-studio-clips-section" id="studioClipsSection" style="margin-top: 14px;">
+        <header class="prism-studio-clips-header">
+            <div class="prism-studio-clips-title-group">
+                <span class="prism-studio-clips-icon" aria-hidden="true">📱</span>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <h4 class="prism-studio-clips-title">Clips &amp; Shorts 9:16 de este Video</h4>
+                        <span id="studioClipsCountBadge" class="radar-chip" style="font-size: 11px; padding: 2px 8px;">0 clips</span>
+                    </div>
+                    <p class="prism-studio-clips-sub">Fragmentos verticales estratégicos optimizados con subtítulos y ganchos de alta retención para TikTok, Reels y Shorts</p>
+                </div>
+            </div>
+            <div class="prism-studio-clips-actions" style="display: flex; align-items: center; gap: 8px;">
+                <button type="button" id="studioExtractClipsBtn" class="subcard-pill-btn active" style="background: linear-gradient(135deg, #a855f7, #6366f1); color: #fff; font-weight: 700; border: none; box-shadow: 0 4px 14px rgba(168,85,247,0.35); cursor: pointer; padding: 6px 14px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px;">
+                    <span>✂️ Extraer Nuevos Clips con IA</span>
+                </button>
+            </div>
+        </header>
+
+        <div id="studioClipsLoading" class="studio-clips-loading" hidden style="display: none; align-items: center; justify-content: center; gap: 10px; padding: 24px; color: #cbd5e1; font-size: 13px;">
+            <div class="pub-spinner"></div>
+            <span>La IA está analizando los momentos clave y recortando shorts verticales 9:16...</span>
+        </div>
+
+        <div id="studioClipsGrid" class="studio-clips-grid">
+            <!-- Rellenado dinámicamente al abrir el proyecto en Mesa & Timeline -->
+        </div>
     </section>
 
 </div>

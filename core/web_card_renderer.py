@@ -2662,3 +2662,284 @@ class WebCardRenderer:
                 im.crop(b).save(png_path)
         except Exception:
             pass
+
+    def generate_viral_verdict_badge_html(
+        self,
+        headline: str,
+        icon: str = "✓",
+        tilt_deg: float = -3.5,
+    ) -> str:
+        """
+        Genera el HTML del distintivo viral inclinado (Estilo Reels/TikTok: '✓ ganó Opus').
+        Píldora con borde blanco premium, fondo traslúcido frosted glass y tipografía serif elegante.
+        """
+        clean_headline = (headline or "Verificado").strip()
+        clean_icon = (icon or "✓").strip()
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+{HTML_FONTS}
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }}
+  .badge-stamp {{
+    display: inline-flex;
+    align-items: center;
+    gap: 18px;
+    padding: 18px 46px;
+    border: 3.5px solid rgba(255, 255, 255, 0.95);
+    border-radius: 22px;
+    background: rgba(20, 20, 28, 0.40);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.40);
+    transform: rotate({tilt_deg:.1f}deg);
+    color: #ffffff;
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    text-shadow: 0 3px 12px rgba(0, 0, 0, 0.6);
+    white-space: nowrap;
+  }}
+  .badge-icon {{
+    font-size: 48px;
+    font-weight: 900;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }}
+</style>
+</head>
+<body>
+  <div class="badge-stamp">
+    <span class="badge-icon">{clean_icon}</span>
+    <span>{clean_headline}</span>
+  </div>
+</body>
+</html>"""
+
+    def render_viral_verdict_badge_to_image(
+        self,
+        headline: str,
+        out_png: Path,
+        icon: str = "✓",
+        tilt_deg: float = -3.5,
+    ) -> Optional[Path]:
+        """Renderiza a PNG transparente el distintivo viral inclinado '✓ ganó Opus'."""
+        try:
+            out_png = Path(out_png)
+            out_png.parent.mkdir(parents=True, exist_ok=True)
+            html_content = self.generate_viral_verdict_badge_html(headline=headline, icon=icon, tilt_deg=tilt_deg)
+            html_file = out_png.with_suffix(".html")
+            html_file.write_text(html_content, encoding="utf-8")
+            file_uri = html_file.resolve().as_uri()
+
+            args = [
+                self.browser_bin,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--hide-scrollbars",
+                "--default-background-color=00000000",
+                f"--screenshot={out_png.resolve()}",
+                "--window-size=1080,1920",
+                file_uri,
+            ]
+            subprocess.run(args, capture_output=True, check=True, timeout=15)
+            self._crop_transparent(out_png)
+            if out_png.exists() and out_png.stat().st_size > 500:
+                return out_png
+        except Exception as exc:
+            import logging
+            logging.getLogger("aethercut.web_renderer").warning(f"Error renderizando verdict badge: {exc}")
+        return None
+
+    def generate_tech_header_card_html(
+        self,
+        title: str,
+        subtitle: str = "",
+        author: str = "",
+        repo_or_tag: str = "",
+    ) -> str:
+        """
+        Genera el HTML de la tarjeta técnica flotante superior (Estilo: 'find-skills por Vercel · vercel-labs/skills').
+        Fondo oscuro #0d1117 con micro-matriz de puntos, tipografía mono de alta jerarquía y jerarquía limpia.
+        """
+        clean_title = (title or "tech-spec").strip()
+        
+        # Parsear si author y repo vienen combinados en subtitle (ej: "por Vercel · vercel-labs/skills")
+        clean_sub = subtitle.strip()
+        if not author and not repo_or_tag and "·" in clean_sub:
+            parts = [p.strip() for p in clean_sub.split("·", 1)]
+            author_part = parts[0]
+            repo_part = parts[1]
+            if author_part.lower().startswith("por "):
+                author = author_part[4:].strip()
+            else:
+                author = author_part
+            repo_or_tag = repo_part
+        elif not author and clean_sub:
+            author = clean_sub
+
+        meta_parts = []
+        if author:
+            meta_parts.append(f'<span>por <span class="tech-meta-author">{author}</span></span>')
+        if repo_or_tag:
+            if meta_parts:
+                meta_parts.append('<span class="tech-meta-sep">·</span>')
+            meta_parts.append(f'<span class="tech-meta-repo">{repo_or_tag}</span>')
+        meta_html = "".join(meta_parts) if meta_parts else f'<span>{clean_sub or "open-source"}</span>'
+
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+{HTML_FONTS}
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }}
+  .tech-card {{
+    position: relative;
+    width: 680px;
+    padding: 34px 40px;
+    border-radius: 20px;
+    background: #0d1117;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+    background-size: 16px 16px;
+    border: 1.5px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
+  }}
+  .tech-title {{
+    font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+    font-size: 52px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    word-break: break-word;
+  }}
+  .tech-meta {{
+    font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+    font-size: 20px;
+    font-weight: 500;
+    color: #8b949e;
+    letter-spacing: -0.2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }}
+  .tech-meta-author {{
+    color: #c9d1d9;
+    font-weight: 600;
+  }}
+  .tech-meta-sep {{
+    color: #484f58;
+  }}
+  .tech-meta-repo {{
+    color: #8b949e;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+  }}
+</style>
+</head>
+<body>
+  <div class="tech-card">
+    <div class="tech-title">{clean_title}</div>
+    <div class="tech-meta">
+      {meta_html}
+    </div>
+  </div>
+</body>
+</html>"""
+
+    def render_tech_header_card_to_image(
+        self,
+        title: str,
+        out_png: Path,
+        subtitle: str = "",
+        author: str = "",
+        repo_or_tag: str = "",
+    ) -> Optional[Path]:
+        """Renderiza a PNG transparente la tarjeta técnica flotante superior 'find-skills'."""
+        try:
+            out_png = Path(out_png)
+            out_png.parent.mkdir(parents=True, exist_ok=True)
+            html_content = self.generate_tech_header_card_html(
+                title=title,
+                subtitle=subtitle,
+                author=author,
+                repo_or_tag=repo_or_tag,
+            )
+            html_file = out_png.with_suffix(".html")
+            html_file.write_text(html_content, encoding="utf-8")
+            file_uri = html_file.resolve().as_uri()
+
+            args = [
+                self.browser_bin,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--hide-scrollbars",
+                "--default-background-color=00000000",
+                f"--screenshot={out_png.resolve()}",
+                "--window-size=1080,1920",
+                file_uri,
+            ]
+            subprocess.run(args, capture_output=True, check=True, timeout=15)
+            self._crop_transparent(out_png)
+            if out_png.exists() and out_png.stat().st_size > 500:
+                return out_png
+        except Exception as exc:
+            import logging
+            logging.getLogger("aethercut.web_renderer").warning(f"Error renderizando tech header card: {exc}")
+        return None
+
+    def render_visual_template(
+        self,
+        template_name: str,
+        out_png: Path,
+        params: Optional[Dict[str, Any]] = None,
+        variant: str = "orange_noir",
+    ) -> Optional[Path]:
+        """Renderiza cualquier plantilla de la librería VisualTemplatesLibrary."""
+        try:
+            from core.visual_templates import VisualTemplatesLibrary
+            lib = VisualTemplatesLibrary(browser_bin=self.browser_bin)
+            return lib.render_template_to_image(
+                template_name=template_name,
+                out_png=out_png,
+                params=params,
+                variant=variant,
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger("aethercut.web_renderer").warning(f"Error renderizando template '{template_name}': {exc}")
+            return None
+
+

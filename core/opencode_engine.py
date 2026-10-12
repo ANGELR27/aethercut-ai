@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue as _queue
 import shutil
 import subprocess
 import threading
@@ -38,13 +39,48 @@ MODEL_MAP: Dict[str, tuple] = {
 # Acciones de UI encoladas por las herramientas de la app, por sesión de OpenCode.
 _action_queues: Dict[str, List[Dict[str, Any]]] = {}
 _action_lock = threading.Lock()
+# Suscriptores en vivo (frontends conectados al SSE /api/oc/events).
+_live_subscribers: List["_queue.Queue[Dict[str, Any]]"] = []
+_live_lock = threading.Lock()
 # Permisos pendientes: request_id -> {"event": Event, "reply": str}
 _pending_permissions: Dict[str, Dict[str, Any]] = {}
 
 
+def _broadcast_action(action: Dict[str, Any]) -> None:
+    """Envía una acción a todos los frontends conectados por SSE (tiempo real)."""
+    with _live_lock:
+        subs = list(_live_subscribers)
+    for q in subs:
+        try:
+            q.put_nowait(action)
+        except Exception:
+            pass
+
+
+def subscribe_live_actions() -> "_queue.Queue[Dict[str, Any]]":
+    """Registra una cola que recibirá cada acción de UI en el instante en que se publique."""
+    q: "_queue.Queue[Dict[str, Any]]" = _queue.Queue()
+    with _live_lock:
+        _live_subscribers.append(q)
+    return q
+
+
+def unsubscribe_live_actions(q: "_queue.Queue[Dict[str, Any]]") -> None:
+    with _live_lock:
+        try:
+            _live_subscribers.remove(q)
+        except ValueError:
+            pass
+
+
 def push_action(session_id: str, action: Dict[str, Any]) -> None:
+    action = dict(action)
+    # Identificador único para que el frontend no ejecute dos veces la misma acción
+    # (llega por SSE en vivo y también drenada al final del turno del chat).
+    action.setdefault("uid", f"act-{time.time_ns()}-{id(action)}")
     with _action_lock:
         _action_queues.setdefault(session_id or "_", []).append(action)
+    _broadcast_action(action)
 
 
 def drain_actions(session_id: str) -> List[Dict[str, Any]]:

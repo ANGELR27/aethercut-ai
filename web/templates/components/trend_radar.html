@@ -13,6 +13,7 @@
             <div class="subcard-pills-wrap" style="margin: 0;">
                 <button type="button" class="subcard-pill-btn active" data-radar-tab="videos">🎥 Ranking viral</button>
                 <button type="button" class="subcard-pill-btn" data-radar-tab="topics">🚨 Temas sin video</button>
+                <button type="button" class="subcard-pill-btn" data-radar-tab="favorites">⭐ Favoritos (<span id="radarFavCountBadge">0</span>)</button>
             </div>
             <button type="button" class="subcard-pill-btn" id="radarRefreshBtn" title="Forzar barrido ahora (charts + IA)">↻</button>
         </div>
@@ -25,14 +26,125 @@
             <span title="KAI usa fragmentos del original solo ≤6s como apoyo de comentario (uso justo, igual con gameplays); el material principal es 100% propio y el video sale listo con miniatura de estudio">© Fragmentos ≤6s de apoyo · material propio · miniatura de estudio incluida</span>
             <span style="margin-left:auto;" id="radarRegionsLabel"></span>
         </div>
+
+        <!-- BARRA DE FILTROS: TIPO DE CONTENIDO, PAÍS/REGIÓN Y TEMPORALIDAD -->
+        <div class="radar-filter-bar" id="radarFilterBar">
+            <div class="radar-filter-group">
+                <label class="radar-filter-label" for="radarCategoryFilter">
+                    <span class="radar-filter-icon">🎭</span> Tipo de Contenido
+                </label>
+                <select id="radarCategoryFilter" class="radar-filter-select">
+                    <option value="all">Todas las temáticas</option>
+                    <option value="entretenimiento">🍿 Entretenimiento / Viral</option>
+                    <option value="divulgacion">🔬 Divulgación & Ciencia</option>
+                    <option value="noticias">📰 Noticias & Actualidad</option>
+                    <option value="tecnologia">💻 Tecnología & IA</option>
+                    <option value="musica">🎵 Música & Arte</option>
+                    <option value="gaming">🎮 Gaming</option>
+                    <option value="deportes">⚽ Deportes</option>
+                </select>
+            </div>
+
+            <div class="radar-filter-group">
+                <label class="radar-filter-label" for="radarRegionFilter">
+                    <span class="radar-filter-icon">🌍</span> País o Región
+                </label>
+                <select id="radarRegionFilter" class="radar-filter-select">
+                    <option value="all">Todas las regiones</option>
+                    <option value="US">🇺🇸 Estados Unidos (US)</option>
+                    <option value="ES">🇪🇸 España (ES)</option>
+                    <option value="MX">🇲🇽 México / LATAM (MX)</option>
+                    <option value="GB">🇬🇧 Reino Unido (GB)</option>
+                    <option value="GLOBAL">🌐 Global / Otras</option>
+                </select>
+            </div>
+
+            <div class="radar-filter-group">
+                <label class="radar-filter-label" for="radarRecencyFilter">
+                    <span class="radar-filter-icon">⏱️</span> Frescura / Fecha
+                </label>
+                <select id="radarRecencyFilter" class="radar-filter-select">
+                    <option value="all">Cualquier momento</option>
+                    <option value="fresh">🔥 Muy recientes (&lt; 24h / Hoy)</option>
+                    <option value="recent">⚡ Recientes (1 a 3 días / 72h)</option>
+                    <option value="older">📈 En tendencia (+3 días / Evergreen)</option>
+                </select>
+            </div>
+
+            <div class="radar-filter-group radar-search-group">
+                <label class="radar-filter-label" for="radarSearchInput">
+                    <span class="radar-filter-icon">🔍</span> Buscar
+                </label>
+                <div class="radar-search-wrap">
+                    <input type="text" id="radarSearchInput" class="radar-search-input" placeholder="Título, canal o tema..." autocomplete="off">
+                    <button type="button" id="radarSearchClearBtn" class="radar-search-clear" hidden title="Borrar búsqueda">✕</button>
+                </div>
+            </div>
+
+            <div class="radar-filter-status">
+                <span id="radarFilterCount" class="radar-filter-count"></span>
+                <button type="button" id="radarFilterResetBtn" class="radar-filter-reset-btn" hidden title="Restablecer todos los filtros">
+                    ↻ Limpiar filtros
+                </button>
+            </div>
+        </div>
+
         <div id="radarVideosList" class="radar-video-list"></div>
     </div>
 
-    <!-- PESTAÑA 2: TEMAS URGENTES SIN COBERTURA -->
+    <!-- PESTAÑA 2: TEMAS URGENTES SIN COBERTURA & FAVORITOS -->
     <div id="radarTopicsPane" hidden style="margin-top: 16px;">
         <div class="radar-legend">
             <span>Puntuados por la IA: fuerza de viralidad · urgencia · ángulo listo para producir</span>
+            <span style="margin-left: auto;">⭐ Guarda tus temas preferidos para producirlos en cualquier momento</span>
         </div>
+
+        <!-- BARRA DE FILTROS DE TEMAS -->
+        <div class="radar-filter-bar" id="radarTopicsFilterBar">
+            <div class="radar-filter-group" style="flex: 1 1 150px; max-width: 190px;">
+                <label class="radar-filter-label" for="radarTopicViewFilter">
+                    <span class="radar-filter-icon">📑</span> Vista / Sección
+                </label>
+                <select id="radarTopicViewFilter" class="radar-filter-select">
+                    <option value="all">🌐 Todos los temas</option>
+                    <option value="favorites">⭐ Mis Favoritos Guardados</option>
+                </select>
+            </div>
+
+            <div class="radar-filter-group" style="flex: 1 1 180px;">
+                <label class="radar-filter-label" for="radarTopicCategoryFilter">
+                    <span class="radar-filter-icon">🎭</span> Categoría de Tema
+                </label>
+                <select id="radarTopicCategoryFilter" class="radar-filter-select">
+                    <option value="all">Todas las categorías</option>
+                    <option value="divulgacion">🔬 Divulgación & Ciencia</option>
+                    <option value="tecnologia">💻 Tecnología & IA</option>
+                    <option value="espacio">🪐 Espacio & Cosmos</option>
+                    <option value="noticias">📰 Noticias & Urgentes</option>
+                    <option value="arqueologia">🏛️ Arqueología & Misterio</option>
+                    <option value="salud">❤️ Salud & Bienestar</option>
+                    <option value="entretenimiento">🍿 Entretenimiento / Viral</option>
+                </select>
+            </div>
+
+            <div class="radar-filter-group radar-search-group">
+                <label class="radar-filter-label" for="radarTopicSearchInput">
+                    <span class="radar-filter-icon">🔍</span> Buscar Tema
+                </label>
+                <div class="radar-search-wrap">
+                    <input type="text" id="radarTopicSearchInput" class="radar-search-input" placeholder="Buscar por palabra clave, ángulo o concepto..." autocomplete="off">
+                    <button type="button" id="radarTopicSearchClearBtn" class="radar-search-clear" hidden title="Borrar búsqueda">✕</button>
+                </div>
+            </div>
+
+            <div class="radar-filter-status">
+                <span id="radarTopicFilterCount" class="radar-filter-count"></span>
+                <button type="button" id="radarTopicFilterResetBtn" class="radar-filter-reset-btn" hidden title="Restablecer filtros">
+                    ↻ Limpiar filtros
+                </button>
+            </div>
+        </div>
+
         <div id="radarTopicsGrid" class="radar-topics-grid"></div>
     </div>
 </section>

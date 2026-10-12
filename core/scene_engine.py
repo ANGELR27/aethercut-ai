@@ -18,6 +18,8 @@ import json
 import math
 import re
 import subprocess
+import sys
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -100,7 +102,14 @@ class SceneEngine:
         color_grade: str = "cinema",
         bgm_volume: float = 0.06,
         bgm_track: str = "default",
+        style_spec: Optional[Dict[str, Any]] = None,
     ):
+        self.style_spec = style_spec
+        if style_spec:
+            if not card_theme or card_theme in ("dark", "auto"):
+                card_theme = style_spec.get("card_theme", card_theme)
+            if not sub_style or sub_style in ("classic", "auto"):
+                sub_style = style_spec.get("sub_style", sub_style)
         self.sub_style = sub_style
         self.subs_enabled = subs_enabled
         self.workdir = workdir
@@ -136,6 +145,30 @@ class SceneEngine:
             self.motion_engine = MotionGraphicsEngine(self.web_renderer, is_vertical=self.is_vertical)
         except Exception:
             self.motion_engine = None
+        try:
+            from core.ai_remotion_generator import AIRemotionGenerator
+            self.ai_remotion = AIRemotionGenerator()
+        except Exception:
+            self.ai_remotion = None
+
+
+    @staticmethod
+    def _is_valid_media_clip(clip_p: Path) -> bool:
+        """Comprueba si un archivo multimedia existe y tiene frames decodificables."""
+        if not clip_p.exists() or clip_p.stat().st_size < 1000:
+            return False
+        if clip_p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+            return True
+        try:
+            res = subprocess.run(
+                ["ffmpeg", "-i", str(clip_p), "-t", "0.5", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=5
+            )
+            if "Output file is empty" in res.stderr:
+                return False
+            return True
+        except Exception:
+            return False
 
     async def render_scene(
         self,
@@ -150,11 +183,13 @@ class SceneEngine:
         scene_dir = self.workdir / f"scene_{scene.scene_id}"
         scene_dir.mkdir(parents=True, exist_ok=True)
         scene_out = scene_dir / f"scene_{scene.scene_id}.mp4"
-        # Escritura atómica: FFmpeg escribe a .tmp.mp4 y solo al terminar bien se
-        # renombra. Una cancelación (proc.kill) deja el parcial en .tmp, jamás en
-        # el archivo final — la caché no puede envenenarse con un MP4 sin moov.
-        scene_tmp = scene_dir / f"scene_{scene.scene_id}.tmp.mp4"
-        scene_tmp.unlink(missing_ok=True)
+        # Escritura atómica con UUID único para evitar bloqueos de Windows [WinError 32]
+        scene_tmp = scene_dir / f"scene_{scene.scene_id}_{uuid.uuid4().hex[:6]}.tmp.mp4"
+        for old_tmp in scene_dir.glob(f"scene_{scene.scene_id}*.tmp.mp4"):
+            try:
+                old_tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
 
         # 0. Cache inteligente de escenas (Reanudar sin rehacer lo que ya está listo).
         # Se valida tamaño Y la firma de settings + guion: una escena hecha con otro
@@ -162,7 +197,11 @@ class SceneEngine:
         thumb_path = scene_dir / "scene_thumb.jpg"
         meta_path = scene_dir / "render_meta.json"
         if scene_out.exists() and scene_out.stat().st_size > 50000 and self._cache_meta_valid(meta_path, scene):
-            scene_tmp.unlink(missing_ok=True)
+            for old_tmp in scene_dir.glob(f"scene_{scene.scene_id}*.tmp.mp4"):
+                try:
+                    old_tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
             if not thumb_path.exists():
                 try:
                     import subprocess
@@ -191,17 +230,51 @@ class SceneEngine:
         rate_mod, pitch_mod = EMOTION_VOICE_MODULATION.get(scene.emotion, ("+0%", "+0Hz"))
         audio_path = scene_dir / "voice.mp3"
 
-        import edge_tts
-        communicate = edge_tts.Communicate(tts_speech_text, self.voice, rate=rate_mod, pitch=pitch_mod)
         sentence_boundaries = []
-        with open(audio_path, "wb") as f_audio:
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    f_audio.write(chunk["data"])
-                elif chunk["type"] == "SentenceBoundary":
-                    s_sec = chunk["offset"] / 10_000_000
-                    d_sec = chunk["duration"] / 10_000_000
-                    sentence_boundaries.append((s_sec, s_sec + d_sec, chunk["text"].strip()))
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(tts_speech_text, self.voice, rate=rate_mod, pitch=pitch_mod)
+            with open(audio_path, "wb") as f_audio:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        f_audio.write(chunk["data"])
+                    elif chunk["type"] == "SentenceBoundary":
+                        s_sec = chunk["offset"] / 10_000_000
+                        d_sec = chunk["duration"] / 10_000_000
+                        sentence_boundaries.append((s_sec, s_sec + d_sec, chunk["text"].strip()))
+        except Exception as _tts_err:
+            safe_log(f"[SceneEngine] Edge-TTS no disponible ({_tts_err}). Usando gTTS de respaldo para que la producción continúe...")
+            try:
+                from gtts import gTTS
+                # Determinar idioma básico
+                lang_code = "es" if any(x in (self.voice or "").lower() for x in ["es-", "es_", "spanish"]) else "es"
+                gtts_obj = gTTS(text=tts_speech_text, lang=lang_code)
+                gtts_obj.save(str(audio_path))
+                # Estimar boundaries de frases para subtítulos
+                raw_sentences = [s.strip() for s in re.split(r"([.!?…]+)", tts_speech_text) if s.strip()]
+                # Reconstruir frases completas
+                full_sents = []
+                cur_s = ""
+                for part in raw_sentences:
+                    cur_s += (" " if cur_s else "") + part
+                    if re.search(r"[.!?…]$", part):
+                        full_sents.append(cur_s.strip())
+                        cur_s = ""
+                if cur_s:
+                    full_sents.append(cur_s.strip())
+                if not full_sents:
+                    full_sents = [tts_speech_text]
+                
+                est_dur = max(3.0, len(tts_speech_text) * 0.065)
+                cur_t = 0.0
+                total_chars = max(1, sum(len(s) for s in full_sents))
+                for s in full_sents:
+                    s_dur = (len(s) / total_chars) * est_dur
+                    sentence_boundaries.append((round(cur_t, 2), round(cur_t + s_dur, 2), s))
+                    cur_t += s_dur
+            except Exception as _gtts_err:
+                safe_log(f"[SceneEngine] Error crítico generando voz fallback: {_gtts_err}")
+                raise _tts_err
 
         # Medir duración exacta del audio real de la escena generado limpiamente por el TTS neural
         tts_duration = self._get_audio_duration(audio_path)
@@ -305,16 +378,25 @@ class SceneEngine:
                 while target_cut <= duration - 2.2 and len(bg_clips) < 4:
                     if not any(abs(t - target_cut) < 2.0 for t in existing_times):
                         sub_q = ""
-                        if sentence_boundaries:
-                            for s_st, _s_en, s_txt in sentence_boundaries:
-                                if abs(s_st - target_cut) <= 2.5:
-                                    words = [w for w in re.findall(r"\w+", s_txt) if len(w) > 3]
-                                    if words:
-                                        sub_q = " ".join(words[:4]) + " 4k cinematic"
+                        # 1. Usar visual_queries secundarias diseñadas por el director si existen
+                        if scene.visual_queries and len(bg_clips) < len(scene.visual_queries):
+                            cand_q = scene.visual_queries[len(bg_clips)]
+                            if cand_q and cand_q != scene.visual_query:
+                                sub_q = f"{cand_q} 4k"
+
+                        # 2. Revisar si hay un beat visual del director cercano a este tiempo
+                        if not sub_q and getattr(scene, "visual_beats", None):
+                            for vb in scene.visual_beats:
+                                if isinstance(vb, dict) and vb.get("query"):
+                                    sub_q = f"{vb['query']} 4k"
                                     break
+
+                        # 3. Variación cinemática en inglés sobre la query base (evita búsquedas en español)
                         if not sub_q:
-                            base_q = scene.visual_query or scene.name
-                            sub_q = f"{base_q} cinematic perspective 4k"
+                            base_q = scene.visual_query or "documentary cinematic"
+                            variations = ["close up detail 4k", "wide angle perspective 4k", "slow motion cinematic 4k"]
+                            var_suffix = variations[(len(bg_clips) - 1) % len(variations)]
+                            sub_q = f"{base_q} {var_suffix}"
 
                         try:
                             supp_clip = await self._get_scene_visual(sub_q, scene_dir, is_video_scene=True)
@@ -326,8 +408,19 @@ class SceneEngine:
                             safe_log(f"[SceneEngine] Fallback en B-Roll complementario: {_esup}")
                     target_cut += 4.5
 
+        # Filtrar clips corruptos o sin frames decodificables
+        valid_bg_clips = []
+        for p, t in bg_clips:
+            if self._is_valid_media_clip(p):
+                valid_bg_clips.append((p, t))
+            else:
+                safe_log(f"[SceneEngine] ⚠️ Descartando clip corrupto o sin frames decodificables: {p.name}")
+        bg_clips = valid_bg_clips
+
         # Ordenar clips de fondo por segundo de inicio
         bg_clips.sort(key=lambda x: x[1])
+        if bg_clips and bg_clips[0][1] > 0.0:
+            bg_clips[0] = (bg_clips[0][0], 0.0)
 
         # Si no se pudo obtener ningún B-Roll o falló la descarga, usar estudio ambiental
         if not bg_clips:
@@ -385,17 +478,146 @@ class SceneEngine:
                 motion_overlay_path = None
 
         # 3. Preparar tarjeta Bento moderna si aplica
+        # 3. Preparar tarjeta gráfica moderna o distintivo viral si aplica
         card_img_path = None
+        card_visual_type = "bento"
+        card_start_time = 0.5
         if scene.card:
             card_img_path = scene_dir / f"card_{scene.scene_id}.png"
             c_badge = str(scene.card.get("badge") if isinstance(scene.card, dict) else getattr(scene.card, "badge", "") or "").upper()
             c_headline = str(scene.card.get("headline") if isinstance(scene.card, dict) else getattr(scene.card, "headline", "") or "")
             c_body = str(scene.card.get("body") if isinstance(scene.card, dict) else getattr(scene.card, "body", "") or c_headline)
             c_stat = str(scene.card.get("stat") if isinstance(scene.card, dict) else getattr(scene.card, "stat", "") or "")
+            c_style = str(getattr(scene.card, "style", "auto") if hasattr(scene.card, "style") else (scene.card.get("style", "auto") if isinstance(scene.card, dict) else "auto")).lower().strip()
+            c_icon = str(getattr(scene.card, "icon", "✓") if hasattr(scene.card, "icon") else (scene.card.get("icon", "✓") if isinstance(scene.card, dict) else "✓")).strip()
+            c_sub = str(getattr(scene.card, "subtitle", "") if hasattr(scene.card, "subtitle") else (scene.card.get("subtitle", "") if isinstance(scene.card, dict) else "")).strip()
+
+            # Sincronización temporal con la locución si se mencionan palabras clave del titular
+            if sentence_boundaries and c_headline:
+                c_words = [w.lower() for w in re.findall(r'\w+', c_headline) if len(w) > 3]
+                for s_st, _s_en, s_txt in sentence_boundaries:
+                    low_txt = s_txt.lower()
+                    if any(w in low_txt for w in c_words):
+                        card_start_time = max(0.4, min(duration - 2.5, round(s_st, 2)))
+                        break
+
+            c_template = str(getattr(scene.card, "template", "auto") if hasattr(scene.card, "template") else (scene.card.get("template", "auto") if isinstance(scene.card, dict) else "auto")).lower().strip()
+            c_variant = str(getattr(scene.card, "variant", "orange_noir") if hasattr(scene.card, "variant") else (scene.card.get("variant", "orange_noir") if isinstance(scene.card, dict) else "orange_noir")).lower().strip()
+            c_params = dict(getattr(scene.card, "params", {}) if hasattr(scene.card, "params") else (scene.card.get("params", {}) if isinstance(scene.card, dict) else {}))
 
             try:
+                # 0. Plantillas dedicadas del VisualTemplatesLibrary
+                # 0a. Distintivo Viral Inclinado (Reels: '✓ ganó Opus', '100% Real', 'Confirmado')
+                if c_template == "verdict_badge" or c_style == "verdict_badge" or any(k in c_badge for k in ("VEREDICTO", "GANADOR", "GANÓ", "GANO", "SELLO", "BADGE", "STAMP")) or any(k in c_headline.lower() for k in ("ganó", "gano", "ganador", "100% real", "veredicto")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="verdict_badge",
+                        out_png=card_img_path,
+                        params={"headline": c_headline, "icon": c_icon or "✓", "subtitle": c_sub or c_body, **c_params},
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "verdict_badge"
+                        safe_log(f"[SceneEngine] 🏷️ Distintivo Viral (Verdict Badge) generado para escena {scene.scene_id}: {c_headline}")
+
+                # 0b. Tarjeta Técnica Flotante Superior (Reels: 'find-skills por Vercel')
+                elif c_template in ("tech_card", "tech_header") or c_style == "tech_card" or any(k in c_badge for k in ("TECH", "HERRAMIENTA", "SKILL", "TOOL", "DEV", "GITHUB", "CÓDIGO", "CODIGO")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="tech_card",
+                        out_png=card_img_path,
+                        params={"title": c_headline, "subtitle": c_sub or c_body or c_stat, **c_params},
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "tech_card"
+                        safe_log(f"[SceneEngine] 💻 Tarjeta Técnica Flotante (Tech Card) generada para escena {scene.scene_id}: {c_headline}")
+
+                # 0c. Cifra Récord / Métrica Clave con medidor en gradiente
+                elif c_template in ("stat_counter", "stat_card") or any(k in c_badge for k in ("RÉCORD", "RECORD", "CIFRA", "MÉTRICA", "METRICA")) or ("%" in c_stat or (c_stat and any(ch.isdigit() for ch in c_stat) and len(c_stat) < 12 and not any(k in c_badge for k in ("MAPA", "GEO")))):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="stat_counter",
+                        out_png=card_img_path,
+                        params={"stat_value": c_stat or "100%", "stat_label": c_body or c_headline, "headline": c_headline, "tag": c_badge or "MÉTRICA CLAVE", **c_params},
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "stat_counter"
+                        safe_log(f"[SceneEngine] 📊 Métrica Clave (Stat Counter) generada para escena {scene.scene_id}: {c_stat}")
+
+                # 0d. Comparativa Versus Dual (Lado A vs Lado B con divisor circular central)
+                elif c_template in ("versus_split", "versus", "vs") or any(k in c_badge for k in ("VERSUS", "COMPARATIVA", "DUAL", "VS")) or (" vs " in c_headline.lower() or " vs " in c_body.lower() or " vs " in c_stat.lower()):
+                    s_a = c_headline
+                    s_b = c_body or "IA"
+                    st_a, st_b = "", ""
+                    if " vs " in c_headline.lower():
+                        parts = c_headline.split(" vs ", 1)
+                        s_a, s_b = parts[0].strip(), parts[1].strip()
+                    if " vs " in c_stat.lower():
+                        st_parts = c_stat.split(" vs ", 1)
+                        st_a, st_b = st_parts[0].strip(), st_parts[1].strip()
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="versus_split",
+                        out_png=card_img_path,
+                        params={"side_a": s_a, "side_b": s_b, "stat_a": st_a, "stat_b": st_b, "tag": c_badge or "COMPARATIVA DIRECTA", **c_params},
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "versus_split"
+                        safe_log(f"[SceneEngine] ⚔️ Comparativa Versus Dual generada para escena {scene.scene_id}: {s_a} vs {s_b}")
+
+                # 0e. Insignia de Hito, Fase o Paso (Step Badge)
+                elif c_template in ("step_badge", "step", "phase") or any(k in c_badge for k in ("PASO", "FASE", "HITO", "REGLA")) or (c_headline.lower().startswith("paso ") or c_headline.lower().startswith("fase ")):
+                    step_num = c_stat or "01"
+                    m_num = re.search(r'\d+', c_headline)
+                    if m_num and not c_stat:
+                        step_num = m_num.group(0)
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="step_badge",
+                        out_png=card_img_path,
+                        params={"step_number": step_num, "step_title": c_headline, "subtitle": c_body or c_sub, **c_params},
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "step_badge"
+                        safe_log(f"[SceneEngine] 🔢 Insignia de Fase (Step Badge) generada para escena {scene.scene_id}: {c_headline}")
+
+                # 0f. Banner de Alerta Crítica HUD
+                elif c_template in ("alert_banner", "alert", "warning") or any(k in c_badge for k in ("ALERTA", "PELIGRO", "WARNING", "CRÍTICO", "CRITICO")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="alert_banner",
+                        out_png=card_img_path,
+                        params={"headline": c_headline, "body": c_body, "tag": c_badge or "ADVERTENCIA CRÍTICA", **c_params},
+                        variant="crimson_hazard" if c_variant == "orange_noir" else c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "alert_banner"
+                        safe_log(f"[SceneEngine] ⚠️ Banner de Alerta Táctica generado para escena {scene.scene_id}: {c_headline}")
+
+                # 0g. Pastilla de Fuente Verificada (Source Chip)
+                elif c_template in ("source_chip", "chip", "source") or any(k in c_badge for k in ("FUENTE", "ATRIBUCIÓN", "ATRIBUCION", "ORIGEN")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="source_chip",
+                        out_png=card_img_path,
+                        params={"source_name": c_headline, "tag": c_badge or "FUENTE OFICIAL", **c_params},
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "source_chip"
+                        safe_log(f"[SceneEngine] 🛡️ Pastilla de Fuente (Source Chip) generada para escena {scene.scene_id}: {c_headline}")
+
+                # 0h. Citas / Evidencias documentales -> Cita Vox Style de alta fidelidad
+                elif c_template in ("quote_evidence", "quote", "citation") or any(k in c_badge for k in ("DOCUMENTAL", "EVIDENCIA", "INFORME", "CITA")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="quote_evidence",
+                        out_png=card_img_path,
+                        params={"quote_text": c_body or c_headline, "source": c_stat or "Registro Oficial 2026", **c_params},
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "quote_evidence"
+                        safe_log(f"[SceneEngine] 📜 Cita/Evidencia Vox Style generada para escena {scene.scene_id}")
+
                 # 1. Mapa Geopolítico / Satelital Táctico GeoIntel (si aplica específicamente)
-                if any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN")) or "mapa" in c_headline.lower():
+                elif any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN")) or "mapa" in c_headline.lower():
                     map_result = self.web_renderer.render_geointel_map_to_image(
                         location_title=c_headline,
                         country_name=c_stat or "ZONA DE INVESTIGACIÓN",
@@ -405,6 +627,7 @@ class SceneEngine:
                         badge=c_badge or "RECONOCIMIENTO GEOGRÁFICO",
                     )
                     if map_result:
+                        card_visual_type = "map"
                         safe_log(f"[SceneEngine] 🗺️ Mapa Geopolítico GeoIntel generado para escena {scene.scene_id}")
                     else:
                         self.web_renderer.render_to_image(
@@ -418,25 +641,10 @@ class SceneEngine:
                             style="auto",
                             image_path=broll_img,
                         )
+                        card_visual_type = "bento"
                         safe_log(f"[SceneEngine] 📊 Tarjeta Bento estándar generada para escena {scene.scene_id}")
 
-                # 2. Citas / Evidencias documentales -> Bento quote si no hay stat, o auto si hay stat
-                elif any(k in c_badge for k in ("DOCUMENTAL", "EVIDENCIA", "INFORME", "CITA")):
-                    c_style = "quote" if not c_stat else "auto"
-                    self.web_renderer.render_to_image(
-                        headline=c_headline,
-                        out_png=card_img_path,
-                        stat_value=c_stat or "",
-                        stat_label="Cifra Verificada" if c_stat else "",
-                        body=c_body,
-                        badge=c_badge or "EVIDENCIA DOCUMENTAL",
-                        source="Registro Oficial 2026",
-                        style=c_style,
-                        image_path=broll_img,
-                    )
-                    safe_log(f"[SceneEngine] 📜 Cita/Evidencia Bento moderna Matte Dark generada para escena {scene.scene_id}")
-
-                # 3. Comparativa / Versus / Bento estándar
+                # 2. Bento estándar (Fallback final)
                 else:
                     self.web_renderer.render_to_image(
                         headline=c_headline,
@@ -449,6 +657,7 @@ class SceneEngine:
                         style="auto",
                         image_path=broll_img,
                     )
+                    card_visual_type = "bento"
                     safe_log(f"[SceneEngine] 🎨 Tarjeta Bento moderna WebCardRenderer generada para escena {scene.scene_id}")
             except Exception as _we:
                 safe_log(f"[SceneEngine] Fallback a WebCardRenderer simplificado: {_we}")
@@ -686,6 +895,21 @@ class SceneEngine:
         except Exception as _kwe:
             safe_log(f"[SceneEngine] Fallback en palabras clave flotantes: {_kwe}")
 
+        # Remotion AI: Generación en marcha de componente React animado personalizado
+        ai_remotion_mov: Optional[Path] = None
+        if getattr(self, "ai_remotion", None) and duration >= 3.0:
+            try:
+                ai_remotion_mov = await self.ai_remotion.render_ai_overlay(
+                    scene_name=scene.name,
+                    speech_text=speech_text,
+                    duration=duration,
+                    out_dir=scene_dir,
+                    vertical=self.is_vertical,
+                    theme_spec=getattr(self, "style_spec", None),
+                )
+            except Exception as _re_err:
+                safe_log(f"[SceneEngine] Remotion AI overlay omitido: {_re_err}")
+
         srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
 
         # 5. Montar filtergraph de FFmpeg específico para el layout de la escena
@@ -695,63 +919,60 @@ class SceneEngine:
 
         # Montaje secuencial dinámico de todos los clips de fondo (bg_clips)
         if bg_clips:
-            first_bg_path, _ = bg_clips[0]
-            first_is_image = first_bg_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
-            if first_is_image:
-                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(first_bg_path)])
-            else:
-                inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(first_bg_path)])
-
-            if first_is_image:
-                # Ken Burns: overscan 110% → zoom lento de 1.0x a 1.08x + paneo sutil hacia arriba
-                kb_frames = max(1, int(float(dur_str) * 25))
-                filter_parts.append(
-                    f"[0:v]scale={int(self.W * 1.12)}:{int(self.H * 1.12)}:force_original_aspect_ratio=increase,"
-                    f"crop={int(self.W * 1.12)}:{int(self.H * 1.12)},"
-                    f"zoompan=z='min(zoom+0.0003,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)-{self.H//10}*on/{kb_frames}':d={kb_frames}:s={self.W}x{self.H}:fps=25,"
-                    f"setsar=1[v_bg0]"
-                )
-            else:
-                filter_parts.append(
-                    f"[0:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1[v_bg0]"
-                )
-            cur_v = "v_bg0"
-            num_in += 1
-
-            # Superponer clips subsiguientes en sus marcas de tiempo exactas
-            for c_idx_sub, (clip_p, cut_sec) in enumerate(bg_clips[1:], start=1):
-                sub_is_image = clip_p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
-                if sub_is_image:
-                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(clip_p)])
-                else:
-                    # Beat de VIDEO sincronizado a su frase: el clip entra a
-                    # cut_sec mostrando SU PROPIO frame 0. Se lee solo lo que
-                    # resta de escena y setpts desplaza los timestamps hasta
-                    # cut_sec. Antes el clip corría oculto desde t=0 y al
-                    # revelarse entraba por su mitad (frame interno de cut_sec),
-                    # perdiendo el momento exacto que el director marcó.
-                    remaining = max(0.5, duration - cut_sec)
-                    inputs.extend(["-t", f"{remaining:.2f}", "-r", "25", "-stream_loop", "-1", "-i", str(clip_p)])
-                clip_in_idx = num_in
-                num_in += 1
-                v_scaled = f"v_bg_scaled_{c_idx_sub}"
-                v_next = f"v_bg_seq_{c_idx_sub}"
-                if sub_is_image:
-                    kb_frames_sub = max(1, int(float(dur_str) * 25))
+            if len(bg_clips) == 1:
+                first_bg_path, _ = bg_clips[0]
+                first_is_image = first_bg_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+                if first_is_image:
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(first_bg_path)])
+                    kb_frames = max(1, int(float(dur_str) * 25))
                     filter_parts.append(
-                        f"[{clip_in_idx}:v]scale={int(self.W * 1.12)}:{int(self.H * 1.12)}:force_original_aspect_ratio=increase,"
+                        f"[0:v]scale={int(self.W * 1.12)}:{int(self.H * 1.12)}:force_original_aspect_ratio=increase,"
                         f"crop={int(self.W * 1.12)}:{int(self.H * 1.12)},"
-                        f"zoompan=z='min(zoom+0.0003,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25,"
-                        f"setsar=1[{v_scaled}];"
-                        f"[{cur_v}][{v_scaled}]overlay=0:0:enable='gte(t,{cut_sec:.2f})'[{v_next}]"
+                        f"zoompan=z='min(zoom+0.0003,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)-{self.H//10}*on/{kb_frames}':d={kb_frames}:s={self.W}x{self.H}:fps=25,"
+                        f"setsar=1[v_bg0]"
                     )
                 else:
+                    inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(first_bg_path)])
                     filter_parts.append(
-                        f"[{clip_in_idx}:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},"
-                        f"setpts=PTS+{cut_sec:.2f}/TB,setsar=1[{v_scaled}];"
-                        f"[{cur_v}][{v_scaled}]overlay=0:0:enable='gte(t,{cut_sec:.2f})'[{v_next}]"
+                        f"[0:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1,"
+                        f"tpad=stop_mode=clone:stop_duration={dur_str},trim=duration={dur_str},setpts=PTS-STARTPTS[v_bg0]"
                     )
-                cur_v = v_next
+                cur_v = "v_bg0"
+                num_in += 1
+            else:
+                # Múltiples B-Rolls: Concat lineal sin frame buffering ni desincronización
+                seg_cuts = [max(0.0, cut) for _, cut in bg_clips]
+                seg_cuts[0] = 0.0
+                seg_tags = []
+                for i, (clip_p, _) in enumerate(bg_clips):
+                    t_start = seg_cuts[i]
+                    t_end = seg_cuts[i + 1] if (i + 1 < len(bg_clips)) else duration
+                    seg_dur = max(0.5, round(t_end - t_start, 2))
+                    seg_dur_str = f"{seg_dur:.2f}"
+                    is_img = clip_p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+                    clip_in_idx = num_in
+                    num_in += 1
+                    seg_tag = f"v_seg_{i}"
+                    seg_tags.append(f"[{seg_tag}]")
+
+                    if is_img:
+                        inputs.extend(["-loop", "1", "-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
+                        kb_frames_sub = max(1, int(seg_dur * 25))
+                        filter_parts.append(
+                            f"[{clip_in_idx}:v]scale={int(self.W * 1.12)}:{int(self.H * 1.12)}:force_original_aspect_ratio=increase,"
+                            f"crop={int(self.W * 1.12)}:{int(self.H * 1.12)},"
+                            f"zoompan=z='min(zoom+0.0003,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25,"
+                            f"setsar=1,trim=duration={seg_dur_str},setpts=PTS-STARTPTS[{seg_tag}]"
+                        )
+                    else:
+                        inputs.extend(["-t", seg_dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(clip_p)])
+                        filter_parts.append(
+                            f"[{clip_in_idx}:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1,"
+                            f"tpad=stop_mode=clone:stop_duration={seg_dur_str},trim=duration={seg_dur_str},setpts=PTS-STARTPTS[{seg_tag}]"
+                        )
+                all_segs = "".join(seg_tags)
+                filter_parts.append(f"{all_segs}concat=n={len(bg_clips)}:v=1:a=0[v_bg_seq]")
+                cur_v = "v_bg_seq"
         else:
             inputs.extend(["-f", "lavfi", "-i", f"color=c=0x0a0a0c:s={self.W}x{self.H}:d={dur_str}:r=25"])
             filter_parts.append("[0:v]format=yuva420p[v_bg0]")
@@ -765,7 +986,7 @@ class SceneEngine:
             num_in += 1
             filter_parts.append(
                 f"[{m_idx}:v]format=rgba,fade=t=in:st=0.3:d=0.35:alpha=1,fade=t=out:st={duration-0.35:.2f}:d=0.35:alpha=1[motion_in];"
-                f"[{cur_v}][motion_in]overlay=0:0:enable='between(t,0.3,{duration-0.2:.2f})'[v_bg_motion]"
+                f"[{cur_v}][motion_in]overlay=x='8*sin(t*0.9)':y='6*cos(t*0.7)':enable='between(t,0.3,{duration-0.2:.2f})'[v_bg_motion]"
             )
             cur_v = "v_bg_motion"
 
@@ -793,11 +1014,17 @@ class SceneEngine:
             free_title_dur = 0.0
 
         if card_duration > 0:
-            # Fondo nítido + capa desenfocada activa solo durante la permanencia de la tarjeta
-            filter_parts.append(f"[{cur_v}]split[v_crisp][v_to_blur];[v_to_blur]boxblur=5:2,drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.45:t=fill[v_blurred];[v_crisp][v_blurred]overlay=0:0:enable='between(t,0.4,{0.4 + card_duration:.2f})'[v_dim]")
+            if card_visual_type in ("verdict_badge", "tech_card"):
+                # Badges y tech cards flotan limpiamente sobre el video nítido sin desenfoque pesado
+                filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.15:t=fill[v_dim]")
+            else:
+                # Bento Box / Cita / Mapa / Stat Counter: Dimming nítido y elegante sin boxblur CPU-bloat
+                filter_parts.append(
+                    f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.40:t=fill:enable='between(t,{card_start_time:.2f},{card_start_time + card_duration:.2f})'[v_dim]"
+                )
         elif free_title_dur > 0:
-            # Desenfoque cinematográfico profundo temporal durante la aparición del gran texto libre
-            filter_parts.append(f"[{cur_v}]split[v_crisp][v_to_blur];[v_to_blur]boxblur=14:4,drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.45:t=fill[v_blurred];[v_crisp][v_blurred]overlay=0:0:enable='between(t,0.4,{0.4 + free_title_dur:.2f})'[v_dim]")
+            # Atenuación cinematográfica durante la aparición del gran texto libre
+            filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.45:t=fill:enable='between(t,0.4,{0.4 + free_title_dur:.2f})'[v_dim]")
         else:
             filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.15:t=fill[v_dim]")
         cur_v = "v_dim"
@@ -918,22 +1145,81 @@ class SceneEngine:
             inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(card_img_path)])
             c_idx = num_in
             num_in += 1
-            card_end = 0.5 + card_duration
-            fo_start = max(0.0, card_end - 0.4)
-            # Motion Graphics: Fade in 0.35s + Fade out suave 0.35s
-            filter_parts.append(
-                f"[{c_idx}:v]format=rgba,fade=t=in:st=0.5:d=0.35:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
-            )
-            # Entrada con slide suave (deslizamiento ease-out de 30px hacia el centro perfecto)
-            # En formato 16:9 horizontal, centrar la tarjeta horizontalmente para máxima presencia y elegancia
-            # card_w = 1060 + margen = ~1120px -> centrado en (1920 - 1120)/2 = ~400px
-            slide_dist = 26
-            slide_calc = f"min(max((t-0.5)/0.35\\,0)\\,1)"
-            # Centrado perfecto en pantalla (X y Y) con elevacion ease-out hacia el centro
-            card_base_x = "((W-w)/2)"
-            ease_y = f"((H-h)/2)+{slide_dist}*(1-pow({slide_calc}\\,3))"
-            filter_parts.append(f"[{cur_v}][card_animated]overlay=x='{card_base_x}':y='{ease_y}':enable='between(t,0.5,{card_end:.2f})'[v_card]")
-            cur_v = "v_card"
+            card_end = card_start_time + card_duration
+            fo_start = max(card_start_time, card_end - 0.35)
+
+            if card_visual_type == "verdict_badge":
+                # Distintivo viral inclinado: Spring Bounce elástico (overshoot) + respiración flotante viva
+                # Escala 0.65 -> 1.03 -> 1.00 en 0.28s
+                bounce_calc = f"min(max((t-{card_start_time:.2f})/0.28\\,0)\\,1)"
+                scale_expr = f"iw*min(1.0\\, 0.65 + 0.38*sin({bounce_calc}*1.9))"
+                filter_parts.append(
+                    f"[{c_idx}:v]scale=eval=frame:w='{scale_expr}':h=-2,format=rgba,"
+                    f"fade=t=in:st={card_start_time:.2f}:d=0.18:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
+                )
+                ease_y = f"((H-h)/2) - 40 + 5*sin(t*2.8)"
+                filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                cur_v = "v_card"
+
+            elif card_visual_type == "tech_card":
+                # Tarjeta técnica moderna: Flotando en el tercio superior con deslizamiento suave y oscilación sutil
+                top_y = int(self.H * 0.16) if self.is_vertical else int(self.H * 0.12)
+                slide_dist = 28
+                slide_calc = f"min(max((t-{card_start_time:.2f})/0.32\\,0)\\,1)"
+                ease_y = f"{top_y} - {slide_dist}*(1-pow({slide_calc}\\,3)) + 4*sin(t*2.4)"
+                filter_parts.append(
+                    f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.25:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
+                )
+                filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                cur_v = "v_card"
+
+            elif card_visual_type in ("step_badge", "source_chip"):
+                # Insignia de paso o fuente: Entrada lateral flotante con rebote sutil desde la izquierda
+                slide_dist = 40
+                slide_calc = f"min(max((t-{card_start_time:.2f})/0.30\\,0)\\,1)"
+                ease_x = f"50 - {slide_dist}*(1-pow({slide_calc}\\,3))"
+                chip_y = int(self.H * 0.68) if self.is_vertical else int(self.H * 0.72)
+                filter_parts.append(
+                    f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.20:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.30:alpha=1[card_animated]"
+                )
+                filter_parts.append(f"[{cur_v}][card_animated]overlay=x='{ease_x}':y='{chip_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                cur_v = "v_card"
+
+            elif card_visual_type == "alert_banner":
+                # Alerta táctica HUD: Caída rápida e impacto de advertencia en el tercio superior
+                alert_y = int(self.H * 0.18) if self.is_vertical else int(self.H * 0.14)
+                slide_dist = 35
+                slide_calc = f"min(max((t-{card_start_time:.2f})/0.26\\,0)\\,1)"
+                ease_y = f"{alert_y} - {slide_dist}*(1-pow({slide_calc}\\,3))"
+                filter_parts.append(
+                    f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.15:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.30:alpha=1[card_animated]"
+                )
+                filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                cur_v = "v_card"
+
+            elif card_visual_type == "stat_counter":
+                # Métrica gigante: Escala suave y elevación centrada con micro-flotación
+                slide_dist = 22
+                slide_calc = f"min(max((t-{card_start_time:.2f})/0.32\\,0)\\,1)"
+                ease_y = f"((H-h)/2) + {slide_dist}*(1-pow({slide_calc}\\,3)) + 3*sin(t*2.2)"
+                filter_parts.append(
+                    f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.25:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
+                )
+                filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                cur_v = "v_card"
+
+            else:
+                # Bento Box / Versus Split / Quote / Mapa estándar
+                slide_dist = 26
+                slide_calc = f"min(max((t-{card_start_time:.2f})/0.35\\,0)\\,1)"
+                card_base_x = "((W-w)/2)"
+                ease_y = f"((H-h)/2)+{slide_dist}*(1-pow({slide_calc}\\,3)) + 3*sin(t*2.0)"
+                filter_parts.append(
+                    f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.35:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
+                )
+                filter_parts.append(f"[{cur_v}][card_animated]overlay=x='{card_base_x}':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                cur_v = "v_card"
+
 
         elif popup_img_path and popup_img_path.exists():
             # Pop-up informativo HUD animado con entrada suave y salida centrada
@@ -1086,7 +1372,18 @@ class SceneEngine:
                     )
                     cur_v = f"v_kwo_{k_i}"
 
-# Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
+        # Superposición de Overlay Cinemático Remotion (React + Alpha ProRes)
+        if ai_remotion_mov and ai_remotion_mov.exists():
+            inputs.extend(["-t", dur_str, "-r", "25", "-i", str(ai_remotion_mov)])
+            remo_idx = num_in
+            num_in += 1
+            filter_parts.append(
+                f"[{remo_idx}:v]scale={self.W}:{self.H},format=rgba[v_remo]"
+            )
+            filter_parts.append(f"[{cur_v}][v_remo]overlay=0:0[v_with_remo]")
+            cur_v = "v_with_remo"
+
+        # Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
         if srt_path and srt_path.exists() and self.subs_enabled:
             esc_srt = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
             sub_size = 18 if self.is_vertical else 14
@@ -1130,6 +1427,7 @@ class SceneEngine:
             audio_filter_parts.append(f"[{bgm_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={bgm_vol:.3f}[a_bgm]")
             audio_mix_inputs.append("[a_bgm]")
 
+        # SFX de escena general (si aplica)
         sfx_path = self._get_sfx_path(scene.sfx)
         if sfx_path and sfx_path.exists():
             inputs.extend(["-i", str(sfx_path)])
@@ -1137,6 +1435,60 @@ class SceneEngine:
             num_in += 1
             audio_filter_parts.append(f"[{sfx_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,adelay=delays=150:all=1,volume=0.35[a_sfx]")
             audio_mix_inputs.append("[a_sfx]")
+
+        # SFX sincronizado al instante exacto de aparición para elementos visuales
+        if card_img_path and card_img_path.exists():
+            sfx_map_by_type = {
+                "verdict_badge": "pop",
+                "step_badge": "pop",
+                "source_chip": "pop",
+                "stat_counter": "chime",
+                "versus_split": "impact",
+                "alert_banner": "alert",
+                "tech_card": "whoosh",
+                "quote_evidence": "whoosh",
+                "quote": "pop",
+                "bento": "whoosh",
+                "map": "whoosh",
+            }
+            card_sfx_type = sfx_map_by_type.get(card_visual_type, "whoosh")
+            c_sfx_path = self._get_sfx_path(card_sfx_type)
+            if c_sfx_path and c_sfx_path.exists():
+                inputs.extend(["-i", str(c_sfx_path)])
+                c_sfx_idx = num_in
+                num_in += 1
+                c_del_ms = max(50, int(card_start_time * 1000))
+                audio_filter_parts.append(
+                    f"[{c_sfx_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                    f"adelay=delays={c_del_ms}:all=1,volume=0.85[a_card_sfx]"
+                )
+                audio_mix_inputs.append("[a_card_sfx]")
+
+        if popup_img_path and popup_img_path.exists():
+            p_sfx_path = self._get_sfx_path("pop")
+            if p_sfx_path and p_sfx_path.exists():
+                inputs.extend(["-i", str(p_sfx_path)])
+                p_sfx_idx = num_in
+                num_in += 1
+                p_del_ms = max(50, int(popup_start_time * 1000))
+                audio_filter_parts.append(
+                    f"[{p_sfx_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                    f"adelay=delays={p_del_ms}:all=1,volume=0.80[a_pop_sfx]"
+                )
+                audio_mix_inputs.append("[a_pop_sfx]")
+
+        if chips_img_path and chips_img_path.exists():
+            ch_sfx_path = self._get_sfx_path("pop")
+            if ch_sfx_path and ch_sfx_path.exists():
+                inputs.extend(["-i", str(ch_sfx_path)])
+                ch_sfx_idx = num_in
+                num_in += 1
+                ch_del_ms = max(50, int(chip_start_time * 1000))
+                audio_filter_parts.append(
+                    f"[{ch_sfx_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                    f"adelay=delays={ch_del_ms}:all=1,volume=0.75[a_chip_sfx]"
+                )
+                audio_mix_inputs.append("[a_chip_sfx]")
 
         # Aplicar color grading cinematográfico al output final si no es 'raw'
         grade_filter = COLOR_GRADE_FILTERS.get(getattr(self, 'color_grade', 'cinema'), '')
@@ -1188,6 +1540,7 @@ class SceneEngine:
             "-c:a", "aac",
             "-b:a", "256k",
             "-ar", "48000",
+            "-max_muxing_queue_size", "1024",
             "-t", dur_str,
             str(scene_tmp),
         ]
@@ -1211,12 +1564,22 @@ class SceneEngine:
                 proc.kill()
             except Exception:
                 pass
+            if sys.platform == "win32":
+                try:
+                    subprocess.run(["taskkill", "/F", "/PID", str(proc.pid)], capture_output=True)
+                except Exception:
+                    pass
             raise
         except asyncio.TimeoutError:
             try:
                 proc.kill()
             except Exception:
                 pass
+            if sys.platform == "win32":
+                try:
+                    subprocess.run(["taskkill", "/F", "/PID", str(proc.pid)], capture_output=True)
+                except Exception:
+                    pass
             raise RuntimeError(f"FFmpeg agotó el tiempo (600 s) renderizando la escena {scene.scene_id}.")
 
         if self.cancel_event and self.cancel_event.is_set():
@@ -1231,8 +1594,15 @@ class SceneEngine:
             print(f"[SceneEngine] ERROR FFmpeg escena {scene.scene_id}:\n{err_msg}")
             raise RuntimeError(f"Fallo al renderizar la escena {scene.scene_id}: {err_msg[-300:]}")
 
-        # Escena completa y válida: publicar atómicamente y registrar su firma.
-        scene_tmp.replace(scene_out)
+        # Escena completa y válida: publicar atómicamente y registrar su firma (con reintentos para Windows).
+        for attempt in range(5):
+            try:
+                scene_tmp.replace(scene_out)
+                break
+            except OSError:
+                if attempt == 4:
+                    raise
+                await asyncio.sleep(0.2)
         self._write_cache_meta(meta_path, scene)
 
         # Extraer miniatura visual de alta definición para el monitor en vivo del frontend
@@ -1344,6 +1714,7 @@ class SceneEngine:
             "-i", str(concat_list_file),
             "-c", "copy",
             "-movflags", "+faststart",
+            "-max_muxing_queue_size", "1024",
             str(output_file),
         ]
 
@@ -1643,6 +2014,7 @@ class SceneEngine:
             "chime": _audio_dir / "chime.wav",
             "impact": _audio_dir / "impact.wav",
             "alert": _audio_dir / "alert.wav",
+            "pop": _audio_dir / "pop.wav",
             "none": None,
         }
         return sfx_map.get(sfx_name.lower().strip())

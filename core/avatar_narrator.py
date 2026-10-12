@@ -163,9 +163,16 @@ REGLAS ESTRICTAS:
         norm_text = normalize_speech_for_tts(text)
 
         # Síntesis directa de una sola pasada para máxima fluidez, prosodia y naturalidad humana
-        # (Sin fragmentación artificial, sin cortes intermedios ni alteraciones de pitch)
-        communicate = edge_tts.Communicate(norm_text or text, chosen_voice, rate="+0%")
-        await communicate.save(str(out_path))
+        try:
+            communicate = edge_tts.Communicate(norm_text or text, chosen_voice, rate="+0%")
+            await communicate.save(str(out_path))
+        except Exception as _e:
+            from core.llm import safe_log
+            safe_log(f"[AvatarNarrator] Edge-TTS error ({_e}). Usando gTTS de respaldo...")
+            from gtts import gTTS
+            lang_code = "es" if any(x in (chosen_voice or "").lower() for x in ["es-", "es_", "spanish"]) else "es"
+            gtts_obj = gTTS(text=norm_text or text, lang=lang_code)
+            gtts_obj.save(str(out_path))
 
         duration = self.get_audio_duration(out_path)
         return out_path, duration

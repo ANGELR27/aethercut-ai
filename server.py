@@ -63,6 +63,7 @@ class NoCacheStaticFiles(StaticFiles):
 
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/media", StaticFiles(directory=str(settings.OUTPUTS_DIR)), name="media")
+app.mount("/outputs", StaticFiles(directory=str(settings.OUTPUTS_DIR)), name="outputs")
 app.mount("/storage", StaticFiles(directory=str(settings.STORAGE_DIR)), name="storage")
 app.mount("/assets", StaticFiles(directory=str(Path(__file__).resolve().parent / "assets")), name="assets")
 
@@ -484,6 +485,8 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
         "source_video_url": (str(payload.get("video_url", "")).strip() or None)
         if str(payload.get("video_url", "")).strip().lower() not in ("none", "null", "")
         else None,
+        # Publicación automática desatendida o preparación autónoma multi-canal
+        "auto_publish": bool(payload.get("auto_publish", False)),
     }
 
     task_id = uuid.uuid4().hex[:8]
@@ -1883,6 +1886,37 @@ def oc_action_endpoint(payload: dict = Body(...)):
     return {"ok": True}
 
 
+@app.get("/api/oc/events")
+async def oc_events_endpoint():
+    """SSE en vivo: transmite al navegador cada acción de UI del agente en el instante
+    en que se publica (desde el chat de la app o desde una sesión de opencode en terminal)."""
+    import queue as _pyq
+
+    from core.opencode_engine import subscribe_live_actions, unsubscribe_live_actions
+
+    q = subscribe_live_actions()
+
+    async def live_stream():
+        try:
+            while True:
+                drained = []
+                try:
+                    while True:
+                        drained.append(q.get_nowait())
+                except _pyq.Empty:
+                    pass
+                if drained:
+                    for act in drained:
+                        yield f"data: {json.dumps(act, ensure_ascii=False, default=str)}\n\n"
+                else:
+                    yield ": ping\n\n"
+                await asyncio.sleep(0.4)
+        finally:
+            unsubscribe_live_actions(q)
+
+    return StreamingResponse(live_stream(), media_type="text/event-stream")
+
+
 @app.get("/api/oc/status")
 def oc_status_endpoint():
     """Estado de tareas en curso del servidor para el agente OpenCode."""
@@ -2076,6 +2110,40 @@ def publish_youtube_disconnect():
     return {"connected": False}
 
 
+@app.get("/api/channels")
+def get_channels():
+    """Lista todos los canales configurados para publicación multi-nicho."""
+    from core.channel_manager import ChannelManager
+    return ChannelManager.list_channels()
+
+
+@app.post("/api/channels")
+def upsert_channel(channel: Dict[str, Any] = Body(...)):
+    """Crea o actualiza un canal en el sistema."""
+    from core.channel_manager import ChannelManager
+    return ChannelManager.upsert_channel(channel)
+
+
+@app.delete("/api/channels/{channel_id}")
+def delete_channel(channel_id: str):
+    """Elimina un canal configurado."""
+    from core.channel_manager import ChannelManager
+    ok = ChannelManager.delete_channel(channel_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Canal no encontrado")
+    return {"deleted": True}
+
+
+@app.post("/api/channels/classify")
+def classify_content_channel(payload: Dict[str, Any] = Body(...)):
+    """Clasifica una temática o guion para determinar el canal óptimo de publicación."""
+    from core.channel_manager import ChannelManager
+    topic = str(payload.get("topic") or payload.get("title") or "")
+    speech = str(payload.get("speech") or "")
+    return ChannelManager.classify_content(topic, speech)
+
+
+
 def _run_youtube_upload(task_id: str, studio, video: Path, payload: Dict[str, Any], thumbnail_path: Optional[Path]) -> None:
     import core.youtube_oauth as yt
     try:
@@ -2168,6 +2236,64 @@ async def get_trend_radar():
     return trend_radar.get_snapshot()
 
 
+RADAR_FAVORITES_FILE = settings.STORAGE_DIR / "radar_topic_favorites.json"
+
+
+@app.get("/api/trend-radar/favorites")
+async def get_trend_radar_favorites():
+    """Obtiene los temas guardados en favoritos de forma persistente."""
+    if RADAR_FAVORITES_FILE.exists():
+        try:
+            favs = json.loads(RADAR_FAVORITES_FILE.read_text(encoding="utf-8"))
+            if isinstance(favs, list):
+                return {"favorites": favs}
+        except Exception as e:
+            safe_log(f"[TrendRadar] Error leyendo favoritos: {e}")
+    return {"favorites": []}
+
+
+@app.post("/api/trend-radar/favorites")
+async def save_trend_radar_favorites(payload: Dict[str, Any] = Body(...)):
+    """Guarda, añade o quita un tema de favoritos de forma persistente."""
+    action = str(payload.get("action", "toggle")).strip().lower()
+    topic = payload.get("topic") or {}
+    favorites = payload.get("favorites")
+
+    current_favs = []
+    if RADAR_FAVORITES_FILE.exists():
+        try:
+            raw = json.loads(RADAR_FAVORITES_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                current_favs = raw
+        except Exception:
+            current_favs = []
+
+    if favorites is not None and isinstance(favorites, list):
+        current_favs = favorites
+    elif topic and topic.get("title"):
+        title_key = topic.get("title", "").strip().lower()
+        exists = any(f.get("title", "").strip().lower() == title_key for f in current_favs)
+
+        if action == "add" and not exists:
+            topic["saved_at"] = datetime.now(timezone.utc).isoformat()
+            current_favs.insert(0, topic)
+        elif action == "remove" and exists:
+            current_favs = [f for f in current_favs if f.get("title", "").strip().lower() != title_key]
+        elif action == "toggle":
+            if exists:
+                current_favs = [f for f in current_favs if f.get("title", "").strip().lower() != title_key]
+            else:
+                topic["saved_at"] = datetime.now(timezone.utc).isoformat()
+                current_favs.insert(0, topic)
+
+    try:
+        RADAR_FAVORITES_FILE.write_text(json.dumps(current_favs, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        safe_log(f"[TrendRadar] Error guardando favoritos: {e}")
+
+    return {"success": True, "favorites": current_favs}
+
+
 @app.post("/api/trend-radar/refresh")
 async def refresh_trend_radar():
     """Fuerza un barrido nuevo en background (charts + temas con IA)."""
@@ -2177,20 +2303,20 @@ async def refresh_trend_radar():
 
 @app.post("/api/trend-radar/analyze")
 async def analyze_trend_item(payload: Dict[str, Any] = Body(...)):
-    """La IA analiza el video original y propone enfoques; el usuario elige."""
+    """La IA analiza el video original o el tema y propone enfoques estratégicos con duración calculada."""
     kind = str(payload.get("kind", "")).strip().lower()
     item = payload.get("item") or {}
-    if kind != "video" or not isinstance(item, dict) or not item:
-        raise HTTPException(status_code=400, detail="El análisis de estrategia aplica a videos virales (kind='video').")
+    if kind not in ("video", "topic") or not isinstance(item, dict) or not item:
+        raise HTTPException(status_code=400, detail="Indica kind ('video'|'topic') y el elemento 'item' a analizar.")
     try:
-        return trend_radar.analyze_video(item)
+        return trend_radar.analyze_item(kind, item)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=friendly_error(exc))
 
 
 @app.post("/api/trend-radar/replicate")
 async def replicate_trend_item(payload: Dict[str, Any] = Body(...)):
-    """Replica un video viral (en español, con mejoras) o produce un tema urgente.
+    """Replica un video viral (en español, con mejoras) o produce un tema urgente con duración óptima.
 
     La IA convierte los parámetros del original en una brief en español y
     arranca directamente la producción autónoma de KAI (streamer pipeline).
@@ -2209,11 +2335,13 @@ async def replicate_trend_item(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=500, detail=friendly_error(exc))
 
     style = str(payload.get("style", "divulgacion")).strip() or "divulgacion"
-    # Duración: la que pida el usuario; si no, la que la IA recomienda según el original.
+    # Duración: la que pida el usuario; si no, la que la IA recomienda según la profundidad del tema.
     raw_duration = payload.get("duration_sec")
     if raw_duration is None:
-        raw_duration = brief.get("recommended_duration_sec") or 60
-    duration_sec = max(20, min(240, int(raw_duration)))
+        raw_duration = brief.get("recommended_duration_sec") or (
+            360 if item.get("category") in ("descubrimiento", "ciencia", "espacio", "arqueologia", "tecnologia", "misterio") else 180
+        )
+    duration_sec = max(45, min(900, int(raw_duration)))
     creation = await create_streamer_broadcast({
         "topic": brief["topic"],
         "extra_notes": brief["extra_notes"],
@@ -2222,7 +2350,7 @@ async def replicate_trend_item(payload: Dict[str, Any] = Body(...)):
         "origin": "radar",
     })
     return {"task_id": creation["task_id"], "project_id": creation["project_id"],
-            "topic": brief["topic"], "extra_notes": brief["extra_notes"]}
+            "topic": brief["topic"], "extra_notes": brief["extra_notes"], "duration_sec": duration_sec}
 
 
 # ============================================================================
@@ -2345,6 +2473,61 @@ def agent_read_file(path: str):
         return {"path": path, "content": content, "lines": content.count("\n") + 1}
     except PermissionError as pe:
         raise HTTPException(status_code=403, detail=str(pe))
+
+
+@app.get("/api/visual-templates")
+def get_visual_templates():
+    """Catálogo completo de la librería de plantillas visuales con variantes temáticas y animaciones."""
+    from core.visual_templates import VisualTemplatesLibrary
+    return VisualTemplatesLibrary.get_catalog()
+
+
+@app.get("/api/visual-templates/preview")
+def preview_visual_template(
+    template: str = "verdict_badge",
+    variant: str = "orange_noir",
+    headline: Optional[str] = None,
+    title: Optional[str] = None,
+    subtitle: Optional[str] = None,
+    body: Optional[str] = None,
+    stat_value: Optional[str] = None,
+    stat_label: Optional[str] = None,
+    side_a: Optional[str] = None,
+    side_b: Optional[str] = None,
+    source: Optional[str] = None,
+):
+    """Genera o sirve la vista previa renderizada en PNG de una plantilla visual."""
+    from core.visual_templates import VisualTemplatesLibrary
+    vlib = VisualTemplatesLibrary()
+    preview_dir = settings.OUTPUTS_DIR / "template_previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    out_file = preview_dir / f"preview_{template}_{variant}.png"
+
+    # Preparar parámetros combinando query params con sample params
+    params = {}
+    catalog = vlib.get_catalog()
+    for item in catalog["templates"]:
+        if item["id"] == template:
+            params.update(item.get("sample_params", {}))
+            break
+
+    # Sobrescribir con valores provistos
+    if headline: params["headline"] = headline
+    if title: params["title"] = title
+    if subtitle: params["subtitle"] = subtitle
+    if body: params["body"] = body
+    if stat_value: params["stat_value"] = stat_value
+    if stat_label: params["stat_label"] = stat_label
+    if side_a: params["side_a"] = side_a
+    if side_b: params["side_b"] = side_b
+    if source: params["source"] = source
+
+    rendered = vlib.render_template_to_image(template, out_file, params, variant=variant)
+    if not rendered or not rendered.exists():
+        raise HTTPException(status_code=500, detail=f"No se pudo generar la vista previa del template '{template}'")
+
+    return FileResponse(rendered, media_type="image/png")
+
 
 
 if __name__ == "__main__":

@@ -24,9 +24,15 @@ from core.llm import LLMClient, safe_log
 @dataclass
 class SceneCard:
     headline: str
-    body: str
+    body: str = ""
     badge: str = "DATO CLAVE"
     stat: str = ""
+    style: str = "auto"       # auto, verdict_badge, tech_card, quote, bento, map
+    icon: str = "✓"
+    subtitle: str = ""
+    template: str = "auto"   # verdict_badge, tech_card, stat_counter, versus_split, quote_evidence, step_badge, alert_banner, source_chip
+    variant: str = "orange_noir"  # orange_noir, frosted_white, emerald_matrix, crimson_hazard, cyber_cyan, royal_gold
+    params: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -75,7 +81,12 @@ class DirectorBroadcastPlan:
         scenes: List[DirectorScene] = []
         for s in scenes_data:
             c = s.get("card")
-            card_obj = SceneCard(**c) if c else None
+            card_obj = None
+            if c and isinstance(c, dict):
+                valid_card_keys = {k: v for k, v in c.items() if k in SceneCard.__dataclass_fields__}
+                card_obj = SceneCard(**valid_card_keys)
+            elif isinstance(c, SceneCard):
+                card_obj = c
             # Reconstruir lista de visual_queries si solo viene visual_query
             vqs = s.get("visual_queries") or []
             vq = s.get("visual_query") or ""
@@ -156,11 +167,121 @@ def _clean_popups(raw: Any) -> List[Dict[str, Any]]:
     return out
 
 
-DIRECTOR_SYSTEM_PROMPT = """Eres el DIRECTOR DE TELEVISIÓN Y STREAMING con Inteligencia Artificial de KAI.
-Tu misión no es solo escribir un monólogo, sino DIRIGIR UNA PRODUCCIÓN AUDIOVISUAL COMPLETA.
+def _parse_director_json(raw: str) -> Dict[str, Any]:
+    """Parseador altamente tolerante a fallos para el plan audiovisual del LLM."""
+    if not raw or not raw.strip():
+        raise ValueError("Respuesta vacía del LLM")
+
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE).strip()
+
+    # 1. Intento directo
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # 2. Extraer subcadena delimitada por la primera { y la última }
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = cleaned[start : end + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+
+        # 3. Eliminar comas finales que invalidan JSON: ,} o ,]
+        fixed = re.sub(r",\s*([\}\]])", r"\1", candidate)
+        try:
+            return json.loads(fixed)
+        except Exception:
+            pass
+
+        # 4. Corregir saltos de línea sin escapar dentro de strings
+        fixed_nl = re.sub(r'(?<=: ")(.*?)(?=",\s*\n|"\s*\n|",)', lambda m: m.group(0).replace('\n', '\\n').replace('\r', ''), fixed, flags=re.DOTALL)
+        try:
+            return json.loads(fixed_nl)
+        except Exception:
+            pass
+
+    # 5. Respuesta truncada por límite de tokens (auto-cerrar llaves/corchetes)
+    if start != -1:
+        partial = cleaned[start:].rstrip()
+        for close_seq in ["]}", "]}}", "}]}", "}\n}"]:
+            try:
+                p_trim = re.sub(r",\s*$", "", partial)
+                return json.loads(p_trim + close_seq)
+            except Exception:
+                pass
+
+    return json.loads(cleaned)
+
+
+DIRECTOR_SYSTEM_PROMPT = """Eres el GUIONISTA PROFESIONAL Y DIRECTOR DE PRODUCCIÓN AUDIOVISUAL DE ÉLITE de KAI.
+Especializado en videos de YouTube, divulgación científica, historia, tecnología, misterios, documentales y contenido educativo.
 FECHA ACTUAL: {today}. Toda referencia visual debe priorizar material reciente (año {year} o {prev_year}) salvo que el tema sea histórico.
 
-Debes dividir la emisión en EXACTAMENTE {num_scenes} ESCENAS según la duración solicitada ({duration_target} segundos = {duration_label}).
+Tu misión es transformar cualquier tema en un guion y una producción audiovisual que consiga cuatro cosas indispensables:
+1. Captar la atención desde los primeros segundos.
+2. Mantener el interés durante todo el video mediante recursos narrativos y psicológicos.
+3. Explicar conceptos complejos de manera sencilla, precisa y causalmente comprensible.
+4. Dejar al espectador con la sensación de haber aprendido algo valioso.
+
+No escribas únicamente para transmitir información. Diseña una experiencia de aprendizaje que despierte curiosidad, facilite la comprensión y recompense la atención del espectador.
+PRINCIPIO FINAL: "Curiosidad para comenzar, claridad para comprender, progresión para continuar y una recompensa intelectual para terminar."
+
+Debes estructurar la emisión en EXACTAMENTE {num_scenes} ESCENAS según la duración solicitada ({duration_target} segundos = {duration_label}).
+
+==============================================================================
+MOTOR PSICOLÓGICO ADAPTATIVO (APLICA SEGÚN EL TEMA):
+==============================================================================
+A. CURIOSIDAD Y BRECHA DE INFORMACIÓN: Abre con una pregunta cuya respuesta no sea inmediatamente evidente. Revela información progresivamente. Plantea contradicciones entre lo que el público cree y lo que muestran las evidencias. Evita resolver demasiado pronto la pregunta principal.
+B. APERTURA Y CIERRE DE BUCLES NARRATIVOS: Introduce preguntas secundarias que se resolverán más adelante. Conecta los descubrimientos con nuevas preguntas relevantes. Cierra cada bucle en el momento adecuado. No acumules preguntas sin responder ni prometas revelaciones que el video no cumple.
+C. SORPRESA Y CAMBIO DE PERSPECTIVA: Introduce descubrimientos, contrastes, excepciones o consecuencias inesperadas. Muestra cambios de perspectiva sin inventar ni exagerar hechos reales.
+D. RELEVANCIA PERSONAL: Conecta el tema con la vida cotidiana, las decisiones, conocimientos previos o preguntas del espectador.
+E. CONFLICTO Y RESOLUCIÓN: Identifica qué misterio, desafío, debate o contradicción impulsa el video. Progresión causal obligatoria: pregunta → investigación → evidencias → dificultad o contradicción → explicación → conclusión.
+F. RECOMPENSAS COGNITIVAS CONTINUAS: Cada escena debe aportar valor concreto: una respuesta, un descubrimiento, una conexión inesperada o una herramienta para entender el mundo. El espectador debe recibir valor durante todo el video, no solo al final.
+G. EJEMPLOS, ANALOGÍAS Y VISUALIZACIÓN MENTAL: Explica ideas abstractas mediante ejemplos concretos, comparaciones comprensibles y situaciones familiares.
+H. RITMO Y VARIACIÓN DE CADENCIA: Alterna preguntas y respuestas, explicaciones y ejemplos, datos y consecuencias, momentos de tensión intelectual y momentos de comprensión.
+
+==============================================================================
+ACTIVACIÓN DEL MÓDULO NARRATIVO SEGÚN EL FORMATO (¡NO TODO ES UN DOCUMENTAL!):
+==============================================================================
+Cada formato tiene sus propias reglas. No fuerces una estructura documental en todos los videos:
+- MÓDULO A (Reacciones y análisis): Presenta el material y contexto indispensables; distingue emociones, opiniones y hechos; aporta análisis propio sustancial en vez de narrar lo que ya se ve; espontaneidad y valor añadido.
+- MÓDULO B (TOPs, listas y rankings): Criterio de inclusión claro; una escena individual por puesto; progresión sin guardarlo todo para el final; justificación y cifras concretas de cada lugar.
+- MÓDULO C (Documentales, ciencia y misterios): Pregunta central, hipótesis, evidencias, explicaciones causales profundas y resolución basada en hechos contrastados.
+- MÓDULO D (Humor, memes y entretenimiento): Premisa cómica, preparación y remate, ritmo ágil sin sobre-explicar bromas ni repetir el mismo chiste.
+- MÓDULO E (Reviews y comparativas): Problema a resolver, criterios de evaluación, ventajas y desventajas reales, pruebas verificables y recomendación condicionada al usuario.
+- MÓDULO F (Gaming y desafíos): Objetivo claro, reglas del desafío, obstáculos inesperados, decisiones bajo presión y desenlace basado en resultados reales.
+- MÓDULO G (Historias, biografías y casos): Contexto y protagonistas, decisiones documentadas, causalidad histórica sin inventar diálogos o hechos ficticios.
+- MÓDULO H (Tutoriales y educación): Resultado prometido, requisitos previos, pasos secuenciales comprobables, errores comunes a evitar y demostración de éxito verificable.
+- MÓDULO I (Noticias, actualidad y tendencias): Información prioritaria inmediata, separar hechos de especulación, contexto y consecuencias inmediatas.
+- MÓDULO J (Pódcasts, debates y entrevistas): Conversación orgánica, dilemas abiertos, matices y contraste de perspectivas contrarias.
+- MÓDULO K (Shorts verticales breves): Gancho visual instantáneo en el segundo 1, una sola idea contundente desarrollada al grano y remate satisfactorio sin relleno.
+- MÓDULO L (Híbridos): Combina con coherencia dos formatos (ej. Reacción + Análisis, TOP + Misterio, Tutorial + Comparativa).
+
+==============================================================================
+CLARIDAD COMO REGLA OBLIGATORIA (LA RETENCIÓN NO SUBORDINA LA COMPRENSIÓN):
+==============================================================================
+- Una idea principal por bloque/escena.
+- Define términos técnicos antes de utilizarlos repetidamente.
+- Explica las CAUSAS, no solo los resultados finales ("ocurrió X porque Y generó Z").
+- Distingue hechos comprobados, hipótesis, interpretaciones y opiniones.
+- Transiciones que expliquen por qué una idea conduce a la siguiente.
+- Elimina frases vacías que suenen interesantes pero no aporten información real.
+
+==============================================================================
+ARQUITECTURA NARRATIVA ADAPTADA EN {num_scenes} ESCENAS:
+==============================================================================
+1. GANCHO INICIAL ADECUADO AL FORMATO (Escena 1): Conecta de inmediato con la promesa del formato sin saludos largos ni rodeos.
+2. PROMESA NARRATIVA: Claridad de qué comprenderá o experimentará el espectador.
+3. CONTEXTO MÍNIMO NECESARIO: Lo indispensable para comprender sin sobrecargar.
+4. DESARROLLO PROGRESIVO: Bloques que construyen avance real hacia el objetivo.
+5. PUNTOS DE RENOVACIÓN DE ATENCIÓN (al 60-70% del video): Introduce una nueva pregunta, giro, evidencia o dilema clave.
+6. REVELACIÓN O CLÍMAX CENTRAL: Resolución de la premisa principal con el grado de certeza o emoción que el formato requiere.
+7. CONSECUENCIAS Y CONEXIONES: Qué significa el resultado y cómo cambia nuestra comprensión.
+8. CIERRE SATISFACTORIO: Conclusión memorable y recompensa intelectual o de entretenimiento lograda.
 
 ==============================================================================
 REQUISITO CRÍTICO E INNEGOCIABLE DE DURACIÓN:
@@ -191,7 +312,7 @@ REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
 - Evita muletillas o saludos vacíos (como "Hola a todos" o "Bienvenidos a mi canal"); entra directo al tema con energía y datos interesantes.
 
 REGLAS DE RETENCIÓN Y VARIEDAD VISUAL (EDICIÓN PROFESIONAL):
-- VARIEDAD DE ESCENA: NUNCA dos escenas consecutivas del mismo "type" (excepto avatar_cam para abrir y cerrar). Alterna card_focus → video_reaction → vector_motion → chat_debate para que el encuadre respire y el ojo no se aburda del mismo formato.
+- VARIEDAD DE ESCENA: NUNCA dos escenas consecutivas del mismo "type" (excepto avatar_cam para abrir y cerrar). Alterna card_focus → video_reaction → vector_motion → chat_debate para que el encuadre respire y el ojo no se aburra del mismo formato.
 - PRIMEROS 15 SEGUNDOS DENSOS: el mayor abandono del espectador ocurre aquí. La escena 1 debe entregar el gancho + el dato más impactante del tema, sin contexto previo ni preámbulos.
 - BEAT DE RE-ENGANCHE al 60-70% del guion: en esa zona incluye OBLIGATORIAMENTE una escena que reformule la tensión con una pregunta directa al espectador, un dato que invierta lo dicho, o un anticipo del desenlace ("y aquí es donde todo cambia...").
 - RITMO DE ORACIONES VARIADO: alterna frases cortas contundentes (6-9 palabras) con frases de desarrollo (14-18 palabras). La variación de cadencia retiene más que el vocabulario.
@@ -207,10 +328,33 @@ REGLAS PARA DATOS, MAPAS, ESTADÍSTICAS Y TARJETAS BENTO HUD (AL MENOS 60% DE LA
   * "headline": Título corto y concreto del dato, mapa o comparativa (ej: "Alianza Geopolítica: EE.UU. e Israel", "Capacidad Olfativa: Perro vs Humano", "Inflación Mensual").
   * "stat": La cifra, métrica o relación clave destacada (ej: "300M vs 6M", "52.9%", "+450%", "Alianza Bilateral").
   * "body": Explicación sintética y contundente del dato con fuentes contrastadas.
+  * "template" (o "style", elige la plantilla exacta de la librería para máximo impacto):
+    - "verdict_badge": Distintivo viral estilo sticker/sello inclinado con rebote elástico (ej: headline "ganó Opus", "100% Real", "Confirmado", icon "✓"). Entra con spring bounce y SFX "pop".
+    - "tech_card": Tarjeta tecnológica superior dark slate con micro-matriz de puntos (ej: headline "find-skills", body "por Vercel · vercel-labs/skills"). Flota arriba con SFX "whoosh" o "pop".
+    - "stat_counter": Cifra récord con número gigante en gradiente, medidor de barra y tendencia (ej: stat "+340%", headline "Récord Histórico"). SFX "chime".
+    - "versus_split": Comparativa dual lado A vs lado B con divisor central circular VS en naranja (ej: headline "Humano", body "IA Autónoma", stat "4h vs 12s"). SFX "impact".
+    - "quote_evidence": Cita editorial Vox con comillas grandes, fuente y frase resaltada en fluorescente. SFX "whoosh".
+    - "step_badge": Píldora de hito/fase con cápsula numérica (ej: headline "Detección Acústica", stat "01"). SFX "pop".
+    - "alert_banner": Alerta táctica con ícono de peligro y borde brillante (ej: headline "CONTRADICCIÓN DETECTADA", body "Señal no biológica"). SFX "alert".
+    - "source_chip": Micro-pastilla de atribución oficial verificada (ej: headline "NOAA Research 2026"). SFX "pop".
+    - "map": Mapa geopolítico táctico satelital.
+    - "bento": Tarjeta Bento Obsidian con gráfico e indicador de estado.
+  * "variant" (paleta de diseño):
+    - "orange_noir": Negro mate Obsidian + Naranja Eléctrico firma + Blanco perla (Firma AetherCut).
+    - "frosted_white": Cristal esmerilado translúcido + Borde blanco + Tipografía serif editorial.
+    - "emerald_matrix": Negro carbón + Verde Esmeralda neón para hechos verificados y éxito.
+    - "crimson_hazard": Negro carbón + Rojo Carmesí para alertas críticas, mitos y controversias.
+    - "cyber_cyan": Negro profundo + Cian Neón para tecnología, software y código.
+    - "royal_gold": Negro + Oro Solar para récords mundiales y tops #1.
   * "badge":
-    - "EVIDENCIA DOCUMENTAL" o "INFORME OFICIAL": Genera automáticamente una cita de artículo / informe con texto resaltado fluorescente estilo Vox / Johnny Harris.
-    - "COMPARATIVA" o "VERSUS": (ej: headline "Estados Unidos vs China", stat "$886B vs $296B") Genera automáticamente la pantalla dividida cinemática Versus con divisor láser.
-    - "ESTADÍSTICA", "DATO CLAVE", "MAPA GLOBAL" o "CONFIRMADO": Genera la tarjeta Bento Box Obsidian / Tactical con gráfico e indicador de estado.
+    - "VEREDICTO", "GANADOR" o "SELLO": Activa verdict_badge.
+    - "TECH", "HERRAMIENTA", "DEV" o "SKILL": Activa tech_card.
+    - "ESTADÍSTICA", "RÉCORD", "CIFRA": Activa stat_counter.
+    - "COMPARATIVA" o "VERSUS": Activa versus_split.
+    - "EVIDENCIA DOCUMENTAL" o "INFORME OFICIAL": Activa quote_evidence.
+    - "PASO", "FASE" o "HITO": Activa step_badge.
+    - "ALERTA" o "PELIGRO": Activa alert_banner.
+    - "FUENTE" o "ATRIBUCIÓN": Activa source_chip.
 - De esta manera el espectador ve el avatar hablando pero al mismo tiempo tiene en pantalla la tarjeta gráfica interactiva mostrando los mapas, números reales y comparativas en pantalla sin sentirse vacío.
 
 REGLAS PARA TEXTO LIBRE ANIMADO CINEMÁTICO ("free_title") (SIN CAJAS, FLOTANTE EN PANTALLA):
@@ -342,10 +486,12 @@ class AIDirector:
         ranked_n = int(ranking_match.group(1)) if ranking_match else None
 
         # Dinamismo profesional de YouTube/TikTok: cambio de escena visual cada 16 a 24 segundos
-        dur = max(30, duration_target)
+        dur = max(20, duration_target)
         if ranked_n and 3 <= ranked_n <= 15:
             # Para un TOP N: 1 escena de intro/gancho + N escenas (una por cada puesto) + 1 escena de conclusión
             num_scenes = ranked_n + 2
+        elif dur <= 35:
+            num_scenes = 2
         elif dur <= 60:
             num_scenes = max(3, dur // 18)
         elif dur <= 180:
@@ -408,11 +554,33 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
         try:
             gen_timeout = max(110.0, min(420.0 if dur > 1200 else 240.0, float(dur * 0.6)))
             raw = await asyncio.wait_for(
-                asyncio.to_thread(self.llm.generate, prompt, json_mode=True, max_models=3, deadline_sec=gen_timeout),
+                asyncio.to_thread(
+                    self.llm.generate,
+                    prompt,
+                    json_mode=True,
+                    max_models=3,
+                    deadline_sec=gen_timeout,
+                    thinking_budget=1024,
+                ),
                 timeout=gen_timeout,
             )
-            cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
-            data = json.loads(cleaned)
+            data = None
+            try:
+                data = _parse_director_json(raw)
+            except Exception as parse_err:
+                safe_log(f"[AIDirector] Aviso: JSON primario requirió reparación ({parse_err}). Reparando...")
+                try:
+                    fix_prompt = (
+                        "El siguiente texto contiene un JSON de un plan de video con errores menores de sintaxis (comas o comillas). "
+                        "Corrige la sintaxis y responde EXCLUSIVAMENTE con el objeto JSON válido:\n\n"
+                        f"{raw[:8000]}"
+                    )
+                    repaired_raw = self.llm.generate(fix_prompt, json_mode=True, deadline_sec=18)
+                    data = _parse_director_json(repaired_raw)
+                    safe_log("[AIDirector] ✓ JSON reparado y recuperado exitosamente con IA auxiliar.")
+                except Exception as fix_err:
+                    safe_log(f"[AIDirector] No se pudo reparar JSON con IA auxiliar ({fix_err}).")
+                    raise parse_err
 
             scenes: List[DirectorScene] = []
             raw_scenes = data.get("scenes", [])
@@ -623,7 +791,7 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
             ),
         ]
         return DirectorBroadcastPlan(
-            title=f"KAI Broadcast: {topic[:35]}",
+            title=f"KAI Broadcast: {topic}",
             topic=topic,
             style=style,
             scenes=scenes,

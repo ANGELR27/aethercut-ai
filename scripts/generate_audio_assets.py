@@ -75,4 +75,10 @@ run(["-f", "lavfi", "-i", "aevalsrc=0.55*sin(2*PI*990*t)*between(t\,0\,0.22)+0.5
      "-ar", "48000", "-ac", "2", str(OUT / "alert.wav")])
 print("OK alert.wav")
 
+# Pop: clic elástico y satisfactorio para stickers y badges virales (0.18 s)
+run(["-f", "lavfi", "-i", "sine=frequency=620:duration=0.18",
+     "-af", "afade=t=out:st=0.03:d=0.15,volume=1.35",
+     "-ar", "48000", "-ac", "2", str(OUT / "pop.wav")])
+print("OK pop.wav")
+
 print("\nAssets generados en", OUT)

@@ -9,6 +9,7 @@ export class AgentCopilot {
         this.isOpen = false;
         this.isExpanded = false;
         this.history = [];          // Historial multi-turn de conversación
+        this.pendingAttachments = []; // Archivos/multimedia listos para enviar con el próximo mensaje
         this.isThinking = false;
         this.currentAbortController = null;
         this.currentTypewriterInterval = null;
@@ -27,6 +28,10 @@ export class AgentCopilot {
         this.chatId = null;
         this.ocSessionId = null;
 
+        // Deduplicación de acciones (llegan por SSE en vivo y también al final del turno)
+        this.seenActionUids = new Set();
+        this.liveEvents = null;
+
         this.modelsMeta = {
             "gemini":      { name: "Gemini 2.5 Flash",  color: "#f59e0b", badge: "⚡ Recomendado" },
             "glm-5.3":     { name: "GLM-5.3 Senior",    color: "#38bdf8", badge: "Arquitecto" },
@@ -39,6 +44,31 @@ export class AgentCopilot {
         this.loadPersistedRenStyles();
         this.loadModelsFromServer();
         this.loadSavedChatsList();
+        this.connectLiveEvents();
+    }
+
+    /**
+     * Suscripción SSE a /api/oc/events: ejecuta en el navegador, en tiempo real,
+     * cada acción de UI que publica el agente (opencode en terminal o chat de la app).
+     */
+    connectLiveEvents() {
+        if (this.liveEvents) return;
+        try {
+            this.liveEvents = new EventSource("/api/oc/events");
+            this.liveEvents.onmessage = (msg) => {
+                try {
+                    const action = JSON.parse(msg.data);
+                    if (action && typeof action === "object") {
+                        this.executeAppActions([action]);
+                    }
+                } catch (e) {
+                    console.warn("[AgentCopilot] Acción en vivo no válida:", e);
+                }
+            };
+            this.liveEvents.onerror = () => { /* EventSource reintenta solo */ };
+        } catch (e) {
+            console.warn("[AgentCopilot] SSE en vivo no disponible:", e);
+        }
     }
 
     /**
@@ -60,8 +90,8 @@ export class AgentCopilot {
                     desc: m.desc || "",
                     provider: m.provider || "",
                 };
-                const card = document.querySelector(`.agent-model-card[data-model="${m.id}"]`);
-                if (card) {
+                const cards = document.querySelectorAll(`.agent-model-card[data-model="${m.id}"]`);
+                cards.forEach(card => {
                     const nameEl = card.querySelector(".agent-model-name");
                     const descEl = card.querySelector(".agent-model-desc");
                     const badgeEl = card.querySelector(".agent-model-badge");
@@ -70,7 +100,7 @@ export class AgentCopilot {
                     if (descEl && m.desc) descEl.textContent = m.desc;
                     if (badgeEl && m.badge) badgeEl.textContent = m.badge;
                     if (dotEl && m.color) dotEl.style.background = m.color;
-                }
+                });
             });
             // Refrescar las etiquetas del modelo activo con el nombre real del servidor.
             this.selectModel(this.activeModel);
@@ -88,14 +118,26 @@ export class AgentCopilot {
         this.btnExpand = document.getElementById("agentBtnExpand");
         this.btnNewChat = document.getElementById("agentBtnNewChat");
         this.modelCards = document.querySelectorAll(".agent-model-card");
+        this.modelSelect = document.getElementById("agentModelSelect");
+        this.modelDropdown = document.getElementById("agentModelDropdown");
+        this.headerModelSelect = document.getElementById("agentHeaderModelSelect");
+        this.headerModelDropdown = document.getElementById("agentHeaderModelDropdown");
+        this.headerModelPill = document.getElementById("agentHeaderModelPill");
         this.headerPillName = document.getElementById("agentHeaderModelName");
         this.headerDot = document.getElementById("agentHeaderDot");
         this.inputModelTag = document.getElementById("agentInputModelTag");
+        this.inputModelNameEl = document.getElementById("agentInputModelName");
         this.fabModelPill = document.getElementById("agentFabModelPill");
         this.messagesContainer = document.getElementById("agentMessagesContainer");
         this.promptForm = document.getElementById("agentPromptForm");
         this.promptInput = document.getElementById("agentPromptInput");
         this.btnSend = document.getElementById("agentBtnSend");
+
+        // Subida de archivos / multimedia (clip junto al nombre del modelo)
+        this.btnAttach = document.getElementById("agentBtnAttach");
+        this.fileInput = document.getElementById("agentFileInput");
+        this.attachmentsBar = document.getElementById("agentAttachments");
+
         this.quickBtns = document.querySelectorAll(".agent-quick-btn");
         this.suggChips = document.querySelectorAll(".agent-sugg-chip");
 
@@ -159,13 +201,55 @@ export class AgentCopilot {
             });
         });
 
-        // Selección de modelos
-        this.modelCards.forEach(card => {
+        // Selección de modelos: tarjetas dentro de AMBOS dropdowns (header y prompt)
+        const allModelCards = document.querySelectorAll(".agent-model-card");
+        allModelCards.forEach(card => {
             card.addEventListener("click", () => {
                 const modelId = card.getAttribute("data-model");
                 this.selectModel(modelId);
+                this.toggleModelDropdown(false);
+                this.toggleHeaderModelDropdown(false);
             });
         });
+
+        // Dropdown del selector de modelo en el HEADER (arriba)
+        if (this.headerModelPill) {
+            this.headerModelPill.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.toggleHeaderModelDropdown();
+                this.toggleModelDropdown(false);
+            });
+        }
+
+        // Dropdown del selector de modelo en el INPUT (abajo)
+        if (this.inputModelTag) {
+            this.inputModelTag.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.toggleModelDropdown();
+                this.toggleHeaderModelDropdown(false);
+            });
+        }
+
+        document.addEventListener("click", (e) => {
+            if (this.modelSelect && !this.modelSelect.contains(e.target)) {
+                this.toggleModelDropdown(false);
+            }
+            if (this.headerModelSelect && !this.headerModelSelect.contains(e.target)) {
+                this.toggleHeaderModelDropdown(false);
+            }
+        });
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+                this.toggleModelDropdown(false);
+                this.toggleHeaderModelDropdown(false);
+            }
+        });
+
+        // Desvanecido animado de los chats recientes al scrollear
+        if (this.savedChatsList) {
+            this.savedChatsList.addEventListener("scroll", () => this.updateChatsScrollFade());
+        }
 
         // Acciones rápidas & sugerencias
         const handlePromptClick = (btn) => {
@@ -181,6 +265,27 @@ export class AgentCopilot {
 
         this.quickBtns.forEach(btn => btn.addEventListener("click", () => handlePromptClick(btn)));
         this.suggChips.forEach(btn => btn.addEventListener("click", () => handlePromptClick(btn)));
+
+        // Subida de archivos o multimedia: clip + arrastrar y soltar sobre el prompt
+        if (this.btnAttach && this.fileInput) {
+            this.btnAttach.addEventListener("click", () => this.fileInput.click());
+            this.fileInput.addEventListener("change", () => {
+                this.addAttachmentFiles(Array.from(this.fileInput.files || []));
+                this.fileInput.value = "";
+            });
+        }
+        if (this.promptForm) {
+            this.promptForm.addEventListener("dragover", (e) => {
+                e.preventDefault();
+                this.promptForm.classList.add("agent-dragover");
+            });
+            this.promptForm.addEventListener("dragleave", () => this.promptForm.classList.remove("agent-dragover"));
+            this.promptForm.addEventListener("drop", (e) => {
+                e.preventDefault();
+                this.promptForm.classList.remove("agent-dragover");
+                this.addAttachmentFiles(Array.from(e.dataTransfer?.files || []));
+            });
+        }
 
         // Envío de formulario o botón de parada si está pensando
         if (this.promptForm) {
@@ -241,20 +346,68 @@ export class AgentCopilot {
         this.activeModel = modelId;
         const meta = this.modelsMeta[modelId];
 
-        this.modelCards.forEach(c => {
+        // Sincronizar estado activo de las tarjetas en ambos dropdowns
+        document.querySelectorAll(".agent-model-card").forEach(c => {
             c.classList.toggle("active", c.getAttribute("data-model") === modelId);
         });
 
+        // Sincronizar HEADER
         if (this.headerPillName) this.headerPillName.textContent = meta.name;
-        if (this.headerDot) this.headerDot.style.background = meta.color;
+        if (this.headerDot) this.headerDot.style.background = meta.color || "#f59e0b";
+
+        // Sincronizar INPUT TOOLBAR
+        if (this.inputModelNameEl) this.inputModelNameEl.textContent = meta.name;
+        const inputDot = this.inputModelTag ? this.inputModelTag.querySelector(".agent-model-select-dot") : null;
+        if (inputDot) inputDot.style.background = meta.color || "#f59e0b";
+
+        // Sincronizar botón flotante
+        if (this.fabModelPill) this.fabModelPill.textContent = meta.name;
+
+        // Si el chat es nuevo y aún no hay mensajes del usuario, actualizar el mensaje de bienvenida
+        if (this.history.length === 0 && this.messagesContainer) {
+            const botAuthorSpan = this.messagesContainer.querySelector(".agent-msg-bot .agent-msg-author span");
+            if (botAuthorSpan) botAuthorSpan.textContent = meta.name;
+            const contentP = this.messagesContainer.querySelector(".agent-msg-bot .agent-msg-content p");
+            if (contentP && contentP.innerHTML.includes("Nuevo chat iniciado")) {
+                contentP.innerHTML = `Nuevo chat iniciado con <strong>${meta.name}</strong>. ¿En qué te ayudo ahora?`;
+            }
+        }
+    }
+
+    /** Abre/cierra el dropdown de modelos anclado en el header superior. */
+    toggleHeaderModelDropdown(force) {
+        if (!this.headerModelSelect) return;
+        const open = typeof force === "boolean"
+            ? force
+            : !this.headerModelSelect.classList.contains("open");
+        this.headerModelSelect.classList.toggle("open", open);
+        if (this.headerModelPill) {
+            this.headerModelPill.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+    }
+
+    /** Abre/cierra el dropdown de modelos anclado a la etiqueta del prompt. */
+    toggleModelDropdown(force) {
+        if (!this.modelSelect) return;
+        const open = typeof force === "boolean"
+            ? force
+            : !this.modelSelect.classList.contains("open");
+        this.modelSelect.classList.toggle("open", open);
         if (this.inputModelTag) {
-            this.inputModelTag.textContent = meta.name;
-            this.inputModelTag.style.color = meta.color;
+            this.inputModelTag.setAttribute("aria-expanded", open ? "true" : "false");
         }
-        if (this.fabModelPill) {
-            this.fabModelPill.textContent = meta.name;
-            this.fabModelPill.style.color = meta.color;
-        }
+    }
+
+    /** Activa el desvanecido superior/inferior de la lista de chats solo cuando hay scroll. */
+    updateChatsScrollFade() {
+        const el = this.savedChatsList;
+        if (!el) return;
+        const scrollable = el.scrollHeight > el.clientHeight + 4;
+        el.classList.toggle("is-scrollable", scrollable);
+        const atTop = el.scrollTop <= 2;
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+        el.classList.toggle("fade-top", scrollable && !atTop);
+        el.classList.toggle("fade-bottom", scrollable && !atBottom);
     }
 
     autoGrowInput() {
@@ -263,9 +416,111 @@ export class AgentCopilot {
         this.promptInput.style.height = Math.min(this.promptInput.scrollHeight, 130) + "px";
     }
 
+    /* =========================================================================
+       SUBIDA DE ARCHIVOS Y MULTIMEDIA (clip junto al modelo + drag & drop)
+       ========================================================================= */
+
+    addAttachmentFiles(files) {
+        const incoming = (files || []).filter(f => f && f.size > 0).slice(0, 6);
+        if (!incoming.length) return;
+        incoming.forEach(f => {
+            const dup = this.pendingAttachments.some(a => a.name === f.name && a.size === f.size);
+            if (!dup) this.pendingAttachments.push(f);
+        });
+        if (this.pendingAttachments.length > 6) {
+            this.pendingAttachments = this.pendingAttachments.slice(-6);
+            this.showToast("Máximo 6 adjuntos por mensaje (se conservan los últimos).", "warning");
+        }
+        this.renderAttachments();
+    }
+
+    removeAttachment(index) {
+        this.pendingAttachments.splice(index, 1);
+        this.renderAttachments();
+    }
+
+    renderAttachments() {
+        if (!this.attachmentsBar) return;
+        this.attachmentsBar.replaceChildren();
+        if (!this.pendingAttachments.length) {
+            this.attachmentsBar.style.display = "none";
+            return;
+        }
+        this.attachmentsBar.style.display = "flex";
+        this.pendingAttachments.forEach((file, i) => {
+            const chip = document.createElement("div");
+            chip.className = "agent-attach-chip";
+            chip.title = file.name;
+            const icon = document.createElement("span");
+            icon.className = "agent-attach-icon";
+            icon.textContent = this.fileIconFor(file);
+            const name = document.createElement("span");
+            name.className = "agent-attach-name";
+            name.textContent = file.name;
+            const size = document.createElement("span");
+            size.className = "agent-attach-size";
+            size.textContent = this.formatFileSize(file.size);
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "agent-attach-remove";
+            remove.title = "Quitar adjunto";
+            remove.textContent = "×";
+            remove.addEventListener("click", () => this.removeAttachment(i));
+            chip.append(icon, name, size, remove);
+            this.attachmentsBar.appendChild(chip);
+        });
+    }
+
+    fileIconFor(file) {
+        const t = (file.type || "").toLowerCase();
+        if (t.startsWith("image/")) return "🖼️";
+        if (t.startsWith("video/")) return "🎬";
+        if (t.startsWith("audio/")) return "🎵";
+        if (t.includes("pdf")) return "📕";
+        if (t.includes("json") || /\.(js|ts|py|css|html?|md|txt|xml|ya?ml|csv|ini|toml|sh|bat|ps1|sql)$/i.test(file.name)) return "📄";
+        return "📎";
+    }
+
+    formatFileSize(bytes) {
+        if (!bytes) return "0 B";
+        const units = ["B", "KB", "MB", "GB"];
+        let i = 0;
+        let n = bytes;
+        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+        return `${n.toFixed(n >= 10 ? 0 : 1)} ${units[i]}`;
+    }
+
+    /**
+     * Convierte los adjuntos en un bloque de contexto para el modelo:
+     * los archivos de texto/código se incrustan (hasta 200 KB) y el resto
+     * (imágenes, video, audio…) se lista con tipo y tamaño.
+     */
+    async buildAttachmentsBlock(files) {
+        const TEXT_EXTS = /\.(txt|md|json|js|mjs|ts|jsx|tsx|py|css|scss|html?|xml|ya?ml|csv|ini|toml|cfg|conf|sh|bat|ps1|sql|log)$/i;
+        const parts = [`📎 El usuario adjuntó ${files.length} archivo(s) en este mensaje:`];
+        for (const f of files) {
+            const isText = TEXT_EXTS.test(f.name) && f.size <= 200 * 1024;
+            if (isText) {
+                try {
+                    const content = (await f.text()).slice(0, 12000);
+                    const lang = (f.name.split(".").pop() || "").toLowerCase();
+                    parts.push(`\n### ${f.name} (${this.formatFileSize(f.size)})\n\`\`\`${lang}\n${content}\n\`\`\``);
+                } catch (e) {
+                    parts.push(`- ${f.name} · ${f.type || "?"} · ${this.formatFileSize(f.size)} (no se pudo leer el contenido)`);
+                }
+            } else {
+                parts.push(`- ${f.name} · tipo: ${f.type || "desconocido"} · tamaño: ${this.formatFileSize(f.size)}${(f.type || "").startsWith("image/") ? " (imagen adjunta)" : ""}`);
+            }
+        }
+        parts.push("Ten en cuenta estos archivos para responder al usuario.");
+        return parts.join("\n");
+    }
+
     resetChat() {
         if (!this.messagesContainer) return;
         this.history = [];
+        this.pendingAttachments = [];
+        this.renderAttachments();
         this.chatId = null;
         this.ocSessionId = null;  // el siguiente guardado crea un chat nuevo
         this.loadSavedChatsList();
@@ -295,7 +550,7 @@ export class AgentCopilot {
         msgDiv.className = "agent-message agent-msg-user";
         msgDiv.innerHTML = `
             <div class="agent-msg-body">
-                <div>${this.escapeHtml(text)}</div>
+                <div style="white-space:pre-wrap;">${this.escapeHtml(text)}</div>
             </div>
         `;
         this.messagesContainer.appendChild(msgDiv);
@@ -773,7 +1028,18 @@ export class AgentCopilot {
     async submitCurrentPrompt() {
         if (!this.promptInput) return;
         const text = this.promptInput.value.trim();
-        if (!text) return;
+        const files = this.pendingAttachments.slice();
+        if (!text && !files.length) return;
+
+        // Los adjuntos viajan dentro del mensaje: texto/código se incrusta y
+        // la multimedia se lista para que el modelo sepa con qué trabaja.
+        let messageToSend = text;
+        let displayText = text;
+        if (files.length) {
+            const block = await this.buildAttachmentsBlock(files);
+            messageToSend = (text ? text + "\n\n" : "") + block;
+            displayText = (text ? text + "\n" : "") + `📎 ${files.length} archivo(s) adjunto(s)`;
+        }
 
         // Si ya había una tarea pensando, se aborta limpiamente
         if (this.isThinking && this.currentAbortController) {
@@ -787,7 +1053,9 @@ export class AgentCopilot {
 
         this.promptInput.value = "";
         this.autoGrowInput();
-        this.appendUserMessage(text);
+        this.pendingAttachments = [];
+        this.renderAttachments();
+        this.appendUserMessage(displayText);
         this.isThinking = true;
         this.setStopButton();
 
@@ -810,7 +1078,7 @@ export class AgentCopilot {
                 headers: { "Content-Type": "application/json" },
                 signal: this.currentAbortController.signal,
                 body: JSON.stringify({
-                    message: text,
+                    message: messageToSend,
                     model_id: this.activeModel,
                     app_context: appContext,
                     history: historyToSend,
@@ -863,7 +1131,7 @@ export class AgentCopilot {
             }
 
             if (!finalPayload) throw new Error("stream_sin_final");
-            this.handleAgentResponse(finalPayload, text, liveReasoning, true);
+            this.handleAgentResponse(finalPayload, displayText, liveReasoning, true);
         } catch (streamErr) {
             if (streamErr.name === "AbortError") {
                 console.log("[AgentCopilot] Petición abortada.");
@@ -877,7 +1145,7 @@ export class AgentCopilot {
                         headers: { "Content-Type": "application/json" },
                         signal: this.currentAbortController.signal,
                         body: JSON.stringify({
-                            message: text,
+                            message: messageToSend,
                             model_id: this.activeModel,
                             app_context: appContext,
                             history: historyToSend,
@@ -886,7 +1154,7 @@ export class AgentCopilot {
                     });
                     const data = await resp2.json();
                     if (!resp2.ok) throw new Error(data.detail || "Error al procesar mensaje");
-                    this.handleAgentResponse(data, text, data.reasoning || "", false);
+                    this.handleAgentResponse(data, displayText, data.reasoning || "", false);
                 } catch (err2) {
                     if (err2.name === "AbortError") return;
                     const thinkEl = document.getElementById(this.currentThinkingId);
@@ -1009,6 +1277,7 @@ export class AgentCopilot {
                 empty.className = "agent-chats-empty";
                 empty.textContent = "Sin chats guardados todavía";
                 this.savedChatsList.appendChild(empty);
+                this.updateChatsScrollFade();
                 return;
             }
             chats.forEach(chat => {
@@ -1139,6 +1408,15 @@ export class AgentCopilot {
                 }
             }
             const type = action.type;
+
+            // Deduplicar: la misma acción puede llegar por SSE y drenada del turno.
+            if (action.uid) {
+                if (this.seenActionUids.has(action.uid)) return;
+                this.seenActionUids.add(action.uid);
+                if (this.seenActionUids.size > 500) {
+                    this.seenActionUids.delete(this.seenActionUids.values().next().value);
+                }
+            }
 
             // ── ACCIÓN REAL: Archivo modificado en disco ──
             if (type === "edit_file") {
