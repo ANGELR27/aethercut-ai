@@ -19,7 +19,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import aiofiles
-from fastapi import FastAPI, BackgroundTasks, Body, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, BackgroundTasks, Body, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -534,7 +534,7 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
 @app.post("/api/projects/{task_id}/resume")
 async def resume_project(task_id: str):
     """Reanuda un proyecto interrumpido (Streamer o Co-Piloto) sin perder escenas ya grabadas."""
-    if task_id in task_jobs:
+    if task_id in task_jobs and not task_jobs[task_id].done():
         raise HTTPException(status_code=409, detail="Este proyecto ya está procesándose.")
     store = ProjectStore(task_id)
     try:
@@ -633,14 +633,21 @@ def build_broadcast_editor_snapshot(task_id: str, document: Dict[str, Any]) -> O
     cards_list = []
     brolls_list = []
     speech_list = []
+    captions_list = []
 
     for sc in scenes_raw:
         sid = sc.get("scene_id")
         mp4_file = proj_dir / "work" / f"scene_{sid}" / f"scene_{sid}.mp4"
+        voice_file = proj_dir / "work" / f"scene_{sid}" / "voice.mp3"
         dur = 0.0
         if mp4_file.exists():
             try:
                 dur = FileManager.get_media_metadata(mp4_file).get("duration", 0.0)
+            except Exception:
+                pass
+        if dur <= 0 and voice_file.exists():
+            try:
+                dur = FileManager.get_media_metadata(voice_file).get("duration", 0.0)
             except Exception:
                 pass
         if dur <= 0:
@@ -714,6 +721,28 @@ def build_broadcast_editor_snapshot(task_id: str, document: Dict[str, Any]) -> O
                 "enabled": True,
             })
 
+        srt_file = proj_dir / "work" / f"scene_{sid}" / "scene_subtitles.srt"
+        if srt_file.exists():
+            try:
+                blocks = srt_file.read_text(encoding="utf-8").strip().split("\n\n")
+                for blk in blocks:
+                    lns = [l.strip() for l in blk.splitlines() if l.strip()]
+                    if len(lns) >= 3 and "-->" in lns[1]:
+                        tp = lns[1].split("-->")
+                        def _pt(ts):
+                            pts = ts.strip().replace(",", ".").split(":")
+                            return float(pts[0])*3600 + float(pts[1])*60 + float(pts[2])
+                        c_st = round(sc_start + _pt(tp[0]), 2)
+                        c_en = round(sc_start + _pt(tp[1]), 2)
+                        captions_list.append({
+                            "start": c_st,
+                            "end": c_en,
+                            "text": " ".join(lns[2:]),
+                            "scene_id": sid,
+                        })
+            except Exception:
+                pass
+
     total_dur = round(master_dur if master_dur > 0 else cum_time, 2)
     return {
         "summary": raw_plan.get("title") or document.get("original_name") or "Producción KAI Streamer",
@@ -723,6 +752,7 @@ def build_broadcast_editor_snapshot(task_id: str, document: Dict[str, Any]) -> O
         "cards": cards_list,
         "brolls": brolls_list,
         "speech": speech_list,
+        "captions": captions_list,
         "cuts": [],
         "shorts": [],
     }
@@ -866,20 +896,27 @@ async def get_project_preview(task_id: str):
                     raise HTTPException(status_code=404, detail="La previsualización todavía no está lista.")
 
     title = document.get("original_name") or (document.get("result") or {}).get("title") or f"KAI_{task_id}"
-    safe_title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
+    import unicodedata
+    ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii")
+    safe_title = re.sub(r"[^\w\s-]", "", ascii_title).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
     filename = f"{safe_title}.mp4"
 
     return FileResponse(
         path=path,
         media_type="video/mp4",
         filename=filename,
-        headers={"Content-Disposition": f'inline; filename="{filename}"'}
     )
 
 
 @app.get("/api/projects/{task_id}/download")
-async def download_project_master(task_id: str):
-    """Descarga el video final con nombre descriptivo y extensión .mp4 garantizada."""
+@app.get("/api/projects/{task_id}/download/{filename}")
+async def download_project_master(
+    task_id: str,
+    filename: Optional[str] = None,
+    burn_subtitles: bool = Query(False),
+    style: str = Query("classic")
+):
+    """Descarga el video final con nombre descriptivo y formato MP4 garantizado para cualquier navegador."""
     store = ProjectStore(task_id)
     try:
         document = store.read()
@@ -899,15 +936,70 @@ async def download_project_master(task_id: str):
             else:
                 raise HTTPException(status_code=404, detail="El video master todavía no está generado.")
 
-    title = document.get("original_name") or (document.get("result") or {}).get("title") or "KAI_Broadcast"
-    safe_title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
-    filename = f"{safe_title}.mp4"
+    file_to_send = master_file
+    if burn_subtitles:
+        sub_master = settings.OUTPUTS_DIR / f"{task_id}_master_subtitled_{style}.mp4"
+        if sub_master.exists() and sub_master.stat().st_size > 50000:
+            file_to_send = sub_master
+        else:
+            proj_dir = settings.PROJECTS_DIR / task_id
+            full_srt = proj_dir / "work" / "full_subtitles.srt"
+            all_srt_blocks = []
+            scene_dirs = sorted(
+                (proj_dir / "work").glob("scene_*"),
+                key=lambda p: int(p.name.replace("scene_", "")) if p.name.replace("scene_", "").isdigit() else 999
+            ) if (proj_dir / "work").exists() else []
+
+            for sc_dir in scene_dirs:
+                srt_path = sc_dir / "scene_subtitles.srt"
+                if srt_path.exists():
+                    try:
+                        content = srt_path.read_text(encoding="utf-8").strip()
+                        if content:
+                            all_srt_blocks.append(content)
+                    except Exception:
+                        pass
+
+            if all_srt_blocks:
+                try:
+                    full_srt.write_text("\n\n".join(all_srt_blocks), encoding="utf-8")
+                    esc_srt = str(full_srt.resolve()).replace("\\", "/").replace(":", "\\:")
+                    font_path = "C\\:/Windows/Fonts/segoeuib.ttf"
+                    force_style = "FontName=Segoe UI,Bold=1,PrimaryColour=&H00FFFFFF,BorderStyle=1,Outline=3,Shadow=0,OutlineColour=&H00000000,FontSize=20,MarginV=45"
+                    cmd = [
+                        "ffmpeg", "-y", "-i", str(master_file),
+                        "-vf", f"subtitles='{esc_srt}':force_style='{force_style}'",
+                        "-c:a", "copy",
+                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        str(sub_master)
+                    ]
+                    subprocess.run(cmd, capture_output=True, timeout=90)
+                    if sub_master.exists() and sub_master.stat().st_size > 50000:
+                        file_to_send = sub_master
+                except Exception as _burn_err:
+                    safe_log(f"[Download] Fallo al quemar subtítulos en export: {_burn_err}")
+
+    import unicodedata
+    if not filename:
+        title = document.get("original_name") or (document.get("result") or {}).get("title") or "KAI_Broadcast"
+        ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii")
+        safe_title = re.sub(r"[^\w\s-]", "", ascii_title).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
+        out_filename = f"{safe_title}.mp4"
+    else:
+        ascii_name = unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode("ascii")
+        clean_name = re.sub(r"[^\w\s.-]", "", ascii_name).strip().replace(" ", "_")
+        if not clean_name.lower().endswith(".mp4"):
+            clean_name = f"{clean_name}.mp4"
+        out_filename = clean_name or f"KAI_{task_id}.mp4"
 
     return FileResponse(
-        path=master_file,
+        path=file_to_send,
         media_type="video/mp4",
-        filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        filename=out_filename,
+        headers={
+            "Content-Disposition": f'attachment; filename="{out_filename}"',
+            "Content-Type": "video/mp4",
+        }
     )
 
 
@@ -1372,17 +1464,11 @@ async def stream_progress(task_id: str):
         while True:
             state = tasks_progress.get(task_id)
             if not state:
-                # Si la tarea no está en memoria, verificar si existe un proyecto guardado completado
+                # Si la tarea no está en memoria, verificar el almacén del proyecto
                 try:
                     doc = ProjectStore(task_id).read()
-                    if "current_progress" in doc and doc["current_progress"]:
-                        cp = doc["current_progress"]
-                        yield f"data: {json.dumps(cp, default=str)}\n\n"
-                        if cp.get("completed") or cp.get("error"):
-                            break
-                        await asyncio.sleep(1)
-                        continue
-                    elif doc.get("status") == "done":
+                    status = doc.get("status")
+                    if status == "done":
                         done_state = {
                             "step": "done",
                             "progress": 100.0,
@@ -1393,8 +1479,26 @@ async def stream_progress(task_id: str):
                         }
                         yield f"data: {json.dumps(done_state, default=str)}\n\n"
                         break
-                    elif doc.get("status") == "error":
+                    elif status == "error":
                         yield f"data: {json.dumps({'error': doc.get('message', 'Error en el proyecto')})}\n\n"
+                        break
+
+                    is_in_jobs = task_id in task_jobs and not task_jobs[task_id].done()
+                    if "current_progress" in doc and doc["current_progress"]:
+                        cp = doc["current_progress"]
+                        if cp.get("completed") or cp.get("error"):
+                            yield f"data: {json.dumps(cp, default=str)}\n\n"
+                            break
+                        if is_in_jobs:
+                            yield f"data: {json.dumps(cp, default=str)}\n\n"
+                            await asyncio.sleep(1)
+                            continue
+                        else:
+                            # Tarea interrumpida (ej. reinicio de servidor)
+                            yield f"data: {json.dumps({'error': 'El proceso se interrumpió al reiniciar el servidor. Puedes reanudarlo para continuar desde las escenas ya creadas.', 'interrupted': True, 'task_id': task_id, 'step': cp.get('step'), 'progress': cp.get('progress', 0.0)}, default=str)}\n\n"
+                            break
+                    elif not is_in_jobs:
+                        yield f"data: {json.dumps({'error': 'La tarea no se encuentra en ejecución activa.', 'interrupted': True, 'task_id': task_id}, default=str)}\n\n"
                         break
                 except Exception:
                     pass
@@ -1408,9 +1512,28 @@ async def stream_progress(task_id: str):
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
+@app.get("/api/tasks/active")
+async def get_active_tasks():
+    """Retorna las tareas en segundo plano que están ejecutándose activamente."""
+    active = []
+    with _state_lock:
+        for tid, job in list(task_jobs.items()):
+            if not job.done():
+                prog = tasks_progress.get(tid, {})
+                active.append({
+                    "task_id": tid,
+                    "step": prog.get("step", "running"),
+                    "progress": prog.get("progress", 0.0),
+                    "message": prog.get("message", "Procesando..."),
+                    "file_name": prog.get("file_name"),
+                })
+    return {"active_tasks": active}
+
+
 @app.get("/api/progress/{task_id}")
 async def get_task_progress(task_id: str):
     state = tasks_progress.get(task_id)
+    is_running = task_id in task_jobs and not task_jobs[task_id].done()
     if not state:
         try:
             doc = ProjectStore(task_id).read()
@@ -1420,13 +1543,28 @@ async def get_task_progress(task_id: str):
                     "progress": 100.0,
                     "message": "¡Transmisión completada!",
                     "completed": True,
+                    "is_running": False,
                     "file_name": doc.get("original_name") or f"KAI Stream {task_id}",
                     "result": doc.get("result"),
                 }
+            if "current_progress" in doc and doc["current_progress"]:
+                cp = doc["current_progress"]
+                return {
+                    **cp,
+                    "is_running": is_running,
+                    "interrupted": not is_running and not cp.get("completed") and not cp.get("error"),
+                }
+            return {
+                "step": doc.get("status", "unknown"),
+                "progress": 0.0,
+                "message": doc.get("message", ""),
+                "is_running": is_running,
+                "interrupted": not is_running and doc.get("status") not in ("done", "error"),
+            }
         except Exception:
             pass
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
-    return state
+    return {**state, "is_running": is_running}
 
 
 @app.get("/api/trending-topics")
@@ -1686,19 +1824,47 @@ async def tts_preview_endpoint(
     # Mapeo de identidad vocal única para que NINGUNA voz suene igual
     studio_voice_map = {
         "es-mx-jorgeneural": "angel",
+        "jorge": "angel",
         "es-us-alonsoneural": "fernando",
+        "alonso": "fernando",
         "es-co-gonzaloneural": "jesus",
+        "gonzalo": "jesus",
         "es-ar-tomasneural": "carlos",
+        "tomas": "carlos",
+        "tomás": "carlos",
         "es-mx-dalianeural": "carmen",
+        "dalia": "carmen",
         "es-ar-elenaneural": "carolina",
+        "elena": "carolina",
         "es-es-alvaroneural": "unai",
+        "alvaro": "unai",
+        "álvaro": "unai",
         "voicestudio-omni-es": "mariana",
+        "omni": "mariana",
         "voicestudio-piper-dave": "maximiliano",
+        "piper-dave": "maximiliano",
         "clon-propio": "emiliano",
         "neural-clon": "emiliano",
         "clone": "emiliano",
     }
-    target_sp_voice = studio_voice_map.get(voice_key, raw_voice.replace("speechify:", ""))
+    target_sp_voice = studio_voice_map.get(voice_key)
+    if not target_sp_voice:
+        if any(x in voice_key for x in ["gonzalo", "es-co"]):
+            target_sp_voice = "jesus"
+        elif any(x in voice_key for x in ["jorge", "es-mx"]):
+            target_sp_voice = "angel"
+        elif any(x in voice_key for x in ["alonso", "es-us"]):
+            target_sp_voice = "fernando"
+        elif any(x in voice_key for x in ["tomas", "tomás", "es-ar-tomas"]):
+            target_sp_voice = "carlos"
+        elif any(x in voice_key for x in ["dalia", "es-mx-dalia"]):
+            target_sp_voice = "carmen"
+        elif any(x in voice_key for x in ["elena", "es-ar-elena"]):
+            target_sp_voice = "carolina"
+        elif any(x in voice_key for x in ["alvaro", "álvaro", "es-es"]):
+            target_sp_voice = "unai"
+        else:
+            target_sp_voice = raw_voice.replace("speechify:", "").strip()
 
     # 0. Síntesis de estudio de alta fidelidad con Speechify (voces humanas 100% distintas)
     try:

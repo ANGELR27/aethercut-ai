@@ -6,6 +6,7 @@ de créditos (failover), validación de saldo disponible y generación de audio 
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -128,10 +129,21 @@ def synthesize_speechify(text: str, voice_id: str) -> Optional[bytes]:
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
                 if resp.status == 200:
-                    data = resp.read()
-                    if len(data) > 200:
+                    raw_data = resp.read()
+                    if raw_data.startswith(b"{") and b"audio_data" in raw_data:
+                        try:
+                            parsed = json.loads(raw_data.decode("utf-8"))
+                            b64_audio = parsed.get("audio_data")
+                            if b64_audio:
+                                mp3_bytes = base64.b64decode(b64_audio)
+                                if len(mp3_bytes) > 200:
+                                    _active_key_index = current_idx
+                                    return mp3_bytes
+                        except Exception as _p_err:
+                            logger.warning(f"[Speechify] Error decodificando audio_data: {_p_err}")
+                    elif len(raw_data) > 200:
                         _active_key_index = current_idx
-                        return data
+                        return raw_data
         except urllib.error.HTTPError as err:
             err_body = ""
             try:

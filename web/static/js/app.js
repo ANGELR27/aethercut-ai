@@ -2058,17 +2058,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 bannerDlBtn.href = "#";
                 bannerDlBtn.onclick = (e) => {
                     e.preventDefault();
-                    fetch(downloadEndpoint)
-                        .then(r => r.blob())
-                        .then(blob => {
-                            const a = document.createElement("a");
-                            a.href = URL.createObjectURL(blob);
-                            a.download = mp4Filename;
-                            document.body.appendChild(a);
-                            a.click();
-                            setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-                        })
-                        .catch(() => window.open(downloadEndpoint, "_blank"));
+                    const dlUrl = taskId ? `/api/projects/${taskId}/download/${encodeURIComponent(mp4Filename)}` : downloadEndpoint;
+                    const a = document.createElement("a");
+                    a.href = dlUrl;
+                    a.download = mp4Filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => a.remove(), 1500);
                 };
             }
         }
@@ -2144,6 +2140,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         function blobDownload(url, filename) {
+            const cleanFile = (filename || "video.mp4").endsWith(".mp4") ? filename : `${filename}.mp4`;
+            const dlUrl = taskId && url.includes("/download") ? `/api/projects/${taskId}/download/${encodeURIComponent(cleanFile)}` : url;
             // Intentar guardado directo en Windows si es proyecto activo
             if (taskId && url.includes("/download")) {
                 fetch(`/api/projects/${taskId}/save-to-downloads`, { method: "POST" })
@@ -2157,11 +2155,11 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const a = document.createElement("a");
-            a.href = url;
-            a.setAttribute("download", filename);
+            a.href = dlUrl;
+            a.download = cleanFile;
             document.body.appendChild(a);
             a.click();
-            setTimeout(() => a.remove(), 1000);
+            setTimeout(() => a.remove(), 1500);
         }
 
         const bannerFolderBtn = $("bannerFolderBtn");
@@ -3690,7 +3688,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const titleSource = $("resVideoTitle")?.textContent || $("bentoCardTitle")?.textContent || "KAI_Broadcast";
                 const cleanTitle = titleSource.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") || "KAI_Broadcast";
                 const mp4Filename = `${cleanTitle}.mp4`;
-                const endpoint = taskId ? `/api/projects/${taskId}/download` : (videoEl.src || "#");
+                const endpoint = taskId ? `/api/projects/${taskId}/download/${encodeURIComponent(mp4Filename)}` : (videoEl.src || "#");
 
                 if (taskId) {
                     fetch(`/api/projects/${taskId}/save-to-downloads`, { method: "POST" })
@@ -3705,10 +3703,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 const a = document.createElement("a");
                 a.href = endpoint;
-                a.setAttribute("download", mp4Filename);
+                a.download = mp4Filename;
                 document.body.appendChild(a);
                 a.click();
-                setTimeout(() => a.remove(), 1000);
+                setTimeout(() => a.remove(), 1500);
             });
         }
     }

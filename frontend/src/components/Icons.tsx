@@ -222,3 +222,22 @@ export const IconShare = (p: P) => (
     <path d="M8.2 10.9 15.8 7.5M8.2 13.1l7.6 3.4" />
   </S>
 );
+
+
+export const IconPin = ({ className, filled }: P & { filled?: boolean }) => (
+  <S className={className}>
+    <path
+      d="M16 4v4l2 3v2h-5v7l-1 1-1-1v-7H6v-2l2-3V4c0-.6.4-1 1-1h6c.6 0 1 .4 1 1z"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+    />
+  </S>
+);
+
+export const IconRefresh = (p: P) => (
+  <S {...p}>
+    <path d="M21 12a9 9 0 0 1-15.3 6.36M3 12a9 9 0 0 1 15.3-6.36" />
+    <path d="M3 17v4h4M21 7V3h-4" />
+  </S>
+);
+

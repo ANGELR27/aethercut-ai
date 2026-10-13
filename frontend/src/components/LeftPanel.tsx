@@ -1,5 +1,14 @@
 import { useState, useRef, useEffect } from "react";
-import { ASSET_FOLDERS, AUTOMATIONS, PRESETS, type Automation } from "@/lib/data";
+import { ASSET_FOLDERS, PRESETS } from "@/lib/data";
+import {
+  generateDailyTopics,
+  getStoredPinnedIds,
+  savePinnedIds,
+  CATEGORY_LABELS,
+  ALL_CATEGORIES,
+  type ViralTopic,
+  type ViralCategory,
+} from "@/lib/viralTopics";
 import { useEditor } from "@/lib/store";
 import { cn } from "@/utils/cn";
 import { Hairline, IconButton, Meter, SectionLabel, Toggle } from "./ui";
@@ -13,6 +22,8 @@ import {
   IconScissors,
   IconSparkle,
   IconType,
+  IconPin,
+  IconRefresh,
 } from "./Icons";
 
 const TABS = [
@@ -105,7 +116,12 @@ export function LeftPanel() {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        <div
+          className={cn(
+            "min-h-0 flex-1 px-3",
+            tab === "ai" ? "flex flex-col overflow-hidden pb-1" : "overflow-y-auto pb-4",
+          )}
+        >
           {tab === "ai" && <AITab />}
           {tab === "media" && <MediaTab />}
           {tab === "text" && <TextTab />}
@@ -119,27 +135,46 @@ export function LeftPanel() {
 
 /* ------------------------------------------------------------------ */
 
-const CATEGORY_LABEL: Record<Automation["category"], string> = {
-  narrativa: "Narrativa",
-  ritmo: "Ritmo",
-  acabado: "Acabado",
-  distribución: "Distribución",
-};
+const NEURAL_VOICES = [
+  { id: "es-MX-JorgeNeural", n: "Jorge · México", d: "Conversacional" },
+  { id: "es-US-AlonsoNeural", n: "Alonso · Latino", d: "Broadcast" },
+  { id: "es-CO-GonzaloNeural", n: "Gonzalo · Colombia", d: "Neutro & Calmo" },
+  { id: "es-AR-TomasNeural", n: "Tomás · Argentina", d: "Directo & Enérgico" },
+  { id: "es-MX-DaliaNeural", n: "Dalia · México", d: "Femenina Cálida" },
+  { id: "es-AR-ElenaNeural", n: "Elena · Argentina", d: "Femenina Expresiva" },
+  { id: "es-ES-AlvaroNeural", n: "Álvaro · España", d: "Tech & Divulgación" },
+  { id: "clon-propio", n: "Clon de voz propio", d: "Muestra de estudio" },
+];
 
 function AITab() {
   const {
-    progress,
-    applied,
-    run,
     isCreating,
     createProgress,
     createStatusMessage,
     createVideo,
+    cancelCreation,
+    resumeProject,
+    flash,
+    projects,
+    activeProjectId,
+    activeProjectTitle,
+    selectedVoice,
+    setSelectedVoice,
+    previewVoice,
+    playingVoiceId,
   } = useEditor();
+
   const [topicPrompt, setTopicPrompt] = useState("");
-  const groups = ["narrativa", "ritmo", "acabado", "distribución"] as const;
-  const done = applied.length;
-  const total = AUTOMATIONS.length;
+  const [selectedCategory, setSelectedCategory] = useState<ViralCategory | "all">("all");
+  const [videoFormat, setVideoFormat] = useState<"long" | "reel">("long");
+  const [targetDurationMin, setTargetDurationMin] = useState<number>(15);
+  const [targetReelSec, setTargetReelSec] = useState<number>(60);
+  const [isExtractingClips, setIsExtractingClips] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => getStoredPinnedIds());
+  const [topics, setTopics] = useState<ViralTopic[]>(() =>
+    generateDailyTopics(getStoredPinnedIds()),
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -147,133 +182,658 @@ function AITab() {
       if (topicPrompt.trim() && !isCreating) {
         const text = topicPrompt.trim();
         setTopicPrompt("");
-        createVideo(text);
+        if (videoFormat === "reel") {
+          createVideo(text, {
+            duration: targetReelSec,
+            style: "shorts",
+            aspect_ratio: "9:16",
+          });
+        } else {
+          createVideo(text, {
+            duration: targetDurationMin * 60,
+            style: "divulgacion",
+            aspect_ratio: "16:9",
+          });
+        }
       }
     }
   };
 
+  const handleRefresh = () => {
+    const fresh = generateDailyTopics(pinnedIds, true);
+    setTopics(fresh);
+    flash("Temas actualizados con nuevas puntuaciones · Favoritos intactos");
+  };
+
+  const togglePin = (topic: ViralTopic) => {
+    const isPinned = pinnedIds.includes(topic.id);
+    const nextPinned = isPinned
+      ? pinnedIds.filter((id) => id !== topic.id)
+      : [topic.id, ...pinnedIds];
+
+    setPinnedIds(nextPinned);
+    savePinnedIds(nextPinned, topic, !isPinned);
+    flash(
+      isPinned
+        ? `«${topic.title.slice(0, 24)}...» desanclado`
+        : `«${topic.title.slice(0, 24)}...» anclado de primero`,
+    );
+  };
+
+  const handleIntegrate = (topic: ViralTopic) => {
+    const combined = `${topic.title}. ${topic.nuances}`;
+    setTopicPrompt(combined);
+    if (videoFormat === "long") {
+      setTargetDurationMin(topic.durationMin || 15);
+    }
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+    flash(`Tema integrado: «${topic.title.slice(0, 25)}...»`);
+  };
+
+  const handleGenerate = (
+    topic: ViralTopic,
+    format: "long" | "reel" = videoFormat,
+    overrideDurationSec?: number,
+  ) => {
+    if (isCreating) return;
+    const combined = `${topic.title}. ${topic.nuances}`;
+    if (format === "reel") {
+      const dur = overrideDurationSec || targetReelSec;
+      createVideo(combined, {
+        duration: dur,
+        style: "shorts",
+        aspect_ratio: "9:16",
+      });
+      flash(`Generando Reel 9:16 (${dur}s): «${topic.title.slice(0, 24)}...»`);
+    } else {
+      const dur = overrideDurationSec || targetDurationMin * 60;
+      const minLabel = Math.round(dur / 60);
+      createVideo(combined, {
+        duration: dur,
+        style: "divulgacion",
+        aspect_ratio: "16:9",
+      });
+      flash(`Generando video documental 16:9 (${minLabel}m): «${topic.title.slice(0, 24)}...»`);
+    }
+  };
+
+  const handleExtractMasterClips = async () => {
+    if (!activeProjectId || isExtractingClips) return;
+    try {
+      setIsExtractingClips(true);
+      flash("Extrayendo 3 Reels verticales 9:16 de los mejores momentos del video...");
+      const res = await fetch(`/api/projects/${activeProjectId}/extract-clips`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Error al extraer clips");
+      flash("¡3 Reels verticales 9:16 listos y extraídos con éxito!");
+    } catch (err: any) {
+      flash(`Aviso: ${err.message || "No se pudieron extraer clips"}`);
+    } finally {
+      setIsExtractingClips(false);
+    }
+  };
+
+  // Grupos activos según el filtro seleccionado
+  const activeCategories: ViralCategory[] =
+    selectedCategory === "all" ? ALL_CATEGORIES : [selectedCategory];
+
+  // Temas filtrados
+  const displayedTopics =
+    selectedCategory === "all"
+      ? topics
+      : topics.filter((t) => t.category === selectedCategory);
+
   return (
-    <div className="space-y-5">
-      <div className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.04] to-transparent p-3">
-        <div className="flex items-center justify-between">
-          <span className="micro-sm text-white/30">
-            {isCreating ? "Creando video IA" : "Pipeline automatizado"}
-          </span>
-          <span className="tnum text-[10px] text-beam-200">
-            {isCreating ? `${Math.round(createProgress)}%` : `${done}/${total}`}
-          </span>
+    <div className="flex flex-col h-full min-h-0">
+      {/* 1. SECCIÓN ESTÁTICA / FIJA (Card de prompt, formato, duración y pipeline) */}
+      <div className="shrink-0 rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.04] to-transparent p-3 mb-2">
+        {/* Cabecera del generador con Switcher de formato Largo vs Reel */}
+        <div className="flex items-center justify-between gap-1 pb-1.5 border-b border-white/[0.04]">
+          <div className="flex items-center gap-0.5 bg-black/50 p-0.5 rounded-lg border border-white/[0.08]">
+            <button
+              type="button"
+              onClick={() => setVideoFormat("long")}
+              className={cn(
+                "px-2 py-0.5 rounded text-[8.5px] font-semibold flex items-center gap-1 transition-all",
+                videoFormat === "long"
+                  ? "bg-beam-500/25 text-beam-100 border border-beam-400/35 shadow-[0_0_8px_rgba(56,189,248,0.2)]"
+                  : "text-white/40 hover:text-white/70",
+              )}
+              title="Modo Largo / Documental: 10 a 40 minutos en formato panorámico 16:9"
+            >
+              <span>🎬</span>
+              <span>Largo 16:9</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setVideoFormat("reel")}
+              className={cn(
+                "px-2 py-0.5 rounded text-[8.5px] font-semibold flex items-center gap-1 transition-all",
+                videoFormat === "reel"
+                  ? "bg-purple-500/25 text-purple-100 border border-purple-400/35 shadow-[0_0_8px_rgba(168,85,247,0.2)]"
+                  : "text-white/40 hover:text-white/70",
+              )}
+              title="Modo Reel / Short: 30 a 90 segundos en formato vertical 9:16 con gancho viral"
+            >
+              <span>📱</span>
+              <span>Reel 9:16</span>
+            </button>
+          </div>
+
+          {/* Control editable de tiempo con signos - y + para elegir libremente o hacer pruebas cortas */}
+          <div className="flex items-center bg-black/60 rounded-lg border border-white/[0.08] px-1 py-0.5 shadow-inner">
+            <button
+              type="button"
+              onClick={() => {
+                if (videoFormat === "long") {
+                  setTargetDurationMin((prev) => Math.max(1, prev - 1));
+                } else {
+                  setTargetReelSec((prev) => Math.max(10, prev - 5));
+                }
+              }}
+              className="h-5 w-5 grid place-items-center rounded text-[13px] font-bold text-white/50 hover:text-white hover:bg-white/[0.08] active:scale-90 transition-all select-none"
+              title={videoFormat === "long" ? "Restar 1 minuto" : "Restar 5 segundos"}
+            >
+              −
+            </button>
+
+            <div className="flex items-center gap-0.5 px-1">
+              {videoFormat === "long" ? (
+                <>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={targetDurationMin || ""}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val)) {
+                        setTargetDurationMin(Math.max(1, Math.min(60, val)));
+                      } else if (e.target.value === "") {
+                        setTargetDurationMin(1);
+                      }
+                    }}
+                    className="w-6 text-center bg-transparent border-0 p-0 text-[11px] font-bold text-beam-200 focus:outline-none focus:ring-0 tnum [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    title="Escribe directamente los minutos (ej: 1 o 2 para pruebas cortas, o 10 a 40 para documental)"
+                  />
+                  <span className="text-[9px] font-medium text-white/40 select-none">m</span>
+                </>
+              ) : (
+                <>
+                  <input
+                    type="number"
+                    min={10}
+                    max={300}
+                    value={targetReelSec || ""}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val)) {
+                        setTargetReelSec(Math.max(5, Math.min(300, val)));
+                      } else if (e.target.value === "") {
+                        setTargetReelSec(15);
+                      }
+                    }}
+                    className="w-7 text-center bg-transparent border-0 p-0 text-[11px] font-bold text-purple-300 focus:outline-none focus:ring-0 tnum [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    title="Escribe directamente los segundos (ej: 15, 30, 45, 60, 90)"
+                  />
+                  <span className="text-[9px] font-medium text-white/40 select-none">s</span>
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (videoFormat === "long") {
+                  setTargetDurationMin((prev) => Math.min(60, prev + 1));
+                } else {
+                  setTargetReelSec((prev) => Math.min(300, prev + 5));
+                }
+              }}
+              className="h-5 w-5 grid place-items-center rounded text-[13px] font-bold text-white/50 hover:text-white hover:bg-white/[0.08] active:scale-90 transition-all select-none"
+              title={videoFormat === "long" ? "Sumar 1 minuto" : "Sumar 5 segundos"}
+            >
+              +
+            </button>
+          </div>
         </div>
-        <div className="mt-2.5">
-          <Meter value={isCreating ? createProgress : (done / total) * 100} />
+
+        {/* Selector y verificador rápido de voz neuronal */}
+        <div className="mt-2 flex items-center justify-between bg-black/40 rounded-lg px-2 py-1 border border-white/[0.05]">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <span className="text-[10px] select-none shrink-0">🎙️</span>
+            <select
+              value={selectedVoice}
+              onChange={(e) => setSelectedVoice(e.target.value)}
+              className="w-full bg-transparent border-0 p-0 text-[9.5px] font-medium text-white/80 focus:outline-none focus:ring-0 truncate cursor-pointer"
+              title="Voz neuronal exacta que narrará tus videos"
+            >
+              {NEURAL_VOICES.map((v) => (
+                <option key={v.id} value={v.id} className="bg-night-950 text-white">
+                  {v.n} ({v.d})
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={() => previewVoice(selectedVoice)}
+            className="shrink-0 text-[9px] text-beam-300/80 hover:text-beam-200 transition-colors pl-1.5 font-medium"
+            title="Escuchar muestra de esta voz neuronal"
+          >
+            {playingVoiceId === selectedVoice ? "🔊 Probando..." : "▶ Muestra"}
+          </button>
+        </div>
+
+        <div className="mt-2">
+          <Meter value={isCreating ? createProgress : 100} />
         </div>
         {isCreating ? (
-          <p className="mt-2.5 text-[10px] leading-relaxed text-beam-200/90 truncate">
-            {createStatusMessage || "Procesando video con IA..."}
-          </p>
+          <div className="mt-2 flex items-center justify-between gap-1.5">
+            <p className="text-[10px] leading-relaxed text-beam-200/90 truncate flex-1" title={createStatusMessage}>
+              {createStatusMessage || "Procesando video con IA..."}
+            </p>
+            <button
+              type="button"
+              onClick={cancelCreation}
+              className="shrink-0 text-[9px] font-medium text-red-300 hover:text-red-100 bg-red-500/15 hover:bg-red-500/30 border border-red-500/30 px-1.5 py-0.5 rounded transition-all"
+              title="Cancelar creación activa"
+            >
+              Cancelar
+            </button>
+          </div>
         ) : (
           <textarea
+            ref={textareaRef}
             value={topicPrompt}
             onChange={(e) => setTopicPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={2}
-            placeholder="Cada acción se procesa sobre el máster sin re-render. Escribe aquí el tema o especificaciones..."
-            className="mt-2.5 w-full resize-none border-0 bg-transparent p-0 text-[10px] leading-relaxed text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-0"
+            placeholder={
+              videoFormat === "reel"
+                ? "Escribe el tema para tu Reel / Short vertical 9:16 (30-90s) con gancho dinámico..."
+                : "Escribe el tema o integra uno de los nichos abajo para crear tu video de 10 a 40 min..."
+            }
+            className="mt-2 w-full resize-none border-0 bg-transparent p-0 text-[10px] leading-relaxed text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-0"
           />
         )}
         {topicPrompt.trim().length > 0 && !isCreating && (
-          <div className="mt-1 flex items-center justify-end">
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-[9px] text-white/30">
+              {videoFormat === "reel" ? (
+                <>
+                  Formato: <strong className="text-purple-300 font-semibold">Reel 9:16 ({targetReelSec}s)</strong>
+                </>
+              ) : (
+                <>
+                  Duración: <strong className="text-beam-300 font-semibold">{targetDurationMin} min (16:9)</strong>
+                </>
+              )}
+            </span>
             <button
               type="button"
               onClick={() => {
                 const text = topicPrompt.trim();
                 setTopicPrompt("");
-                createVideo(text);
+                if (videoFormat === "reel") {
+                  createVideo(text, {
+                    duration: targetReelSec,
+                    style: "shorts",
+                    aspect_ratio: "9:16",
+                  });
+                } else {
+                  createVideo(text, {
+                    duration: targetDurationMin * 60,
+                    style: "divulgacion",
+                    aspect_ratio: "16:9",
+                  });
+                }
               }}
-              className="micro-sm text-beam-300 hover:text-beam-100 transition-colors"
+              className={cn(
+                "micro-sm transition-colors font-medium",
+                videoFormat === "reel"
+                  ? "text-purple-300 hover:text-purple-100"
+                  : "text-beam-300 hover:text-beam-100",
+              )}
             >
-              Crear video ↵
+              {videoFormat === "reel"
+                ? `Crear Reel (${targetReelSec}s) ↵`
+                : `Crear video (${targetDurationMin}m) ↵`}
             </button>
+          </div>
+        )}
+
+        {/* Acceso rápido a extraer 3 Reels verticales si hay video activo en el editor */}
+        {activeProjectId && (
+          <div className="mt-2 pt-2 border-t border-white/[0.05] flex items-center justify-between">
+            <span className="text-[9px] text-white/30 truncate max-w-[120px]" title={activeProjectTitle}>
+              En timeline: {activeProjectTitle || "Video activo"}
+            </span>
+            <div className="flex items-center gap-1.5">
+              {(() => {
+                const activeProj = projects?.find((p) => p.id === activeProjectId);
+                const isInterrupted =
+                  Boolean(activeProjectId) &&
+                  !isCreating &&
+                  Boolean(
+                    activeProj &&
+                      !activeProj.has_result &&
+                      (activeProj.status === "render" ||
+                        activeProj.status === "running" ||
+                        activeProj.status === "script" ||
+                        activeProj.status === "error"),
+                  );
+                return (
+                  isInterrupted && (
+                    <button
+                      type="button"
+                      onClick={() => resumeProject(activeProjectId)}
+                      className="text-[9px] font-medium px-2 py-0.5 rounded-md border border-amber-400/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/30 transition-all flex items-center gap-1"
+                      title="Reanudar generación de este video desde donde se detuvo"
+                    >
+                      <span>⚡</span>
+                      <span>Reanudar</span>
+                    </button>
+                  )
+                );
+              })()}
+              <button
+                type="button"
+                onClick={handleExtractMasterClips}
+                disabled={isExtractingClips}
+                className={cn(
+                  "text-[9px] font-medium px-2 py-0.5 rounded-md border transition-all flex items-center gap-1",
+                  isExtractingClips
+                    ? "border-white/10 bg-white/5 text-white/40 cursor-not-allowed"
+                    : "border-purple-400/30 bg-purple-500/15 text-purple-200 hover:bg-purple-500/25 hover:border-purple-400/50",
+                )}
+                title="Extrae automáticamente 3 clips verticales (Shorts / Reels 9:16) a partir de los mejores momentos"
+              >
+                <span>✂️</span>
+                <span>{isExtractingClips ? "Extrayendo..." : "Extraer 3 Reels"}</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      {groups.map((g) => {
-        const items = AUTOMATIONS.filter((a) => a.category === g);
-        if (!items.length) return null;
-        return (
-          <div key={g} className="space-y-2">
-            <SectionLabel>{CATEGORY_LABEL[g]}</SectionLabel>
-            {items.map((a) => {
-              const p = progress[a.id];
-              const isApplied = applied.includes(a.id);
-              const isRunning = p !== undefined;
-              return (
-                <div
-                  key={a.id}
-                  className={cn(
-                    "group relative overflow-hidden rounded-xl border p-2.5 transition-all duration-500",
-                    isApplied
-                      ? "border-signal-400/20 bg-signal-400/[0.035]"
-                      : isRunning
-                        ? "border-beam-400/35 bg-beam-500/[0.07]"
-                        : "border-white/[0.06] bg-white/[0.015] hover:border-white/[0.14] hover:bg-white/[0.035]",
-                  )}
-                >
-                  {isRunning && (
-                    <span className="shimmer-bar absolute inset-x-0 top-0 h-[2px] overflow-hidden bg-beam-500/20" />
-                  )}
-                  <div className="flex items-start gap-2.5">
-                    <span
-                      className={cn(
-                        "mt-[1px] grid h-6 w-6 shrink-0 place-items-center rounded-lg border text-[11px]",
-                        isApplied
-                          ? "border-signal-400/30 bg-signal-400/10 text-signal-400"
-                          : "border-beam-400/25 bg-beam-500/10 text-beam-200",
-                      )}
-                    >
-                      {isApplied ? <IconCheck className="h-3 w-3" /> : a.glyph}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-[11.5px] text-white/85">{a.name}</span>
-                        <span className="tnum shrink-0 text-[9.5px] text-beam-200/80">
-                          +{a.score}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[10px] leading-snug text-white/35">{a.detail}</p>
+      {/* 2. BARRA DE CABECERA CON CONTADOR Y BOTÓN ACTUALIZAR */}
+      <div className="shrink-0 flex items-center justify-between px-1 mb-1">
+        <div className="flex items-center gap-1.5">
+          <span className="micro-sm text-white/35 font-medium tracking-wider">
+            NICHOS VIRALES
+          </span>
+          <span className="rounded-full bg-beam-500/10 border border-beam-400/20 px-1.5 py-0.2 text-[9px] font-semibold text-beam-300">
+            {displayedTopics.length} disponibles
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          title="Actualizar temas del día (los favoritos permanecen anclados de primero)"
+          className="flex items-center gap-1 text-[9.5px] text-white/40 hover:text-beam-300 transition-colors px-1.5 py-0.5 rounded hover:bg-white/[0.04]"
+        >
+          <IconRefresh className="h-3 w-3" />
+          <span>Actualizar</span>
+        </button>
+      </div>
 
-                      {isRunning ? (
-                        <div className="mt-2 space-y-1">
-                          <Meter value={p} height={2} />
-                          <div className="flex justify-between">
-                            <span className="micro-sm text-beam-200/70">Procesando</span>
-                            <span className="tnum text-[9px] text-white/40">
-                              {Math.round(p)}%
+      {/* 3. BOTÓN DE FILTRADO HORIZONTAL RÁPIDO POR NICHO */}
+      <div
+        onWheel={(e) => {
+          if (e.deltaY !== 0) {
+            e.currentTarget.scrollLeft += e.deltaY;
+          }
+        }}
+        className="shrink-0 flex items-center gap-1 overflow-x-auto no-scrollbar py-1 px-0.5 mb-1.5 scroll-smooth"
+      >
+        <button
+          type="button"
+          onClick={() => setSelectedCategory("all")}
+          className={cn(
+            "shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[9.5px] border transition-all duration-200",
+            selectedCategory === "all"
+              ? "bg-beam-500/20 border-beam-400/40 text-beam-100 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]"
+              : "bg-white/[0.025] border-white/[0.06] text-white/45 hover:text-white/80 hover:bg-white/[0.05]",
+          )}
+        >
+          <span>Todos</span>
+          <span className="text-[8.5px] opacity-60">({topics.length})</span>
+        </button>
+        {ALL_CATEGORIES.map((catKey) => {
+          const catInfo = CATEGORY_LABELS[catKey];
+          const count = topics.filter((t) => t.category === catKey).length;
+          const isActive = selectedCategory === catKey;
+          return (
+            <button
+              key={catKey}
+              type="button"
+              onClick={() => setSelectedCategory(catKey)}
+              title={catInfo.desc}
+              className={cn(
+                "shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[9.5px] border transition-all duration-200",
+                isActive
+                  ? "bg-beam-500/20 border-beam-400/40 text-beam-100 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]"
+                  : "bg-white/[0.025] border-white/[0.06] text-white/45 hover:text-white/80 hover:bg-white/[0.05]",
+              )}
+            >
+              <span>{catInfo.icon}</span>
+              <span>{catInfo.label}</span>
+              <span className="text-[8.5px] opacity-60">({count})</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 4. LISTA SCROLLABLE DE TEMAS CON EFECTO DE DESAPARICIÓN */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto space-y-4 pr-1 pb-4 pt-1"
+        style={{
+          WebkitMaskImage:
+            "linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 16px), transparent 100%)",
+          maskImage:
+            "linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 16px), transparent 100%)",
+        }}
+      >
+        {activeCategories.map((g) => {
+          const items = topics.filter((a) => a.category === g);
+          if (!items.length) return null;
+
+          // Ordenar: temas anclados/favoritos van DE PRIMERO en su categoría
+          const sortedItems = [...items].sort((a, b) => {
+            const aPinned = pinnedIds.includes(a.id);
+            const bPinned = pinnedIds.includes(b.id);
+            if (aPinned && !bPinned) return -1;
+            if (!aPinned && bPinned) return 1;
+            return b.score - a.score;
+          });
+
+          const catInfo = CATEGORY_LABELS[g];
+
+          return (
+            <div key={g} className="space-y-2">
+              <div className="flex items-center justify-between">
+                <SectionLabel>
+                  <span className="flex items-center gap-1.5">
+                    <span>{catInfo.icon}</span>
+                    <span>{catInfo.label}</span>
+                  </span>
+                </SectionLabel>
+                <span className="text-[9px] text-white/20">
+                  {sortedItems.length} temas
+                </span>
+              </div>
+              {sortedItems.map((topic) => {
+                const isPinned = pinnedIds.includes(topic.id);
+                return (
+                  <div
+                    key={topic.id}
+                    className={cn(
+                      "group relative overflow-hidden rounded-xl border p-2.5 transition-all duration-300",
+                      isPinned
+                        ? "border-amber-400/25 bg-amber-400/[0.035] shadow-[0_0_12px_rgba(251,191,36,0.06)]"
+                        : "border-white/[0.06] bg-white/[0.015] hover:border-white/[0.14] hover:bg-white/[0.035]",
+                    )}
+                  >
+                    {isPinned && (
+                      <span className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-amber-400/40 via-amber-300/80 to-amber-400/40" />
+                    )}
+                    <div className="flex items-start gap-2.5">
+                      {/* Glyph / Icono del nicho */}
+                      <span
+                        className={cn(
+                          "mt-[1px] grid h-6 w-6 shrink-0 place-items-center rounded-lg border text-[11px]",
+                          isPinned
+                            ? "border-amber-400/35 bg-amber-400/10 text-amber-300"
+                            : "border-beam-400/25 bg-beam-500/10 text-beam-200",
+                        )}
+                      >
+                        {topic.glyph || catInfo.icon}
+                      </span>
+
+                      <div className="min-w-0 flex-1">
+                        {/* Título + duración + score de viralidad + botoncito de favoritos */}
+                        <div className="flex items-start justify-between gap-1.5">
+                          <h4 className="text-[11.5px] font-medium leading-snug text-white/90 line-clamp-2">
+                            {topic.title}
+                          </h4>
+                          <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                            {/* Badge de duración sugerida (10-40 min) */}
+                            <span
+                              className="text-[8.5px] font-medium text-white/45 bg-white/[0.04] px-1 py-0.5 rounded border border-white/[0.06]"
+                              title={`Duración sugerida: ${topic.durationMin} minutos`}
+                            >
+                              ⏱ {topic.durationMin}m
                             </span>
+                            {/* Score de viralidad */}
+                            <span
+                              className="tnum text-[9.5px] font-semibold text-beam-200/90 bg-beam-500/10 px-1 py-0.5 rounded border border-beam-400/20"
+                              title="Puntuación de potencial viral estimado"
+                            >
+                              +{topic.score}
+                            </span>
+                            {/* Botoncito pequeño sutil de guardar en favoritos / anclar */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePin(topic);
+                              }}
+                              title={
+                                isPinned
+                                  ? "Anclado de primero en favoritos · Clic para desanclar"
+                                  : "Guardar en favoritos y anclar de primero en esta categoría"
+                              }
+                              className={cn(
+                                "p-1 rounded-md transition-all duration-200",
+                                isPinned
+                                  ? "text-amber-400 bg-amber-400/15 border border-amber-400/35 shadow-[0_0_8px_rgba(251,191,36,0.25)]"
+                                  : "text-white/20 hover:text-amber-300/80 hover:bg-white/[0.06]",
+                              )}
+                            >
+                              <IconPin
+                                className={cn(
+                                  "h-3 w-3 transition-transform",
+                                  isPinned ? "rotate-[-45deg] scale-110" : "opacity-60",
+                                )}
+                                filled={isPinned}
+                              />
+                            </button>
                           </div>
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => run(a.id)}
-                          disabled={isApplied}
-                          className={cn(
-                            "mt-2 w-full rounded-lg border py-[5px] text-[10px] font-medium tracking-wide transition-all duration-300",
-                            isApplied
-                              ? "cursor-default border-transparent text-signal-400/70"
-                              : "border-white/10 bg-white/[0.03] text-white/60 hover:border-beam-300/40 hover:bg-beam-500/15 hover:text-white",
+
+                        {/* Matices o descripción para crear sobre eso */}
+                        <p className="mt-1 text-[10px] leading-snug text-white/40 line-clamp-2">
+                          {topic.nuances}
+                        </p>
+
+                        {/* Botones Integrar, Generar Largo y Generar Reel */}
+                        <div className="mt-2.5 flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleIntegrate(topic)}
+                            className="flex-1 rounded-lg border border-white/10 bg-white/[0.025] py-[4.5px] text-[10px] font-medium text-white/70 hover:border-white/20 hover:bg-white/[0.06] hover:text-white transition-all text-center"
+                            title="Copiar título y matices en la card de edición superior"
+                          >
+                            Integrar
+                          </button>
+                          {videoFormat === "long" ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleGenerate(topic, "long", (topic.durationMin || targetDurationMin) * 60)}
+                                disabled={isCreating}
+                                className={cn(
+                                  "flex-[1.2] rounded-lg border py-[4.5px] text-[10px] font-medium transition-all text-center truncate px-1",
+                                  isCreating
+                                    ? "opacity-50 cursor-not-allowed border-white/10 text-white/40"
+                                    : "border-beam-400/30 bg-beam-500/15 text-beam-200 hover:border-beam-300/50 hover:bg-beam-500/25 hover:text-white",
+                                )}
+                                title={`Generar video documental de ${topic.durationMin || targetDurationMin} min con IA en 16:9`}
+                              >
+                                Generar ({topic.durationMin || targetDurationMin}m)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleGenerate(topic, "reel")}
+                                disabled={isCreating}
+                                className={cn(
+                                  "shrink-0 rounded-lg border py-[4.5px] px-2 text-[10px] font-medium transition-all text-center",
+                                  isCreating
+                                    ? "opacity-50 cursor-not-allowed border-white/10 text-white/40"
+                                    : "border-purple-400/30 bg-purple-500/15 text-purple-200 hover:border-purple-300/50 hover:bg-purple-500/25 hover:text-white",
+                                )}
+                                title={`Generar versión Reel vertical 9:16 (${targetReelSec}s) con gancho dinámico instantáneo`}
+                              >
+                                📱 Reel ({targetReelSec}s)
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleGenerate(topic, "reel")}
+                                disabled={isCreating}
+                                className={cn(
+                                  "flex-[1.2] rounded-lg border py-[4.5px] text-[10px] font-medium transition-all text-center truncate px-1",
+                                  isCreating
+                                    ? "opacity-50 cursor-not-allowed border-white/10 text-white/40"
+                                    : "border-purple-400/30 bg-purple-500/15 text-purple-200 hover:border-purple-300/50 hover:bg-purple-500/25 hover:text-white",
+                                )}
+                                title={`Generar Reel vertical 9:16 de ${targetReelSec}s con gancho viral`}
+                              >
+                                📱 Reel ({targetReelSec}s)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleGenerate(topic, "long", (topic.durationMin || 15) * 60)}
+                                disabled={isCreating}
+                                className={cn(
+                                  "shrink-0 rounded-lg border py-[4.5px] px-2 text-[10px] font-medium transition-all text-center",
+                                  isCreating
+                                    ? "opacity-50 cursor-not-allowed border-white/10 text-white/40"
+                                    : "border-beam-400/30 bg-beam-500/15 text-beam-200 hover:border-beam-300/50 hover:bg-beam-500/25 hover:text-white",
+                                )}
+                                title={`Generar video documental largo de ${topic.durationMin} min en 16:9`}
+                              >
+                                🎬 {topic.durationMin}m
+                              </button>
+                            </>
                           )}
-                        >
-                          {isApplied ? "Aplicado al máster" : "Ejecutar"}
-                        </button>
-                      )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -357,64 +917,140 @@ function MediaTab() {
 }
 
 function TextTab() {
-  const { overlays, toggleOverlay } = useEditor();
+  const {
+    overlays,
+    toggleOverlay,
+    subtitleStyle,
+    setSubtitleStyle,
+    subtitleFont,
+    setSubtitleFont,
+    captions,
+    updateCaption,
+    seek,
+  } = useEditor();
+
   const styles = [
-    { name: "Kinetic Bold", detail: "Palabra activa resaltada", active: true },
-    { name: "Karaoke Flow", detail: "Relleno progresivo" },
-    { name: "Minimal Line", detail: "Banda inferior fina" },
-    { name: "Outline Pop", detail: "Contorno + sombra" },
+    { id: "kinetic", name: "Kinetic Bold", detail: "Palabra activa resaltada" },
+    { id: "karaoke", name: "Karaoke Flow", detail: "Relleno progresivo" },
+    { id: "minimal", name: "Minimal Line", detail: "Banda inferior fina" },
+    { id: "outline", name: "Outline Pop", detail: "Contorno + sombra" },
   ];
+
+  const fonts = ["Inter Tight", "Instrument", "Neue Haas", "Söhne Mono"];
+
   return (
     <div className="space-y-5">
       <div className="space-y-2">
         <SectionLabel>Estilo de subtítulo</SectionLabel>
-        {styles.map((s) => (
-          <button
-            key={s.name}
-            className={cn(
-              "flex w-full items-center justify-between rounded-xl border p-2.5 text-left transition-all duration-300",
-              s.active
-                ? "border-beam-400/35 bg-beam-500/[0.08]"
-                : "border-white/[0.06] bg-white/[0.015] hover:border-white/[0.14]",
-            )}
-          >
-            <span>
-              <span className="block text-[11.5px] text-white/85">{s.name}</span>
-              <span className="micro-sm mt-1 block text-white/25">{s.detail}</span>
-            </span>
-            <span
+        {styles.map((s) => {
+          const isActive = subtitleStyle === s.id;
+          return (
+            <button
+              key={s.id}
+              onClick={() => setSubtitleStyle(s.id)}
               className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                s.active ? "bg-beam-300 shadow-[0_0_10px_2px_rgba(126,163,255,0.7)]" : "bg-white/15",
+                "flex w-full items-center justify-between rounded-xl border p-2.5 text-left transition-all duration-300",
+                isActive
+                  ? "border-beam-400/40 bg-beam-500/[0.12] shadow-[0_0_15px_-3px_rgba(79,123,255,0.3)]"
+                  : "border-white/[0.06] bg-white/[0.015] hover:border-white/[0.14]",
               )}
-            />
-          </button>
-        ))}
+            >
+              <span>
+                <span className="block text-[11.5px] font-medium text-white/90">{s.name}</span>
+                <span className="micro-sm mt-0.5 block text-white/35">{s.detail}</span>
+              </span>
+              <span
+                className={cn(
+                  "h-2 w-2 rounded-full transition-all duration-300",
+                  isActive ? "bg-beam-300 shadow-[0_0_10px_2px_rgba(126,163,255,0.8)] scale-110" : "bg-white/15",
+                )}
+              />
+            </button>
+          );
+        })}
       </div>
+
       <Hairline />
+
       <div className="space-y-1.5">
         <SectionLabel>Superposición</SectionLabel>
-        <Toggle on={overlays.captions} onChange={() => toggleOverlay("captions")} label="Subtítulos" hint="92 palabras alineadas" />
-        <Toggle on={overlays.tracking} onChange={() => toggleOverlay("tracking")} label="Caja de seguimiento" hint="Rostro principal" />
-        <Toggle on={overlays.safe} onChange={() => toggleOverlay("safe")} label="Zonas seguras" hint="UI de plataforma" />
+        <Toggle
+          on={overlays.captions}
+          onChange={() => toggleOverlay("captions")}
+          label="Subtítulos"
+          hint={`${captions.length} frases sincronizadas`}
+        />
+        <Toggle
+          on={overlays.tracking}
+          onChange={() => toggleOverlay("tracking")}
+          label="Caja de seguimiento"
+          hint="Rostro principal"
+        />
+        <Toggle
+          on={overlays.safe}
+          onChange={() => toggleOverlay("safe")}
+          label="Zonas seguras"
+          hint="UI de plataforma"
+        />
       </div>
+
       <Hairline />
+
       <div className="space-y-2">
         <SectionLabel>Tipografía</SectionLabel>
         <div className="grid grid-cols-2 gap-2">
-          {["Inter Tight", "Instrument", "Neue Haas", "Söhne Mono"].map((f, i) => (
-            <div
-              key={f}
-              className={cn(
-                "rounded-lg border px-2.5 py-2 text-[10.5px]",
-                i === 0 ? "border-beam-400/30 bg-beam-500/[0.08] text-white/85" : "border-white/[0.06] text-white/45",
-              )}
-            >
-              {f}
-            </div>
-          ))}
+          {fonts.map((f) => {
+            const isActive = subtitleFont === f;
+            return (
+              <button
+                key={f}
+                onClick={() => setSubtitleFont(f)}
+                className={cn(
+                  "rounded-lg border px-2.5 py-2 text-left text-[10.5px] font-medium transition-all duration-200",
+                  isActive
+                    ? "border-beam-400/40 bg-beam-500/[0.12] text-white shadow-[0_0_12px_-2px_rgba(79,123,255,0.4)]"
+                    : "border-white/[0.06] text-white/50 hover:border-white/15 hover:text-white/80",
+                )}
+              >
+                {f}
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      {captions.length > 0 && (
+        <>
+          <Hairline />
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <SectionLabel>Líneas de subtítulo ({captions.length})</SectionLabel>
+              <span className="text-[9px] text-white/30">Clic para saltar</span>
+            </div>
+            <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 text-left">
+              {captions.map((c, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => seek(c.start)}
+                  className="group flex flex-col gap-1 rounded-lg border border-white/[0.05] bg-white/[0.02] p-2 transition-colors hover:border-beam-400/30 hover:bg-white/[0.04] cursor-pointer"
+                >
+                  <div className="flex items-center justify-between text-[9px] text-beam-300/70">
+                    <span className="font-mono">{c.start.toFixed(1)}s → {c.end.toFixed(1)}s</span>
+                    <span className="text-white/20 group-hover:text-white/50 text-[8px]">Editar</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={c.text}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => updateCaption(idx, e.target.value)}
+                    className="w-full bg-transparent text-[10.5px] text-white/85 outline-none focus:border-b focus:border-beam-400 focus:text-white"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

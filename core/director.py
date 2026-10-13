@@ -559,10 +559,12 @@ class AIDirector:
             num_scenes = 2
         elif dur <= 60:
             num_scenes = max(3, dur // 18)
+        elif dur <= 100:
+            num_scenes = max(3, dur // 20)
         elif dur <= 180:
-            num_scenes = max(6, dur // 22)
+            num_scenes = max(5, dur // 22)
         elif dur <= 360:
-            num_scenes = max(10, dur // 25)
+            num_scenes = max(8, dur // 25)
         else:
             num_scenes = min(48, max(12, dur // 28)) if dur > 1200 else min(20, max(12, dur // 28))
 

@@ -12,9 +12,11 @@ import {
   AUTOMATIONS,
   BASE_RETENTION,
   CLIPS,
+  CAPTIONS,
   DURATION,
   PLATFORMS,
   type Clip,
+  type Caption,
   type PlatformId,
   type Ratio,
   retentionAt,
@@ -103,16 +105,31 @@ type Ctx = {
   createStatusMessage: string;
   selectProject: (id: string) => void;
   loadProjects: () => Promise<void>;
-  loadProject: (id: string) => Promise<void>;
-  exportMaster: () => Promise<void>;
+  exportMaster: (opts?: { burnSubtitles?: boolean; style?: string; title?: string }) => Promise<void>;
   importVideo: (file: File) => Promise<void>;
-  createVideo: (topic: string, opts?: { duration?: number; style?: string }) => Promise<string | null>;
+  createVideo: (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => Promise<string | null>;
+  cancelCreation: () => Promise<void>;
+  resumeProject: (taskId: string) => Promise<void>;
 
   /* voice */
   selectedVoice: string;
   setSelectedVoice: (v: string) => void;
   playingVoiceId: string | null;
   previewVoice: (voiceId: string) => void;
+
+  /* subtitles */
+  captions: Caption[];
+  setCaptions: React.Dispatch<React.SetStateAction<Caption[]>>;
+  updateCaption: (index: number, text: string) => void;
+  subtitleStyle: string;
+  setSubtitleStyle: (s: string) => void;
+  subtitleFont: string;
+  setSubtitleFont: (f: string) => void;
+
+  /* audio / sound */
+  isMuted: boolean;
+  setIsMuted: (m: boolean) => void;
+  toggleMute: () => void;
 
   flash: (msg: string) => void;
   log: LogEntry[];
@@ -154,7 +171,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
 
   /* Backend project state */
   const [projects, setProjects] = useState<BackendProject[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get("project") || urlParams.get("task") || localStorage.getItem("lumen_active_project") || null;
+    }
+    return null;
+  });
   const [activeProjectTitle, setActiveProjectTitle] = useState<string>("Ritmo Nocturno — EP.02");
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -162,6 +185,33 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [createProgress, setCreateProgress] = useState(0);
   const [createStatusMessage, setCreateStatusMessage] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const activeEsRef = useRef<EventSource | null>(null);
+
+  /* Subtitle & Sound interactive state */
+  const [captions, setCaptions] = useState<Caption[]>(CAPTIONS);
+  const [subtitleStyle, setSubtitleStyle] = useState<string>("kinetic");
+  const [subtitleFont, setSubtitleFont] = useState<string>("Inter Tight");
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      if (videoRef.current) {
+        videoRef.current.muted = next;
+      }
+      return next;
+    });
+  }, []);
+
+  const updateCaption = useCallback((index: number, text: string) => {
+    setCaptions((prev) => {
+      const copy = [...prev];
+      if (copy[index]) {
+        copy[index] = { ...copy[index], text };
+      }
+      return copy;
+    });
+  }, []);
 
   const pushLog = useCallback((text: string, kind: LogEntry["kind"] = "ai") => {
     const now = new Date();
@@ -336,6 +386,16 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         const title = proj.original_name || (proj.result && proj.result.title) || `Proyecto ${id}`;
         setActiveProjectId(id);
         setActiveProjectTitle(title);
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem("lumen_active_project", id);
+            const url = new URL(window.location.href);
+            if (url.searchParams.get("project") !== id) {
+              url.searchParams.set("project", id);
+              window.history.replaceState({}, "", url.toString());
+            }
+          } catch (_) {}
+        }
 
         const dur =
           proj.result?.duration ||
@@ -346,34 +406,127 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           setDuration(Math.round(dur));
         }
 
-        // Conectar url de previsualización
+        // Conectar url de previsualización sin subtítulos quemados
         setPreviewVideoUrl(`/api/projects/${id}/preview?v=${Date.now()}`);
 
-        // Intentar obtener broadcast-plan para escenas reales
-        try {
-          const bpRes = await fetch(`/api/projects/${id}/broadcast-plan`);
-          if (bpRes.ok) {
-            const bp = await bpRes.json();
-            if (bp.scenes && bp.scenes.length > 0) {
-              let cursor = 0;
-              const mapped: Clip[] = bp.scenes.map((sc: any, i: number) => {
-                const scDur = sc.duration || 6;
-                const clip: Clip = {
-                  id: `sc-${sc.scene_id || i}`,
-                  track: "v1",
-                  start: cursor,
-                  duration: scDur,
-                  label: sc.headline || sc.name || `Escena ${i + 1}`,
-                  kind: "scene",
-                  frame: sc.thumb_url,
-                };
-                cursor += scDur;
-                return clip;
+        // Construir pistas sincronizadas desde el editor real
+        if (data.editor && data.editor.scenes && data.editor.scenes.length > 0) {
+          const editor = data.editor;
+          const mappedClips: Clip[] = [];
+
+          // 1. Pista V1: Escenas de video
+          editor.scenes.forEach((sc: any, i: number) => {
+            const scDur = sc.duration || 6;
+            const scStart = typeof sc.start === "number" ? sc.start : 0;
+            mappedClips.push({
+              id: `sc-${sc.scene_id || i}`,
+              track: "v1",
+              start: scStart,
+              duration: scDur,
+              label: sc.headline || sc.name || `Escena ${i + 1}`,
+              kind: "scene",
+              frame: sc.thumb_url,
+            });
+          });
+
+          // 2. Pista V2: Tarjetas informativas y B-rolls
+          if (editor.cards && editor.cards.length > 0) {
+            editor.cards.forEach((cd: any, i: number) => {
+              mappedClips.push({
+                id: cd.id || `card-${i}`,
+                track: "v2",
+                start: cd.start || 0,
+                duration: Math.max(1.8, Math.min(cd.duration || 3.5, 4.5)),
+                label: `Inserto · ${cd.headline || cd.title || "Dato clave"}`,
+                kind: "broll",
+                frame: cd.card_url,
+                ai: true,
               });
-              setClips(mapped);
-            }
+            });
+          } else if (editor.brolls && editor.brolls.length > 0) {
+            editor.brolls.forEach((br: any, i: number) => {
+              mappedClips.push({
+                id: br.id || `broll-${i}`,
+                track: "v2",
+                start: br.start || 0,
+                duration: br.duration || 3,
+                label: `B-Roll · ${br.concept || br.title || "Inserto"}`,
+                kind: "broll",
+                ai: true,
+              });
+            });
           }
-        } catch (_) {}
+
+          // 3. Pista T1: Subtítulos cinéticos sincronizados
+          if (editor.captions && editor.captions.length > 0) {
+            editor.scenes.forEach((sc: any, i: number) => {
+              const sid = sc.scene_id || (i + 1);
+              const scCaps = editor.captions.filter((c: any) => c.scene_id === sid);
+              if (scCaps.length > 0) {
+                const cStart = scCaps[0].start;
+                const cEnd = scCaps[scCaps.length - 1].end;
+                mappedClips.push({
+                  id: `cap-sc-${sid}`,
+                  track: "t1",
+                  start: cStart,
+                  duration: Math.max(1, cEnd - cStart),
+                  label: "Subtítulos cinéticos",
+                  kind: "caption",
+                  ai: true,
+                });
+              } else {
+                mappedClips.push({
+                  id: `cap-sc-${sid}`,
+                  track: "t1",
+                  start: sc.start + 0.3,
+                  duration: Math.max(1, (sc.duration || 6) - 0.6),
+                  label: "Subtítulos cinéticos",
+                  kind: "caption",
+                  ai: true,
+                });
+              }
+            });
+            setCaptions(
+              editor.captions.map((c: any) => ({
+                start: c.start,
+                end: c.end,
+                text: c.text,
+                hot: c.text.length < 35,
+              }))
+            );
+          } else {
+            editor.scenes.forEach((sc: any, i: number) => {
+              const sid = sc.scene_id || (i + 1);
+              mappedClips.push({
+                id: `cap-sc-${sid}`,
+                track: "t1",
+                start: sc.start + 0.3,
+                duration: Math.max(1, (sc.duration || 6) - 0.6),
+                label: "Subtítulos cinéticos",
+                kind: "caption",
+                ai: true,
+              });
+            });
+          }
+
+          // 4. Pista A1: Locución de audio sincronizada por escena sin solapamientos
+          editor.scenes.forEach((sc: any, i: number) => {
+            const sid = sc.scene_id || (i + 1);
+            const speechText = sc.speech || "";
+            const shortLabel = speechText ? speechText.slice(0, 24) + "..." : (sc.name || `E${sid}`);
+            mappedClips.push({
+              id: `voice-${sid}`,
+              track: "a1",
+              start: sc.start,
+              duration: sc.duration,
+              label: `Locución · E${sid}: ${shortLabel}`,
+              kind: "voice",
+              ai: true,
+            });
+          });
+
+          setClips(mappedClips);
+        }
 
         pushLog(`✓ Proyecto cargado: ${title}`, "ai");
         flash(`Cargado: ${title}`);
@@ -394,7 +547,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         setProjects(data.projects);
 
         const urlParams = new URLSearchParams(window.location.search);
-        const qProj = urlParams.get("project") || urlParams.get("task");
+        const qProj =
+          urlParams.get("project") ||
+          urlParams.get("task") ||
+          (typeof window !== "undefined" ? localStorage.getItem("lumen_active_project") : null);
         if (qProj) {
           loadProject(qProj);
         } else if (data.projects.length > 0 && !activeProjectId) {
@@ -409,12 +565,195 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }
   }, [activeProjectId, loadProject]);
 
+  const attachCreationStream = useCallback(
+    (taskId: string) => {
+      if (activeEsRef.current) {
+        try {
+          activeEsRef.current.close();
+        } catch (_) {}
+        activeEsRef.current = null;
+      }
+
+      setIsCreating(true);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("lumen_active_creation_task", taskId);
+          localStorage.setItem("lumen_active_project", taskId);
+          const url = new URL(window.location.href);
+          url.searchParams.set("project", taskId);
+          window.history.replaceState({}, "", url.toString());
+        } catch (_) {}
+      }
+
+      const es = new EventSource(`/api/stream-progress/${encodeURIComponent(taskId)}`);
+      activeEsRef.current = es;
+
+      es.onmessage = (ev) => {
+        try {
+          const p = JSON.parse(ev.data);
+          if (typeof p.progress === "number") {
+            setCreateProgress(Math.max(10, Math.min(100, p.progress)));
+          }
+          if (p.message) {
+            setCreateStatusMessage(p.message);
+            pushLog(p.message, "ai");
+          }
+          if (p.completed) {
+            es.close();
+            activeEsRef.current = null;
+            setCreateProgress(100);
+            setCreateStatusMessage("¡Video creado con éxito!");
+            setIsCreating(false);
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.removeItem("lumen_active_creation_task");
+              } catch (_) {}
+            }
+            flash("¡Video creado y masterizado!");
+            loadProjects();
+            loadProject(taskId);
+          } else if (p.error) {
+            es.close();
+            activeEsRef.current = null;
+            setIsCreating(false);
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.removeItem("lumen_active_creation_task");
+              } catch (_) {}
+            }
+            setCreateStatusMessage(p.error);
+            pushLog(`Aviso tarea: ${p.error}`, "warn");
+            flash(`Aviso: ${p.error}`);
+            loadProjects();
+          }
+        } catch (_) {}
+      };
+
+      es.onerror = () => {
+        // Desconexión transitoria
+      };
+    },
+    [pushLog, flash, loadProjects, loadProject],
+  );
+
+  const cancelCreation = useCallback(async () => {
+    const taskId =
+      (typeof window !== "undefined" ? localStorage.getItem("lumen_active_creation_task") : null) ||
+      activeProjectId;
+    if (!taskId) {
+      setIsCreating(false);
+      return;
+    }
+    try {
+      pushLog(`Cancelando tarea ${taskId}...`, "warn");
+      await fetch(`/api/cancel-task/${taskId}`, { method: "POST" });
+      if (activeEsRef.current) {
+        try {
+          activeEsRef.current.close();
+        } catch (_) {}
+        activeEsRef.current = null;
+      }
+      setIsCreating(false);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.removeItem("lumen_active_creation_task");
+        } catch (_) {}
+      }
+      flash("Proceso cancelado.");
+      loadProjects();
+    } catch (err: any) {
+      setIsCreating(false);
+      flash(`Error al cancelar: ${err.message}`);
+    }
+  }, [activeProjectId, pushLog, flash, loadProjects]);
+
+  const resumeProject = useCallback(
+    async (taskId: string) => {
+      try {
+        setIsCreating(true);
+        setCreateStatusMessage("Reanudando proceso...");
+        pushLog(`Reanudando proyecto ${taskId}...`, "ai");
+        flash("Reanudando proyecto...");
+        const res = await fetch(`/api/projects/${taskId}/resume`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Error al reanudar proyecto");
+        attachCreationStream(taskId);
+      } catch (err: any) {
+        setIsCreating(false);
+        flash(`Error al reanudar: ${err.message}`);
+        pushLog(`Error al reanudar: ${err.message}`, "warn");
+      }
+    },
+    [pushLog, flash, attachCreationStream],
+  );
+
   useEffect(() => {
     loadProjects();
     (window as any).openProject = (id: string) => {
       loadProject(id);
     };
-  }, [loadProjects, loadProject]);
+
+    const checkActiveTasks = async () => {
+      try {
+        const res = await fetch("/api/tasks/active");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.active_tasks && data.active_tasks.length > 0) {
+            const active = data.active_tasks[0];
+            pushLog(`Reconectado a tarea activa: ${active.task_id}`, "ai");
+            setCreateProgress(active.progress || 10);
+            setCreateStatusMessage(active.message || "Procesando video...");
+            attachCreationStream(active.task_id);
+            return;
+          }
+        }
+
+        const savedTaskId =
+          typeof window !== "undefined" ? localStorage.getItem("lumen_active_creation_task") : null;
+        if (savedTaskId) {
+          const pRes = await fetch(`/api/progress/${savedTaskId}`);
+          if (pRes.ok) {
+            const pData = await pRes.json();
+            if (pData.is_running) {
+              attachCreationStream(savedTaskId);
+            } else if (pData.completed) {
+              if (typeof window !== "undefined") {
+                try {
+                  localStorage.removeItem("lumen_active_creation_task");
+                } catch (_) {}
+              }
+              setIsCreating(false);
+              loadProject(savedTaskId);
+            } else {
+              if (typeof window !== "undefined") {
+                try {
+                  localStorage.removeItem("lumen_active_creation_task");
+                } catch (_) {}
+              }
+              setIsCreating(false);
+            }
+          } else {
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.removeItem("lumen_active_creation_task");
+              } catch (_) {}
+            }
+            setIsCreating(false);
+          }
+        }
+      } catch (_) {}
+    };
+
+    checkActiveTasks();
+
+    return () => {
+      if (activeEsRef.current) {
+        try {
+          activeEsRef.current.close();
+        } catch (_) {}
+      }
+    };
+  }, [loadProjects, loadProject, attachCreationStream, pushLog]);
 
   const selectProject = useCallback(
     (id: string) => {
@@ -423,24 +762,38 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     [loadProject],
   );
 
-  const exportMaster = useCallback(async () => {
-    if (!activeProjectId) {
-      flash("Selecciona un proyecto primero");
-      return;
-    }
-    try {
-      pushLog(`Exportando máster del proyecto ${activeProjectId}...`, "info");
-      const a = document.createElement("a");
-      a.href = `/api/projects/${activeProjectId}/download`;
-      a.download = `${activeProjectTitle || "video_master"}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      flash("Descarga del máster iniciada");
-    } catch (e: any) {
-      flash(`Error al exportar: ${e.message}`);
-    }
-  }, [activeProjectId, activeProjectTitle, pushLog, flash]);
+  const exportMaster = useCallback(
+    async (opts?: { burnSubtitles?: boolean; style?: string; title?: string }) => {
+      const targetId = activeProjectId || (projects.length > 0 ? projects[0].id : null);
+      if (!targetId) {
+        flash("No hay proyectos en el servidor para exportar");
+        return;
+      }
+      const burnSubs = typeof opts?.burnSubtitles === "boolean" ? opts.burnSubtitles : overlays.captions;
+      const subStyle = opts?.style || subtitleStyle;
+      const downloadTitle = (opts?.title || activeProjectTitle || "video_master").trim();
+      const safeBase = downloadTitle.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") || `master_${targetId}`;
+      const finalMp4Name = safeBase.toLowerCase().endsWith(".mp4") ? safeBase : `${safeBase}.mp4`;
+
+      try {
+        pushLog(`Exportando máster: ${downloadTitle} (${burnSubs ? "Con subtítulos" : "Video limpio"})...`, "info");
+        const downloadUrl = `/api/projects/${targetId}/download/${encodeURIComponent(finalMp4Name)}?burn_subtitles=${burnSubs ? "true" : "false"}&style=${encodeURIComponent(subStyle)}`;
+
+        // Descarga directa en el navegador con nombre de archivo explícito
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = finalMp4Name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 1500);
+
+        flash(`Descargando: ${finalMp4Name}`);
+      } catch (e: any) {
+        flash(`Error al exportar: ${e.message}`);
+      }
+    },
+    [activeProjectId, projects, activeProjectTitle, overlays.captions, subtitleStyle, pushLog, flash],
+  );
 
   const importVideo = useCallback(
     async (file: File) => {
@@ -467,41 +820,26 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         const taskId = data.task_id;
         pushLog(`Procesando video (Tarea: ${taskId})...`, "ai");
         flash(`Tarea ${taskId} en proceso`);
-
-        const es = new EventSource(`/api/stream-progress/${taskId}`);
-        es.onmessage = (ev) => {
-          try {
-            const p = JSON.parse(ev.data);
-            if (p.message) pushLog(p.message, "ai");
-            if (p.completed) {
-              es.close();
-              setIsUploading(false);
-              flash("¡Video procesado con éxito!");
-              loadProjects();
-              loadProject(taskId);
-            } else if (p.error) {
-              es.close();
-              setIsUploading(false);
-              pushLog(`Error en pipeline: ${p.error}`, "warn");
-              flash(`Error: ${p.error}`);
-            }
-          } catch (_) {}
-        };
+        attachCreationStream(taskId);
       } catch (err: any) {
         setIsUploading(false);
         pushLog(`Fallo al importar video: ${err.message}`, "warn");
         flash(`Error: ${err.message}`);
       }
     },
-    [pushLog, flash, loadProjects, loadProject],
+    [pushLog, flash, selectedVoice, attachCreationStream],
   );
 
   const createVideo = useCallback(
-    async (topic: string, opts?: { duration?: number; style?: string }) => {
+    async (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => {
       const cleanTopic = topic.trim();
       if (!cleanTopic) return null;
 
       try {
+        const targetRatio = opts?.aspect_ratio || ratio || "16:9";
+        if (opts?.aspect_ratio && opts.aspect_ratio !== ratio) {
+          setRatio(opts.aspect_ratio);
+        }
         setIsCreating(true);
         setCreateProgress(10);
         setCreateStatusMessage(`Investigando: «${cleanTopic}»...`);
@@ -514,7 +852,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({
             topic: cleanTopic,
             duration_sec: opts?.duration || 45,
-            aspect_ratio: ratio || "16:9",
+            aspect_ratio: targetRatio,
             style: opts?.style || "divulgacion",
             voice: selectedVoice,
           }),
@@ -525,35 +863,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
 
         const taskId = data.task_id || data.project_id;
         pushLog(`Tarea iniciada con ID: ${taskId}`, "info");
-
-        const es = new EventSource(`/api/stream-progress/${taskId}`);
-        es.onmessage = (ev) => {
-          try {
-            const p = JSON.parse(ev.data);
-            if (typeof p.progress === "number") {
-              setCreateProgress(Math.max(10, Math.min(100, p.progress)));
-            }
-            if (p.message) {
-              setCreateStatusMessage(p.message);
-              pushLog(p.message, "ai");
-            }
-            if (p.completed) {
-              es.close();
-              setCreateProgress(100);
-              setCreateStatusMessage("¡Video creado con éxito!");
-              setIsCreating(false);
-              flash("¡Video creado y masterizado!");
-              loadProjects();
-              loadProject(taskId);
-            } else if (p.error) {
-              es.close();
-              setIsCreating(false);
-              setCreateStatusMessage(`Error: ${p.error}`);
-              pushLog(`Error en creación: ${p.error}`, "warn");
-              flash(`Error: ${p.error}`);
-            }
-          } catch (_) {}
-        };
+        attachCreationStream(taskId);
         return taskId;
       } catch (err: any) {
         setIsCreating(false);
@@ -563,7 +873,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         return null;
       }
     },
-    [ratio, pushLog, flash, loadProjects, loadProject],
+    [ratio, selectedVoice, pushLog, flash, attachCreationStream],
   );
 
   /* ---------------- keyboard ---------------- */
@@ -697,10 +1007,22 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     exportMaster,
     importVideo,
     createVideo,
+    cancelCreation,
+    resumeProject,
     selectedVoice,
     setSelectedVoice,
     playingVoiceId,
     previewVoice,
+    captions,
+    setCaptions,
+    updateCaption,
+    subtitleStyle,
+    setSubtitleStyle,
+    subtitleFont,
+    setSubtitleFont,
+    isMuted,
+    setIsMuted,
+    toggleMute,
     flash,
     log,
     toast,

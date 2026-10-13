@@ -1,5 +1,6 @@
+import { useMemo } from "react";
 import { useEditor } from "@/lib/store";
-import { DURATION, captionAt, sceneAt, timecode, type Ratio } from "@/lib/data";
+import { CAPTIONS, DURATION, captionAt, sceneAt, timecode, type Ratio } from "@/lib/data";
 import { cn } from "@/utils/cn";
 import { Hairline, IconButton, SectionLabel } from "./ui";
 import {
@@ -29,12 +30,129 @@ const RATIO_VALUE: Record<Ratio, number> = {
 const RATIOS: Ratio[] = ["9:16", "4:5", "1:1", "16:9"];
 
 function Frame() {
-  const { time, ratio, overlays, running, previewVideoUrl, videoRef, duration } = useEditor();
+  const {
+    time,
+    ratio,
+    overlays,
+    running,
+    previewVideoUrl,
+    videoRef,
+    duration,
+    captions,
+    subtitleStyle,
+    subtitleFont,
+    isMuted,
+  } = useEditor();
   const scene = sceneAt(time);
   const starts = [0, 11.5, 23.5];
   const idx = starts.findIndex((s) => time >= s);
   const local = Math.min(1, Math.max(0, (time - starts[idx]) / (duration - starts[idx] || 1)));
-  const cap = overlays.captions ? captionAt(time) : null;
+
+  const cap = useMemo(() => {
+    if (!overlays.captions) return null;
+    const list = captions && captions.length > 0 ? captions : CAPTIONS;
+    const c = list.find((x) => time >= x.start && time <= x.end);
+    if (!c) return null;
+
+    const rawWords = c.text.trim().split(/\s+/).filter(Boolean);
+    if (rawWords.length === 0) return null;
+
+    const span = Math.max(0.1, c.end - c.start);
+
+    // Ponderación fonética por longitud de caracteres y pausas de puntuación para sincronía precisa con la voz
+    const weights = rawWords.map((w) => {
+      const letters = w.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ]/g, "").length;
+      let wt = Math.max(1.2, letters);
+      if (/[,\-;:–—]/.test(w)) wt += 1.8;
+      if (/[.!?]/.test(w)) wt += 2.6;
+      return wt;
+    });
+
+    const totalWeight = weights.reduce((a, b) => a + b, 0) || 1;
+
+    let currTime = c.start;
+    const timedWords = rawWords.map((w, idx) => {
+      const wordDur = (weights[idx] / totalWeight) * span;
+      const item = {
+        word: w,
+        start: currTime,
+        end: currTime + wordDur,
+        globalIndex: idx,
+      };
+      currTime += wordDur;
+      return item;
+    });
+
+    // Subdividir en fragmentos cortos de 2 a 4 palabras para que los subtítulos jamás ocupen más de 1 o 2 líneas
+    const chunks: { words: typeof timedWords; start: number; end: number }[] = [];
+    let curChunk: typeof timedWords = [];
+
+    for (let i = 0; i < timedWords.length; i++) {
+      curChunk.push(timedWords[i]);
+      const hasPunct = /[.,!?;:]/.test(timedWords[i].word);
+      const remaining = timedWords.length - (i + 1);
+      const shouldBreak =
+        curChunk.length >= 4 ||
+        (curChunk.length >= 3 && remaining >= 2) ||
+        (curChunk.length >= 2 && hasPunct && remaining !== 1);
+
+      if (shouldBreak) {
+        chunks.push({
+          words: curChunk,
+          start: curChunk[0].start,
+          end: curChunk[curChunk.length - 1].end,
+        });
+        curChunk = [];
+      }
+    }
+
+    if (curChunk.length > 0) {
+      if (curChunk.length === 1 && chunks.length > 0 && chunks[chunks.length - 1].words.length <= 3) {
+        chunks[chunks.length - 1].words.push(...curChunk);
+        chunks[chunks.length - 1].end = curChunk[curChunk.length - 1].end;
+      } else {
+        chunks.push({
+          words: curChunk,
+          start: curChunk[0].start,
+          end: curChunk[curChunk.length - 1].end,
+        });
+      }
+    }
+
+    // Ubicar el fragmento activo según el tiempo actual
+    let activeChunk = chunks.find((ch) => time >= ch.start && time < ch.end);
+    if (!activeChunk) {
+      activeChunk = time >= c.end ? chunks[chunks.length - 1] : chunks[0];
+    }
+
+    // Ubicar palabra activa dentro del fragmento
+    let activeIdx = activeChunk.words.findIndex((w) => time >= w.start && time < w.end);
+    if (activeIdx === -1) {
+      activeIdx = time >= activeChunk.end ? activeChunk.words.length - 1 : 0;
+    }
+
+    return {
+      chunk: activeChunk,
+      words: activeChunk.words,
+      activeIdx,
+      hot: c.hot,
+      text: c.text,
+    };
+  }, [overlays.captions, captions, time]);
+
+  const fontStyle = useMemo(() => {
+    switch (subtitleFont) {
+      case "Instrument":
+        return { fontFamily: "'Instrument Serif', Georgia, serif" };
+      case "Neue Haas":
+        return { fontFamily: "'Helvetica Neue', Arial, sans-serif" };
+      case "Söhne Mono":
+        return { fontFamily: "'Consolas', 'Courier New', monospace" };
+      case "Inter Tight":
+      default:
+        return { fontFamily: "'Inter Tight', 'Inter', sans-serif" };
+    }
+  }, [subtitleFont]);
 
   const kb = [
     `scale(${1.05 + local * 0.1}) translate(${(1 - local) * 1.4}%, ${local * -1.2}%)`,
@@ -47,13 +165,18 @@ function Frame() {
       className="relative overflow-hidden rounded-[20px] border border-white/[0.09] bg-black shadow-[0_60px_120px_-50px_rgba(0,0,0,1),0_0_120px_-60px_rgba(47,92,255,0.9)]"
       style={{ aspectRatio: String(RATIO_VALUE[ratio]) }}
     >
-      {/* footage */}
+      {/* ambient shadows & tints (detrás del video para que no lo oscurezcan) */}
+      <div className="pointer-events-none absolute inset-0 z-0" style={{ background: scene.tint }} />
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(120%_80%_at_50%_10%,transparent_35%,rgba(0,0,0,0.55)_100%)]" />
+
+      {/* footage (video y tomas DELANTE de las sombras para máxima visibilidad y claridad) */}
       {previewVideoUrl ? (
         <video
           ref={videoRef}
           src={previewVideoUrl}
           playsInline
-          className="no-drag absolute inset-0 h-full w-full object-cover"
+          muted={isMuted}
+          className="no-drag absolute inset-0 z-10 h-full w-full object-cover"
         />
       ) : (
         [
@@ -65,26 +188,23 @@ function Frame() {
             key={sc.f}
             src={sceneAt(sc.s + 0.1).frame}
             alt=""
-            className="no-drag absolute inset-0 h-full w-full object-cover transition-opacity duration-700"
+            className="no-drag absolute inset-0 z-10 h-full w-full object-cover transition-opacity duration-700"
             style={{ opacity: idx === sc.f ? 1 : 0, transform: idx === sc.f ? kb : "scale(1.05)" }}
           />
         ))
       )}
 
-      {/* grade + bloom */}
-      <div className="pointer-events-none absolute inset-0" style={{ background: scene.tint }} />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_50%_10%,transparent_35%,rgba(0,0,0,0.55)_100%)]" />
-      <div className="pointer-events-none absolute inset-0 film-grain opacity-[0.09] mix-blend-overlay" />
-      <div className="pointer-events-none absolute inset-0 scan-lines opacity-25" />
+      {/* micro efectos sutiles sobre el video */}
+      <div className="pointer-events-none absolute inset-0 z-20 film-grain opacity-[0.04] mix-blend-overlay" />
       {running && (
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
           <div className="sweep-line h-[35%] w-full bg-gradient-to-b from-transparent via-beam-300/10 to-transparent" />
         </div>
       )}
 
       {/* thirds grid */}
       {overlays.grid && (
-        <div className="pointer-events-none absolute inset-0">
+        <div className="pointer-events-none absolute inset-0 z-20">
           <div className="absolute inset-y-0 left-1/3 w-px bg-white/15" />
           <div className="absolute inset-y-0 left-2/3 w-px bg-white/15" />
           <div className="absolute inset-x-0 top-1/3 h-px bg-white/15" />
@@ -94,24 +214,24 @@ function Frame() {
 
       {/* safe areas */}
       {overlays.safe && (
-        <>
-          <div className="pointer-events-none absolute inset-[6%] rounded-[10px] border border-dashed border-white/12" />
-          <div className="pointer-events-none absolute bottom-[6%] right-[6%] top-[6%] w-[13%] rounded-[8px] border border-dashed border-beam-300/20">
-            <span className="micro-sm absolute -left-1 top-0 origin-top-left -rotate-90 whitespace-nowrap text-beam-200/40">
+        <div className="pointer-events-none absolute inset-0 z-20">
+          <div className="absolute inset-[6%] rounded-[10px] border border-dashed border-white/10" />
+          <div className="absolute bottom-[6%] right-[6%] top-[6%] w-[12%] rounded-[8px] border border-dashed border-beam-300/20">
+            <span className="micro-sm absolute bottom-1 right-1 text-[8px] text-beam-200/40 font-mono">
               UI
             </span>
           </div>
-          <div className="pointer-events-none absolute inset-x-[6%] bottom-[6%] h-[12%] rounded-[8px] border border-dashed border-beam-300/20" />
-        </>
+          <div className="absolute inset-x-[6%] bottom-[6%] h-[12%] rounded-[8px] border border-dashed border-beam-300/20" />
+        </div>
       )}
 
       {/* subject tracking */}
       {overlays.tracking && (
         <div
-          className="pointer-events-none absolute h-[34%] w-[52%] transition-all duration-1000 ease-linear"
+          className="pointer-events-none absolute h-[28%] w-[48%] transition-all duration-1000 ease-linear z-20"
           style={{
-            left: `${26 + Math.sin(time / 3.4) * 4}%`,
-            top: `${20 + Math.cos(time / 4.1) * 2.5}%`,
+            left: `${26 + Math.sin(time / 3.4) * 3}%`,
+            top: `${28 + Math.cos(time / 4.1) * 2}%`,
           }}
         >
           <div className="relative h-full w-full">
@@ -121,62 +241,156 @@ function Frame() {
               "left-0 bottom-0 border-l border-b",
               "right-0 bottom-0 border-r border-b",
             ].map((c) => (
-              <span key={c} className={cn("absolute h-4 w-4 border-beam-300/70", c)} />
+              <span key={c} className={cn("absolute h-3 w-3 border-beam-300/60", c)} />
             ))}
-            <span className="micro-sm absolute -top-5 left-0 whitespace-nowrap bg-black/40 px-1 py-0.5 text-beam-200/80 backdrop-blur-sm">
+            <span className="micro-sm absolute bottom-1 left-1.5 whitespace-nowrap bg-black/60 px-1.5 py-0.5 rounded text-[8px] text-beam-200/80 backdrop-blur-sm border border-white/[0.08]">
               Sujeto 98%
             </span>
           </div>
         </div>
       )}
 
-      {/* kinetic captions */}
+      {/* interactive live captions (unburned preview with live styling) */}
       {cap && (
-        <div className="absolute inset-x-[8%] bottom-[11%]">
-          <p
-            className={cn(
-              "text-center text-[clamp(13px,4.4cqh,26px)] font-semibold uppercase leading-[1.15] tracking-tight",
-              cap.hot ? "text-white" : "text-white/85",
-            )}
-            style={{ textShadow: "0 2px 18px rgba(0,0,0,0.75)" }}
-          >
-            {cap.words.map((w, i) => (
-              <span
-                key={i}
-                className={cn(
-                  "transition-all duration-200",
-                  i === cap.index
-                    ? "text-beam-200 [text-shadow:0_0_24px_rgba(79,123,255,0.95)]"
-                    : "opacity-55",
-                )}
+        <div
+          className="absolute inset-x-[8%] bottom-[9%] sm:bottom-[11%] z-20 pointer-events-none select-none flex justify-center items-end"
+          style={fontStyle}
+        >
+          {subtitleStyle === "karaoke" ? (
+            <div className="inline-block max-w-[90%] px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.65)]">
+              <p className="text-center text-xs sm:text-[13px] md:text-sm font-bold leading-snug">
+                {cap.words.map((w, i) => {
+                  const isCurrent = i === cap.activeIdx;
+                  const isPast = time >= w.end;
+                  return (
+                    <span
+                      key={w.globalIndex}
+                      className={cn(
+                        "transition-all duration-100 inline-block mx-0.5 px-1 py-0.5 rounded",
+                        isCurrent
+                          ? "bg-beam-500 text-white font-extrabold shadow-[0_0_12px_rgba(79,123,255,0.9)] scale-105"
+                          : isPast
+                            ? "text-white opacity-95"
+                            : "text-white/35",
+                      )}
+                    >
+                      {w.word}
+                    </span>
+                  );
+                })}
+              </p>
+            </div>
+          ) : subtitleStyle === "minimal" ? (
+            <div className="inline-block max-w-[90%] px-3.5 py-1 rounded-full bg-black/80 backdrop-blur-md border border-white/12 shadow-[0_4px_16px_rgba(0,0,0,0.55)]">
+              <p className="text-center text-[11px] sm:text-xs md:text-[12.5px] font-medium text-white/90 leading-tight">
+                {cap.words.map((w, i) => {
+                  const isCurrent = i === cap.activeIdx;
+                  const isPast = time >= w.end;
+                  return (
+                    <span
+                      key={w.globalIndex}
+                      className={cn(
+                        "transition-colors duration-100 inline-block mx-0.5",
+                        isCurrent
+                          ? "text-beam-300 font-bold scale-105"
+                          : isPast
+                            ? "text-white"
+                            : "text-white/40",
+                      )}
+                    >
+                      {w.word}
+                    </span>
+                  );
+                })}
+              </p>
+            </div>
+          ) : subtitleStyle === "outline" ? (
+            <div className="inline-block max-w-[90%]">
+              <p
+                className="text-center text-xs sm:text-sm md:text-[15px] font-black uppercase leading-tight tracking-wide text-yellow-300"
+                style={{
+                  WebkitTextStroke: "1px #000",
+                  textShadow:
+                    "1.5px 1.5px 0 #000, -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 0 3px 12px rgba(0,0,0,0.9)",
+                }}
               >
-                {w}{" "}
-              </span>
-            ))}
-          </p>
-          <div className="mx-auto mt-2 h-px w-10 bg-beam-300/60" />
+                {cap.words.map((w, i) => {
+                  const isCurrent = i === cap.activeIdx;
+                  return (
+                    <span
+                      key={w.globalIndex}
+                      className={cn(
+                        "transition-transform duration-100 inline-block mx-0.5 sm:mx-1",
+                        isCurrent
+                          ? "scale-110 text-cyan-300 drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]"
+                          : "scale-100",
+                      )}
+                    >
+                      {w.word}
+                    </span>
+                  );
+                })}
+              </p>
+            </div>
+          ) : (
+            /* Kinetic Bold (default) */
+            <div className="inline-block max-w-[90%]">
+              <p
+                className={cn(
+                  "text-center text-xs sm:text-sm md:text-[14.5px] font-extrabold uppercase leading-tight tracking-tight",
+                  cap.hot ? "text-white" : "text-white/95",
+                )}
+                style={{ textShadow: "0 2px 14px rgba(0,0,0,0.9), 0 1px 3px rgba(0,0,0,0.95)" }}
+              >
+                {cap.words.map((w, i) => {
+                  const isCurrent = i === cap.activeIdx;
+                  const isPast = time >= w.end;
+                  return (
+                    <span
+                      key={w.globalIndex}
+                      className={cn(
+                        "transition-all duration-100 inline-block mx-0.5",
+                        isCurrent
+                          ? "text-beam-300 scale-105 [text-shadow:0_0_14px_rgba(79,123,255,0.95)]"
+                          : isPast
+                            ? "text-white opacity-90"
+                            : "text-white/45",
+                      )}
+                    >
+                      {w.word}
+                    </span>
+                  );
+                })}
+              </p>
+              <div className="mx-auto mt-1 h-0.5 w-6 rounded-full bg-beam-300/60 shadow-[0_0_6px_rgba(126,163,255,0.7)]" />
+            </div>
+          )}
         </div>
       )}
 
-      {/* top HUD */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-2.5">
-        <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/45 px-2 py-1 backdrop-blur-md">
-          <span className="h-1 w-1 rounded-full bg-ember-400 anim-ping" />
-          <span className="micro-sm text-white/70">En vivo</span>
+      {/* top HUD (contador y en vivo con márgenes seguros y tipografía nítida) */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-3 sm:p-3.5 z-20">
+        <div className="flex items-center gap-1.5 rounded-full border border-white/12 bg-black/60 px-2.5 py-0.5 backdrop-blur-md shadow-sm">
+          <span className="h-1.5 w-1.5 rounded-full bg-ember-400 anim-ping shrink-0" />
+          <span className="text-[9px] font-semibold text-white/80 uppercase tracking-wider">En vivo</span>
         </div>
-        <span className="tnum rounded-full border border-white/10 bg-black/45 px-2 py-1 text-[10px] text-white/70 backdrop-blur-md">
+        <span className="tnum font-mono rounded-full border border-white/12 bg-black/60 px-2.5 py-0.5 text-[9.5px] font-medium text-white/90 backdrop-blur-md shadow-sm shrink-0 whitespace-nowrap">
           {timecode(time)}
         </span>
       </div>
 
-      {/* bottom HUD */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-2.5">
-        <span className="micro-sm text-white/45">{scene.name}</span>
-        <span className="micro-sm text-white/35">{ratio} · 4K</span>
+      {/* bottom HUD (nombres limpios sin desbordamiento) */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between p-3 sm:p-3.5 z-20">
+        <span className="text-[9px] font-medium text-white/55 bg-black/60 px-2 py-0.5 rounded-md border border-white/10 backdrop-blur-md shadow-sm truncate max-w-[130px]">
+          {scene.name}
+        </span>
+        <span className="text-[9px] font-mono text-white/45 bg-black/60 px-1.5 py-0.5 rounded-md border border-white/10 backdrop-blur-md shadow-sm shrink-0">
+          {ratio} · 4K
+        </span>
       </div>
 
       {running && (
-        <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-beam-300/25 bg-black/50 px-3 py-1.5 backdrop-blur-md">
+        <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-beam-300/25 bg-black/50 px-3 py-1.5 backdrop-blur-md z-30">
           <IconSparkle className="h-3.5 w-3.5 text-beam-200" />
           <span className="micro-sm text-beam-100/90">IA recalculando máster</span>
         </div>
@@ -365,11 +579,11 @@ export function PreviewStage() {
         <button
           onClick={toggle}
           className={cn(
-            "absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/10 bg-black/40 text-white/80 backdrop-blur-md transition-all duration-500",
-            playing ? "pointer-events-none scale-75 opacity-0" : "opacity-100 hover:scale-105",
+            "absolute left-1/2 top-1/2 grid h-14 w-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-black/50 text-white/90 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,0,0.6)] transition-all duration-300 z-30",
+            playing ? "pointer-events-none scale-75 opacity-0" : "opacity-100 hover:scale-105 active:scale-95",
           )}
         >
-          <IconPlay className="h-6 w-6" />
+          <IconPlay className="h-5 w-5 ml-0.5 text-white" />
         </button>
       </div>
 
@@ -380,7 +594,19 @@ export function PreviewStage() {
 }
 
 export function Transport() {
-  const { playing, toggle, seek, time, duration, rate, setRate, loop, setLoop } = useEditor();
+  const {
+    playing,
+    toggle,
+    seek,
+    time,
+    duration,
+    rate,
+    setRate,
+    loop,
+    setLoop,
+    isMuted,
+    toggleMute,
+  } = useEditor();
   const safeDuration = duration || DURATION;
   const pct = (time / safeDuration) * 100;
 
@@ -410,8 +636,13 @@ export function Transport() {
         >
           <IconLoop className="h-3.5 w-3.5" />
         </IconButton>
-        <IconButton size="sm" title="Silencio">
-          <IconVolume className="h-3.5 w-3.5" />
+        <IconButton
+          size="sm"
+          title={isMuted ? "Activar audio" : "Silenciar"}
+          active={!isMuted}
+          onClick={toggleMute}
+        >
+          <IconVolume className={cn("h-3.5 w-3.5", isMuted && "opacity-40")} />
         </IconButton>
       </div>
 

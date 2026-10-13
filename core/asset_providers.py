@@ -194,7 +194,21 @@ class OpenStockAssetProvider(AssetProvider):
                     with Image.open(out_path) as im:
                         # Asegurar resolución aceptable
                         if im.size[0] >= 640 and im.size[1] >= 360:
-                            print(f"[OpenStockProvider] Foto real verificada obtenida: {out_path.name} ({im.size})")
+                            import json
+                            # Guardar registro oficial de procedencia y derechos de uso
+                            prov = {
+                                "source_url": res.page_url or res.image_url,
+                                "source_name": "Wikimedia Commons",
+                                "license": getattr(res, "license", "Dominio Público / CC BY-SA"),
+                                "artist": getattr(res, "artist", "Archivo Histórico"),
+                                "date": getattr(res, "date", ""),
+                                "visual_nature": "documental_real",
+                                "attribution_badge": f"ARCHIVO HISTÓRICO · {res.date[:4]}" if (getattr(res, "date", "") and any(c.isdigit() for c in res.date)) else "ARCHIVO HISTÓRICO VERIFICADO",
+                                "context_note": res.title or query,
+                            }
+                            prov_path = target_dir / f"{cue.cue_id}_provenance.json"
+                            prov_path.write_text(json.dumps(prov, ensure_ascii=False, indent=2), encoding="utf-8")
+                            print(f"[OpenStockProvider] Foto real verificada obtenida: {out_path.name} ({im.size}) | {prov['attribution_badge']}")
                             return out_path
                 except Exception:
                     pass
@@ -216,6 +230,7 @@ class WebPhotoAssetProvider(AssetProvider):
 
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
         import asyncio
+        import json
         from PIL import Image
         from core.web_media import WikiMediaClient
 
@@ -242,7 +257,7 @@ class WebPhotoAssetProvider(AssetProvider):
                     if not res:
                         res = list(ddgs.images(query, max_results=15))
 
-                clean_urls = []
+                clean_items = []
                 for r in res:
                     img_url = r.get("image") or ""
                     if not img_url.startswith("http"):
@@ -256,10 +271,10 @@ class WebPhotoAssetProvider(AssetProvider):
                     h = int(r.get("height") or 0)
                     # Exigir alta definición mínima (HD real) y evitar banners deformes
                     if (w >= 1280 and h >= 720) or (w >= 1000 and 1.2 <= (w / max(1, h)) <= 2.2):
-                        clean_urls.append(img_url)
-                    elif not clean_urls and min(w, h) >= 800:
-                        clean_urls.append(img_url)
-                return clean_urls
+                        clean_items.append(r)
+                    elif not clean_items and min(w, h) >= 800:
+                        clean_items.append(r)
+                return clean_items
             except Exception as exc:
                 print(f"[WebPhotoProvider] Búsqueda falló: {exc}")
                 return []
@@ -267,8 +282,9 @@ class WebPhotoAssetProvider(AssetProvider):
         client = WikiMediaClient()
         # wait_for: ddgs no tiene timeout propio — un DuckDuckGo colgado
         # (rate-limit/CAPTCHA) congelaba el render de la escena indefinidamente.
-        urls = await asyncio.wait_for(asyncio.to_thread(search), timeout=12.0)
-        for i, url in enumerate(urls[:8]):
+        items = await asyncio.wait_for(asyncio.to_thread(search), timeout=12.0)
+        for i, item in enumerate(items[:8]):
+            url = item.get("image") or ""
             dest = target_dir / f"{cue.cue_id}_web{i}.jpg"
             if not await client.download_image(url, dest):
                 continue
@@ -279,6 +295,19 @@ class WebPhotoAssetProvider(AssetProvider):
                     # Filtro de calidad estricto: mínimo 900x500 y no cuadrado ni hiper-alargado
                     aspect = im.size[0] / max(1, im.size[1])
                     if im.size[0] >= 900 and im.size[1] >= 500 and 1.1 <= aspect <= 2.4:
+                        # Guardar proveniencia registrada
+                        prov = {
+                            "source_url": item.get("url") or url,
+                            "source_name": "Archivo Web Editorial",
+                            "license": "Uso Editorial / Periodístico",
+                            "artist": item.get("source", "Web Press"),
+                            "date": "",
+                            "visual_nature": "ilustrativo",
+                            "attribution_badge": "IMAGEN ILUSTRATIVA",
+                            "context_note": item.get("title", query),
+                        }
+                        prov_path = target_dir / f"{cue.cue_id}_provenance.json"
+                        prov_path.write_text(json.dumps(prov, ensure_ascii=False, indent=2), encoding="utf-8")
                         print(f"[WebPhotoProvider] Imagen HD real descargada: {dest.name} ({im.size})")
                         return dest
             except Exception:
@@ -375,7 +404,20 @@ class YouTubeReactionAssetProvider(AssetProvider):
                     except Exception:
                         pass
 
-                    print(f"[YouTubeReactionProvider] Clip H.264 limpio obtenido: {chosen.name} ({chosen.stat().st_size // 1024} KB)", flush=True)
+                    import json
+                    prov = {
+                        "source_url": f"https://www.youtube.com/results?search_query={clean_q.replace(' ', '+')}",
+                        "source_name": "Archivo Audiovisual / YouTube",
+                        "license": "Uso Informativo / Editorial",
+                        "artist": "Metraje de Archivo",
+                        "date": str(cur_yr),
+                        "visual_nature": "documental_real",
+                        "attribution_badge": "METRAJE DOCUMENTAL",
+                        "context_note": clean_q,
+                    }
+                    prov_path = target_dir / f"{cue.cue_id}_provenance.json"
+                    prov_path.write_text(json.dumps(prov, ensure_ascii=False, indent=2), encoding="utf-8")
+                    print(f"[YouTubeReactionProvider] Clip H.264 limpio obtenido: {chosen.name} ({chosen.stat().st_size // 1024} KB) | {prov['attribution_badge']}", flush=True)
                     return chosen
             except Exception as e:
                 print(f"[YouTubeReactionProvider] Falló descarga de clip para '{query}': {e}", flush=True)

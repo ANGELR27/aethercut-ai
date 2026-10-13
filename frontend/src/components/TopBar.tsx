@@ -11,6 +11,7 @@ import {
   IconCheck,
   IconSparkle,
 } from "./Icons";
+import { ExportModal } from "./ExportModal";
 import { cn } from "@/utils/cn";
 
 function Mark() {
@@ -39,9 +40,14 @@ export function TopBar() {
     activeProjectTitle,
     selectProject,
     exportMaster,
+    duration,
+    ratio,
+    subtitleStyle,
+    overlays,
   } = useEditor();
   const [exporting, setExporting] = useState<number | null>(null);
   const [projectOpen, setProjectOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,7 +63,7 @@ export function TopBar() {
   useEffect(() => {
     if (exporting === null) return;
     if (exporting >= 100) {
-      const t = window.setTimeout(() => setExporting(null), 1400);
+      const t = window.setTimeout(() => setExporting(null), 1800);
       return () => window.clearTimeout(t);
     }
     const t = window.setTimeout(
@@ -69,8 +75,22 @@ export function TopBar() {
 
   const handleExportClick = () => {
     if (exporting !== null) return;
+    setModalOpen(true);
+  };
+
+  const handleModalConfirm = (opts: {
+    burnSubtitles: boolean;
+    resolution: "1080p" | "4k" | "720p";
+    fps: 30 | 60;
+    title: string;
+  }) => {
+    setModalOpen(false);
     setExporting(0);
-    exportMaster();
+    exportMaster({
+      burnSubtitles: opts.burnSubtitles,
+      style: subtitleStyle,
+      title: opts.title,
+    });
   };
 
   const openCopilot = () => {
@@ -230,17 +250,17 @@ export function TopBar() {
           type="button"
           onClick={openCopilot}
           title="Abrir AetherCopilot AI (Chat multi-modelo)"
-          className="relative flex items-center gap-1.5 overflow-hidden rounded-xl border border-purple-500/30 bg-gradient-to-b from-purple-500/15 to-purple-900/20 px-3 py-2 text-[11px] font-medium text-purple-200 shadow-[0_1px_0_0_rgba(255,255,255,0.1)_inset,0_8px_24px_-10px_rgba(168,85,247,0.7)] transition-all duration-300 hover:border-purple-400/50 hover:from-purple-500/25"
+          className="relative flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border border-purple-500/30 bg-gradient-to-b from-purple-500/15 to-purple-900/20 px-3 text-[11px] font-medium text-purple-200 shadow-[0_1px_0_0_rgba(255,255,255,0.1)_inset,0_8px_20px_-10px_rgba(168,85,247,0.7)] transition-all duration-300 hover:border-purple-400/50 hover:from-purple-500/25"
         >
-          <IconSparkle className="h-3.5 w-3.5 text-purple-300" />
-          <span>Copilot IA</span>
+          <IconSparkle className="h-3.5 w-3.5 shrink-0 text-purple-300" />
+          <span className="whitespace-nowrap">Copilot IA</span>
         </button>
 
         {/* export */}
         <button
           type="button"
           onClick={handleExportClick}
-          className="relative flex items-center gap-2 overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-white/[0.14] to-white/[0.04] px-3.5 py-2 text-[11px] font-medium text-white shadow-[0_1px_0_0_rgba(255,255,255,0.18)_inset,0_10px_30px_-14px_rgba(47,92,255,0.9)] transition-all duration-300 hover:border-beam-300/40 hover:from-beam-500/25"
+          className="relative flex h-8 shrink-0 items-center gap-2 whitespace-nowrap overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-white/[0.14] to-white/[0.04] px-3.5 text-[11px] font-medium text-white shadow-[0_1px_0_0_rgba(255,255,255,0.18)_inset,0_10px_30px_-14px_rgba(47,92,255,0.9)] transition-all duration-300 hover:border-beam-300/40 hover:from-beam-500/25"
         >
           {exporting !== null && exporting < 100 && (
             <span
@@ -248,16 +268,16 @@ export function TopBar() {
               style={{ width: `${exporting}%` }}
             />
           )}
-          {exporting === null && <IconDownload className="relative h-3.5 w-3.5" />}
+          {exporting === null && <IconDownload className="relative h-3.5 w-3.5 shrink-0" />}
           {exporting !== null && exporting < 100 ? (
-            <span className="relative tnum">Renderizando {Math.round(exporting)}%</span>
+            <span className="relative tnum whitespace-nowrap">Renderizando {Math.round(exporting)}%</span>
           ) : exporting !== null ? (
             <>
-              <IconCheck className="relative h-3.5 w-3.5 text-signal-400" />
-              <span className="relative">Máster listo</span>
+              <IconCheck className="relative h-3.5 w-3.5 shrink-0 text-signal-400" />
+              <span className="relative whitespace-nowrap">Máster listo</span>
             </>
           ) : null}
-          {exporting === null && <span className="relative">Exportar</span>}
+          {exporting === null && <span className="relative whitespace-nowrap">Exportar</span>}
         </button>
 
         {/* avatar */}
@@ -266,6 +286,18 @@ export function TopBar() {
         </div>
       </div>
       <Hairline className="absolute inset-x-0 bottom-0" />
+
+      {/* Export Specifications Modal */}
+      <ExportModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onConfirm={handleModalConfirm}
+        defaultTitle={activeProjectTitle || "KAI_Video_Master"}
+        durationSec={duration}
+        ratio={ratio}
+        subtitleStyle={subtitleStyle}
+        subtitlesActive={overlays.captions}
+      />
     </header>
   );
 }

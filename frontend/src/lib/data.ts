@@ -71,8 +71,9 @@ export const CLIPS: Clip[] = [
   { id: "t2", track: "t1", start: 12.1, duration: 10.9, label: "Subtítulos cinéticos", kind: "caption", ai: true },
   { id: "t3", track: "t1", start: 23.9, duration: 7.4, label: "CTA animado", kind: "caption", ai: true },
 
-  { id: "m1", track: "a1", start: 0, duration: 32, label: "Pulso Nocturno · 92 BPM", kind: "music" },
-  { id: "a2", track: "a1", start: 0.6, duration: 29.2, label: "Locución IA · es-LA (Neural v4)", kind: "voice", ai: true },
+  { id: "a1", track: "a1", start: 0, duration: 11.5, label: "Locución · A. Hook directo", kind: "voice", ai: true },
+  { id: "a2", track: "a1", start: 11.5, duration: 12, label: "Locución · B. Prueba en pantalla", kind: "voice", ai: true },
+  { id: "a3", track: "a1", start: 23.5, duration: 8.5, label: "Locución · C. Cierre + CTA", kind: "voice", ai: true },
 ];
 
 export type Caption = { start: number; end: number; text: string; hot?: boolean };

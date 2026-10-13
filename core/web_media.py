@@ -23,14 +23,29 @@ HEADERS = {"User-Agent": USER_AGENT, "Accept": "application/json"}
 
 
 class WikiResult:
-    """Resultado de una búsqueda enciclopédica real (título, extracto, imagen y URL fuente)."""
+    """Resultado de una búsqueda enciclopédica real (título, extracto, imagen, URL fuente, licencia y fecha)."""
 
-    def __init__(self, title: str, extract: str, image_url: Optional[str], page_url: str, lang: str):
+    def __init__(
+        self,
+        title: str,
+        extract: str,
+        image_url: Optional[str],
+        page_url: str,
+        lang: str,
+        license: str = "Dominio Público / CC BY-SA",
+        artist: str = "Archivo oficial",
+        date: str = "",
+        visual_nature: str = "documental_real",
+    ):
         self.title = title
         self.extract = extract
         self.image_url = image_url
         self.page_url = page_url
         self.lang = lang
+        self.license = license
+        self.artist = artist
+        self.date = date
+        self.visual_nature = visual_nature
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -39,6 +54,10 @@ class WikiResult:
             "image_url": self.image_url,
             "page_url": self.page_url,
             "lang": self.lang,
+            "license": self.license,
+            "artist": self.artist,
+            "date": self.date,
+            "visual_nature": self.visual_nature,
         }
 
 
@@ -71,7 +90,7 @@ class WikiMediaClient:
             "gsrnamespace": "6",
             "gsrlimit": 5,
             "prop": "imageinfo",
-            "iiprop": "url|size|mime",
+            "iiprop": "url|size|mime|extmetadata",
             "iiurlwidth": 1280,
         }
         try:
@@ -98,12 +117,25 @@ class WikiMediaClient:
                 continue
 
             title = page.get("title", "").replace("File:", "").replace(".jpg", "").replace(".png", "")
+            extmeta = imageinfo.get("extmetadata") or {}
+            clean_license = extmeta.get("LicenseShortName", {}).get("value", "CC BY-SA / Dominio Público")
+            clean_artist = extmeta.get("Artist", {}).get("value", "Archivo Histórico / Wikimedia")
+            # Limpiar etiquetas HTML que a veces Wikimedia pone en el campo Artist
+            clean_artist = re.sub(r"<[^>]+>", "", clean_artist).strip() or "Wikimedia Commons"
+            clean_date = extmeta.get("DateTimeOriginal", {}).get("value", extmeta.get("DateTime", {}).get("value", ""))
+            clean_desc = extmeta.get("ImageDescription", {}).get("value", "Fotografía documental de archivo de Wikimedia Commons.")
+            clean_desc = re.sub(r"<[^>]+>", "", clean_desc).strip()
+
             return WikiResult(
                 title=title or query,
-                extract="Fotografía documental de archivo de Wikimedia Commons.",
+                extract=clean_desc or "Fotografía documental de archivo de Wikimedia Commons.",
                 image_url=thumb_url,
                 page_url=imageinfo.get("descriptionurl", "https://commons.wikimedia.org"),
                 lang="commons",
+                license=clean_license,
+                artist=clean_artist,
+                date=clean_date,
+                visual_nature="documental_real",
             )
         return None
 

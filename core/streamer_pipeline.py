@@ -144,6 +144,7 @@ class StreamerOptions:
     # --- Opciones definidas en el compositor (todas con default retrocompatible) ---
     sub_style: str = "classic"     # classic, outline, viral, neon, minimal, cinema
     subs_enabled: bool = True
+    burn_subtitles: bool = False   # Subtítulos quemados solo bajo petición explícita de exportación
     visual_mode: str = "mixed"     # mixed | svg (animaciones vectoriales propias) | stock (b-roll)
     enable_broll: bool = True
     enable_cards: bool = True
@@ -335,6 +336,7 @@ class StreamerPipeline:
             cancel_event=self.cancel_event,
             sub_style=self.options.sub_style,
             subs_enabled=self.options.subs_enabled,
+            burn_subtitles=getattr(self.options, 'burn_subtitles', False),
             fps=getattr(self.options, 'fps', 30),
             crf=getattr(self.options, 'crf', 18),
             audio_normalize=getattr(self.options, 'audio_normalize', True),
@@ -454,14 +456,92 @@ class StreamerPipeline:
             self._state("render", 95.0, f"Emitiendo en vivo por RTMP a {rtmp_dest[:22]}...")
             asyncio.create_task(self._stream_to_rtmp(output_file, rtmp_dest))
 
-        # Construir y guardar plan en ProjectStore
+        # Construir y guardar plan enriquecido en ProjectStore con sincronización precisa de pistas
+        from utils.file_manager import FileManager
+        timeline_segments = []
+        info_cards = []
+        b_rolls = []
+        captions = []
+        cum_sec = 0.0
+
+        for sc in plan.scenes:
+            sid = sc.scene_id
+            mp4_file = self.workdir / f"scene_{sid}" / f"scene_{sid}.mp4"
+            dur = 0.0
+            if mp4_file.exists():
+                try:
+                    dur = FileManager.get_media_metadata(mp4_file).get("duration", 0.0)
+                except Exception:
+                    pass
+            if dur <= 0:
+                dur = float(sc.duration_est or 6.0)
+
+            sc_start = round(cum_sec, 2)
+            sc_end = round(cum_sec + dur, 2)
+            cum_sec += dur
+
+            timeline_segments.append(TimelineSegment(
+                start_sec=sc_start,
+                end_sec=sc_end,
+                action=ActionType.KEEP,
+                reason=sc.name or f"Escena {sid}"
+            ))
+
+            card_data = sc.card if isinstance(sc.card, dict) else (sc.card.__dict__ if hasattr(sc.card, "__dict__") else {})
+            if card_data and card_data.get("headline"):
+                h_text = str(card_data.get("headline", "")).strip()
+                b_text = str(card_data.get("body", "")).strip()
+                dur_disp = max(4.5, min(12.0, float(dur - 0.8) if dur > 5.5 else 4.5))
+                info_cards.append(InfoCard(
+                    card_id=f"card-{sid}",
+                    start_sec=sc_start + 0.5,
+                    end_sec=sc_start + 0.5 + dur_disp,
+                    display_duration_sec=dur_disp,
+                    headline=h_text,
+                    claim=str(card_data.get("claim") or h_text),
+                    search_query=str(card_data.get("search_query") or h_text),
+                    body=b_text,
+                    stat_value=str(card_data.get("stat") or card_data.get("stat_value") or ""),
+                ))
+
+            if sc.visual_query:
+                b_rolls.append(BRollCue(
+                    cue_id=f"broll-{sid}",
+                    start_sec=sc_start,
+                    end_sec=sc_end,
+                    concept=sc.visual_query,
+                    search_query_en=sc.visual_query,
+                    reasoning=sc.name or f"Escena {sid}",
+                ))
+
+            srt_file = self.workdir / f"scene_{sid}" / "scene_subtitles.srt"
+            if srt_file.exists():
+                try:
+                    blocks = srt_file.read_text(encoding="utf-8").strip().split("\n\n")
+                    for blk in blocks:
+                        lns = [l.strip() for l in blk.splitlines() if l.strip()]
+                        if len(lns) >= 3 and "-->" in lns[1]:
+                            tp = lns[1].split("-->")
+                            def _pt(ts):
+                                pts = ts.strip().replace(",", ".").split(":")
+                                return float(pts[0])*3600 + float(pts[1])*60 + float(pts[2])
+                            c_st = round(sc_start + _pt(tp[0]), 2)
+                            c_en = round(sc_start + _pt(tp[1]), 2)
+                            captions.append(CaptionItem(
+                                start_sec=c_st,
+                                end_sec=c_en,
+                                text=" ".join(lns[2:]),
+                            ))
+                except Exception:
+                    pass
+
         edit_plan = VideoEditingPlan(
             video_summary=plan.title,
-            total_original_duration_sec=plan.total_est_duration,
-            timeline=[TimelineSegment(start_sec=0.0, end_sec=plan.total_est_duration, action=ActionType.KEEP)],
-            info_cards=[],
-            b_rolls=[],
-            captions=[],
+            total_original_duration_sec=cum_sec,
+            timeline=timeline_segments,
+            info_cards=info_cards,
+            b_rolls=b_rolls,
+            captions=captions,
         )
         self.project_store.save_plan(edit_plan)
 

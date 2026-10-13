@@ -187,19 +187,47 @@ REGLAS ESTRICTAS:
         # Mapeo de identidad vocal única para que cada locutor suene con voz humana propia y distinta
         studio_voice_map = {
             "es-mx-jorgeneural": "angel",
+            "jorge": "angel",
             "es-us-alonsoneural": "fernando",
+            "alonso": "fernando",
             "es-co-gonzaloneural": "jesus",
+            "gonzalo": "jesus",
             "es-ar-tomasneural": "carlos",
+            "tomas": "carlos",
+            "tomás": "carlos",
             "es-mx-dalianeural": "carmen",
+            "dalia": "carmen",
             "es-ar-elenaneural": "carolina",
+            "elena": "carolina",
             "es-es-alvaroneural": "unai",
+            "alvaro": "unai",
+            "álvaro": "unai",
             "voicestudio-omni-es": "mariana",
+            "omni": "mariana",
             "voicestudio-piper-dave": "maximiliano",
+            "piper-dave": "maximiliano",
             "clon-propio": "emiliano",
             "neural-clon": "emiliano",
             "clone": "emiliano",
         }
-        sp_target = studio_voice_map.get(cv_lower, chosen_voice.replace("speechify:", ""))
+        sp_target = studio_voice_map.get(cv_lower)
+        if not sp_target:
+            if any(x in cv_lower for x in ["gonzalo", "es-co"]):
+                sp_target = "jesus"
+            elif any(x in cv_lower for x in ["jorge", "es-mx"]):
+                sp_target = "angel"
+            elif any(x in cv_lower for x in ["alonso", "es-us"]):
+                sp_target = "fernando"
+            elif any(x in cv_lower for x in ["tomas", "tomás", "es-ar-tomas"]):
+                sp_target = "carlos"
+            elif any(x in cv_lower for x in ["dalia", "es-mx-dalia"]):
+                sp_target = "carmen"
+            elif any(x in cv_lower for x in ["elena", "es-ar-elena"]):
+                sp_target = "carolina"
+            elif any(x in cv_lower for x in ["alvaro", "álvaro", "es-es"]):
+                sp_target = "unai"
+            else:
+                sp_target = chosen_voice.replace("speechify:", "").strip()
 
         # 0. Intentar síntesis con Speechify
         try:
@@ -214,7 +242,17 @@ REGLAS ESTRICTAS:
         except Exception:
             pass
 
-        # 1. Intentar Gemini TTS de alta fidelidad si está configurado
+        # 1. Intentar edge-tts prioritario para voces neuronales exactas (es-MX-JorgeNeural, es-US-AlonsoNeural, etc.)
+        if not generated and not chosen_voice.startswith("speechify:"):
+            try:
+                communicate = edge_tts.Communicate(content_text, chosen_voice, rate="+0%")
+                await asyncio.wait_for(communicate.save(str(out_path)), timeout=12.0)
+                if out_path.exists() and out_path.stat().st_size > 500:
+                    generated = True
+            except Exception:
+                pass
+
+        # 2. Respaldo con Gemini TTS si está configurado y edge-tts no pudo generar
         if not generated:
             try:
                 from config.settings import settings
@@ -225,37 +263,27 @@ REGLAS ESTRICTAS:
                     model = genai.GenerativeModel("models/gemini-2.5-flash-preview-tts")
                     prompt = f"Lee con {accent_desc}: {content_text}"
 
-                loop = asyncio.get_running_loop()
-                res = await asyncio.wait_for(
-                    loop.run_in_executor(None, lambda: model.generate_content(
-                        prompt,
-                        generation_config={"response_modalities": ["AUDIO"]}
-                    )),
-                    timeout=8.0
-                )
-                pcm = None
-                for p in res.candidates[0].content.parts:
-                    if p.inline_data:
-                        pcm = p.inline_data.data
-                        break
-                if pcm:
-                    cmd = [
-                        "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
-                        "-i", "pipe:0", "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", str(out_path)
-                    ]
-                    proc = subprocess.run(cmd, input=pcm, capture_output=True)
-                    if proc.returncode == 0 and out_path.exists() and out_path.stat().st_size > 500:
-                        generated = True
-            except Exception:
-                pass
-
-        # 2. Intentar edge-tts
-        if not generated:
-            try:
-                communicate = edge_tts.Communicate(content_text, chosen_voice, rate="+0%")
-                await asyncio.wait_for(communicate.save(str(out_path)), timeout=8.0)
-                if out_path.exists() and out_path.stat().st_size > 500:
-                    generated = True
+                    loop = asyncio.get_running_loop()
+                    res = await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: model.generate_content(
+                            prompt,
+                            generation_config={"response_modalities": ["AUDIO"]}
+                        )),
+                        timeout=8.0
+                    )
+                    pcm = None
+                    for p in res.candidates[0].content.parts:
+                        if p.inline_data:
+                            pcm = p.inline_data.data
+                            break
+                    if pcm:
+                        cmd = [
+                            "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
+                            "-i", "pipe:0", "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", str(out_path)
+                        ]
+                        proc = subprocess.run(cmd, input=pcm, capture_output=True)
+                        if proc.returncode == 0 and out_path.exists() and out_path.stat().st_size > 500:
+                            generated = True
             except Exception:
                 pass
 

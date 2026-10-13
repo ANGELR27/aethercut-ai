@@ -96,6 +96,7 @@ class SceneEngine:
         cancel_event: Optional[Any] = None,
         sub_style: str = "classic",
         subs_enabled: bool = True,
+        burn_subtitles: bool = False,
         fps: int = 30,
         crf: int = 18,
         audio_normalize: bool = True,
@@ -112,6 +113,7 @@ class SceneEngine:
                 sub_style = style_spec.get("sub_style", sub_style)
         self.sub_style = sub_style
         self.subs_enabled = subs_enabled
+        self.burn_subtitles = burn_subtitles
         self.workdir = workdir
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.aspect_ratio = aspect_ratio
@@ -231,58 +233,89 @@ class SceneEngine:
         audio_path = scene_dir / "voice.mp3"
 
         sentence_boundaries = []
+        audio_generated = False
+
+        # 1. Síntesis neuronal de alta fidelidad con el narrador (Speechify / Gemini / Voz seleccionada por el usuario)
         try:
-            import edge_tts
-            communicate = edge_tts.Communicate(tts_speech_text, self.voice, rate=rate_mod, pitch=pitch_mod)
-            with open(audio_path, "wb") as f_audio:
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        f_audio.write(chunk["data"])
-                    elif chunk["type"] == "SentenceBoundary":
-                        s_sec = chunk["offset"] / 10_000_000
-                        d_sec = chunk["duration"] / 10_000_000
-                        sentence_boundaries.append((s_sec, s_sec + d_sec, chunk["text"].strip()))
-        except Exception as _tts_err:
-            safe_log(f"[SceneEngine] Edge-TTS no disponible ({_tts_err}). Usando gTTS de respaldo para que la producción continúe...")
+            safe_log(f"[SceneEngine] Sintetizando locución con la voz seleccionada ({self.voice}) para escena {scene.scene_id}...")
+            _, tts_duration = await self.narrator.synthesize(tts_speech_text, audio_path, voice=self.voice)
+            if audio_path.exists() and audio_path.stat().st_size > 500:
+                audio_generated = True
+                safe_log(f"[SceneEngine] Audio de escena {scene.scene_id} generado exitosamente con voz {self.voice} ({audio_path.stat().st_size} bytes)")
+        except Exception as _narrator_err:
+            safe_log(f"[SceneEngine] Error en síntesis neuronal con narrador: {_narrator_err}")
+
+        # 2. Respaldo secundario con Edge-TTS (si la red lo permite)
+        if not audio_generated:
+            try:
+                import edge_tts
+                communicate = edge_tts.Communicate(tts_speech_text, self.voice, rate=rate_mod, pitch=pitch_mod)
+                with open(audio_path, "wb") as f_audio:
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            f_audio.write(chunk["data"])
+                        elif chunk["type"] == "SentenceBoundary":
+                            s_sec = chunk["offset"] / 10_000_000
+                            d_sec = chunk["duration"] / 10_000_000
+                            sentence_boundaries.append((s_sec, s_sec + d_sec, chunk["text"].strip()))
+                if audio_path.exists() and audio_path.stat().st_size > 500:
+                    audio_generated = True
+            except Exception as _edge_err:
+                safe_log(f"[SceneEngine] Edge-TTS no disponible ({_edge_err}). Pasando a gTTS regional...")
+
+        # 3. Respaldo terciario infalible con gTTS regional
+        if not audio_generated:
             try:
                 from gtts import gTTS
-                # Determinar idioma básico
-                lang_code = "es" if any(x in (self.voice or "").lower() for x in ["es-", "es_", "spanish"]) else "es"
-                gtts_obj = gTTS(text=tts_speech_text, lang=lang_code)
+                v_lower = (self.voice or "").lower()
+                tld = "com.mx"
+                if any(x in v_lower for x in ["es-es", "alvaro"]):
+                    tld = "es"
+                elif any(x in v_lower for x in ["es-co", "gonzalo", "clon"]):
+                    tld = "com.co"
+                elif any(x in v_lower for x in ["es-ar", "tomas", "elena"]):
+                    tld = "com.ar"
+                gtts_obj = gTTS(text=tts_speech_text, lang="es", tld=tld)
                 gtts_obj.save(str(audio_path))
-                # Estimar boundaries de frases para subtítulos
-                raw_sentences = [s.strip() for s in re.split(r"([.!?…]+)", tts_speech_text) if s.strip()]
-                # Reconstruir frases completas
-                full_sents = []
-                cur_s = ""
-                for part in raw_sentences:
-                    cur_s += (" " if cur_s else "") + part
-                    if re.search(r"[.!?…]$", part):
-                        full_sents.append(cur_s.strip())
-                        cur_s = ""
-                if cur_s:
-                    full_sents.append(cur_s.strip())
-                if not full_sents:
-                    full_sents = [tts_speech_text]
-                
-                est_dur = max(3.0, len(tts_speech_text) * 0.065)
-                cur_t = 0.0
-                total_chars = max(1, sum(len(s) for s in full_sents))
-                for s in full_sents:
-                    s_dur = (len(s) / total_chars) * est_dur
-                    sentence_boundaries.append((round(cur_t, 2), round(cur_t + s_dur, 2), s))
-                    cur_t += s_dur
+                audio_generated = True
             except Exception as _gtts_err:
                 safe_log(f"[SceneEngine] Error crítico generando voz fallback: {_gtts_err}")
-                raise _tts_err
+                raise
 
         # Medir duración exacta del audio real de la escena generado limpiamente por el TTS neural
         tts_duration = self._get_audio_duration(audio_path)
+
+        # Si sentence_boundaries no fue provisto por Edge-TTS, calcular boundaries de frases con la duración real del audio
+        if not sentence_boundaries:
+            raw_sentences = [s.strip() for s in re.split(r"([.!?…]+)", tts_speech_text) if s.strip()]
+            full_sents = []
+            cur_s = ""
+            for part in raw_sentences:
+                cur_s += (" " if cur_s else "") + part
+                if re.search(r"[.!?…]$", part):
+                    full_sents.append(cur_s.strip())
+                    cur_s = ""
+            if cur_s:
+                full_sents.append(cur_s.strip())
+            if not full_sents:
+                full_sents = [tts_speech_text]
+
+            cur_t = 0.0
+            total_chars = max(1, sum(len(s) for s in full_sents))
+            for s in full_sents:
+                s_dur = (len(s) / total_chars) * tts_duration
+                sentence_boundaries.append((round(cur_t, 2), round(cur_t + s_dur, 2), s))
+                cur_t += s_dur
+
         # La escena se ajusta de forma milimétrica al audio hablado para evitar silencios y mantener sincronía exacta con los fotogramas
         duration = max(3.0, round(tts_duration + 0.15, 2))
         dur_str = f"{duration:.2f}"
 
-        # 2. Descargar o seleccionar B-Roll temático para la escena
+        # 2. Curaduría Inteligente de Contenido y Apoyo Visual
+        from core.smart_media_curator import SmartMediaCurator, VisualIntentType, VisualNature
+        visual_intent = SmartMediaCurator.analyze_narration_intent(speech_text, scene.name)
+        safe_log(f"[SmartMediaCurator] 🧠 Intención detectada para escena {scene.scene_id}: {visual_intent.intent_type.value} ('{visual_intent.entity_name}')")
+
         broll_img = None
         is_opening_scene = (int(getattr(scene, "scene_id", 1)) == 1)
 
@@ -300,10 +333,10 @@ class SceneEngine:
             try:
                 v_concept = scene.visual_query or f"{scene.name} motion graphics 4k tech"
                 safe_log(f"[SceneEngine] 🎬 Obteniendo B-Roll cinemático HD para escena conceptual {scene.scene_id}: '{v_concept}'")
-                broll_img = await self._get_scene_visual(v_concept, scene_dir, is_video_scene=True)
+                broll_img = await self._get_scene_visual(v_concept, scene_dir, is_video_scene=True, intent=visual_intent)
                 if not broll_img or not broll_img.exists():
                     fallback_concept = f"{scene.name} concept documentary 4k"
-                    broll_img = await self._get_scene_visual(fallback_concept, scene_dir, is_video_scene=True)
+                    broll_img = await self._get_scene_visual(fallback_concept, scene_dir, is_video_scene=True, intent=visual_intent)
             except Exception as _ev:
                 safe_log(f"[SceneEngine] Fallback en visual conceptual: {_ev}")
 
@@ -321,7 +354,7 @@ class SceneEngine:
             # Priorizar video en movimiento para todas las escenas con B-Roll, reacción, noticias o contexto
             # En la apertura (escena 1), SIEMPRE es video documental de alto impacto
             is_video_reaction = is_opening_scene or (scene.type != "avatar_cam") or ("video" in (scene.visual_query or "").lower())
-            broll_img = await self._get_scene_visual(scene.visual_query, scene_dir, is_video_scene=is_video_reaction)
+            broll_img = await self._get_scene_visual(scene.visual_query, scene_dir, is_video_scene=is_video_reaction, intent=visual_intent)
 
         # Garantizar que NUNCA quede un fondo negro vacío: si la descarga no encontró imagen externa,
         # usar el set de estudio iluminado cinemático con bokeh de KAI
@@ -331,6 +364,26 @@ class SceneEngine:
                 fallback_bg = Path("assets/streamer_studio_room.jpg")
             if fallback_bg.exists():
                 broll_img = fallback_bg
+
+        # Registro y Verificación de Procedencia del Material Visual
+        media_prov = self._get_media_provenance(broll_img)
+        provenance_chip_path = None
+        if media_prov and media_prov.get("attribution_badge"):
+            b_text = str(media_prov.get("attribution_badge", "")).strip()
+            s_name = str(media_prov.get("source_name", "Archivo Oficial")).strip()
+            safe_log(f"[SmartMediaCurator] 🛡️ Proveniencia: {b_text} | Fuente: {s_name} | Licencia: {media_prov.get('license', 'Uso Libre')}")
+            # Si es documental real, histórico, o reconstrucción, generar pastilla de transparencia en pantalla
+            if any(k in b_text.upper() for k in ("HISTÓRICO", "HISTORICO", "DOCUMENTAL", "RECONSTRUCCIÓN", "RECONSTRUCCION", "SIMULACIÓN", "SIMULACION", "VERIFICADO")):
+                try:
+                    out_chip_p = scene_dir / f"provenance_chip_{scene.scene_id}.png"
+                    provenance_chip_path = self.web_renderer.render_visual_template(
+                        template_name="source_chip",
+                        out_png=out_chip_p,
+                        params={"source_name": s_name, "tag": b_text},
+                        variant="orange_noir",
+                    )
+                except Exception as _p_err:
+                    safe_log(f"[SmartMediaCurator] Fallback en source chip: {_p_err}")
 
         # 2b. Descargar clips secuenciales de referencia (visual_beats) o segundo clip complementario
         bg_clips: List[Tuple[Path, float]] = []
@@ -480,11 +533,74 @@ class SceneEngine:
                 safe_log(f"[SceneEngine] Fallback en motion graphics: {_me}")
                 motion_overlay_path = None
 
-        # 3. Preparar tarjeta Bento moderna si aplica
-        # 3. Preparar tarjeta gráfica moderna o distintivo viral si aplica
+        # 3. Preparar tarjeta Bento moderna o alternativa visual honesta
         card_img_path = None
         card_visual_type = "bento"
         card_start_time = 0.5
+        smart_card_dur = None
+
+        # Si el director no asignó tarjeta pero la locución menciona una cifra, lugar, comparación,
+        # frase impactante, acontecimiento o concepto difícil, generar la alternativa visual honesta adecuada:
+        if not scene.card and visual_intent and visual_intent.intent_type != VisualIntentType.GENERAL_BROLL:
+            from core.director import SceneCard
+            if visual_intent.intent_type == VisualIntentType.STAT_NUMBER and visual_intent.stat_value:
+                scene.card = SceneCard(
+                    headline=visual_intent.entity_name,
+                    stat=visual_intent.stat_value,
+                    body=visual_intent.raw_sentence[:100],
+                    badge="MÉTRICA VERIFICADA",
+                    template="stat_counter",
+                )
+                safe_log(f"[SmartMediaCurator] 📊 Cifra en locución -> Generando Stat Counter: {visual_intent.stat_value}")
+            elif visual_intent.intent_type == VisualIntentType.GEO_LOCATION:
+                scene.card = SceneCard(
+                    headline=visual_intent.entity_name,
+                    stat=visual_intent.location or "ZONA TÁCTICA",
+                    body=f"Ubicación geográfica clave: {visual_intent.entity_name} ({visual_intent.location})",
+                    badge="MAPA TÁCTICO",
+                    template="map",
+                )
+                safe_log(f"[SmartMediaCurator] 🗺️ Lugar en locución -> Generando Mapa GeoIntel: {visual_intent.entity_name}")
+            elif visual_intent.intent_type == VisualIntentType.VERSUS_COMPARISON:
+                scene.card = SceneCard(
+                    headline=visual_intent.entity_name,
+                    body=visual_intent.secondary_entity,
+                    badge="COMPARATIVA",
+                    template="versus_split",
+                )
+                safe_log(f"[SmartMediaCurator] ⚔️ Comparación en locución -> Generando Versus Split: {visual_intent.entity_name} vs {visual_intent.secondary_entity}")
+            elif visual_intent.intent_type == VisualIntentType.IMPACT_PHRASE:
+                scene.card = SceneCard(
+                    headline=visual_intent.entity_name,
+                    body=visual_intent.raw_sentence[:90],
+                    badge="PUNTO CLAVE",
+                    template="alert_banner",
+                )
+                safe_log(f"[SmartMediaCurator] ⚡ Frase impactante en locución -> Generando Alert Banner: {visual_intent.entity_name}")
+            elif visual_intent.intent_type == VisualIntentType.COMPLEX_CONCEPT:
+                scene.card = SceneCard(
+                    headline=visual_intent.entity_name,
+                    body=visual_intent.raw_sentence[:95],
+                    badge="CONCEPTO TÉCNICO",
+                    template="tech_card",
+                )
+                safe_log(f"[SmartMediaCurator] 💡 Concepto difícil en locución -> Generando Tech Card: {visual_intent.entity_name}")
+            elif visual_intent.intent_type == VisualIntentType.HISTORICAL_EVENT and visual_intent.year:
+                scene.card = SceneCard(
+                    headline=visual_intent.entity_name,
+                    body=visual_intent.raw_sentence[:110],
+                    stat=str(visual_intent.year),
+                    badge=f"ARCHIVO · {visual_intent.year}",
+                    template="quote_evidence",
+                )
+                safe_log(f"[SmartMediaCurator] 📜 Acontecimiento con fecha -> Generando Registro Histórico: {visual_intent.year}")
+
+        # Calcular temporización sincronizada para que aparezca cuando aporte contexto y se retire cuando deje de ser relevante
+        if visual_intent:
+            card_start_time, smart_card_dur = SmartMediaCurator.calculate_smart_timing(
+                visual_intent, sentence_boundaries, duration
+            )
+
         if scene.card:
             card_img_path = scene_dir / f"card_{scene.scene_id}.png"
             c_badge = str(scene.card.get("badge") if isinstance(scene.card, dict) else getattr(scene.card, "badge", "") or "").upper()
@@ -496,7 +612,7 @@ class SceneEngine:
             c_sub = str(getattr(scene.card, "subtitle", "") if hasattr(scene.card, "subtitle") else (scene.card.get("subtitle", "") if isinstance(scene.card, dict) else "")).strip()
 
             # Sincronización temporal con la locución si se mencionan palabras clave del titular
-            if sentence_boundaries and c_headline:
+            if sentence_boundaries and c_headline and not smart_card_dur:
                 c_words = [w.lower() for w in re.findall(r'\w+', c_headline) if len(w) > 3]
                 for s_st, _s_en, s_txt in sentence_boundaries:
                     low_txt = s_txt.lower()
@@ -620,7 +736,7 @@ class SceneEngine:
                         safe_log(f"[SceneEngine] 📜 Cita/Evidencia Vox Style generada para escena {scene.scene_id}")
 
                 # 1. Mapa Geopolítico / Satelital Táctico GeoIntel (si aplica específicamente)
-                elif any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN")) or "mapa" in c_headline.lower():
+                elif c_template in ("map", "geointel_map") or any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN", "UBICACION")) or "mapa" in c_headline.lower():
                     map_result = self.web_renderer.render_geointel_map_to_image(
                         location_title=c_headline,
                         country_name=c_stat or "ZONA DE INVESTIGACIÓN",
@@ -1011,8 +1127,8 @@ class SceneEngine:
             c_hl = scene.card.get("headline") if isinstance(scene.card, dict) else getattr(scene.card, "headline", "")
             c_bd = scene.card.get("body") if isinstance(scene.card, dict) else getattr(scene.card, "body", "")
             card_words = len(f"{c_hl or ''} {c_bd or ''}".split())
-            # Tarjeta: acotada estrictamente a MAXIMO 4.0 SEGUNDOS (y sale antes del corte de escena)
-            card_duration = max(2.2, min(4.0, min(max(2.0, duration - 0.8), 0.20 * card_words + 1.8)))
+            # Tarjeta: acotada estrictamente por temporización inteligente (y sale antes del corte de escena)
+            card_duration = max(2.2, min(smart_card_dur or 4.0, min(max(2.0, duration - card_start_time - 0.5), 0.20 * card_words + 1.8)))
         else:
             card_duration = 0.0
         # Duración del texto libre: con serie cinética la ventana cubre el
@@ -1356,6 +1472,25 @@ class SceneEngine:
             filter_parts.append(f"[{cur_v}][chips_animated]overlay=x={chip_x}:y='{chip_y}':enable='between(t,{chip_start_time:.2f},{chip_end:.2f})'[v_chips]")
             cur_v = "v_chips"
 
+        # Overlay de Pastilla de Atribución y Proveniencia Verificada (Source / Transparency Chip)
+        if provenance_chip_path and provenance_chip_path.exists():
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(provenance_chip_path)])
+            prv_idx = num_in
+            num_in += 1
+            prv_start = 0.6
+            prv_dur = 3.6
+            prv_end = min(duration - 0.3, round(prv_start + prv_dur, 2))
+            prv_fo = max(prv_start + 0.3, prv_end - 0.4)
+            prv_x = "(W-w-40)" if not self.is_vertical else "(W-w-24)"
+            prv_y = 40 if not self.is_vertical else 80
+            filter_parts.append(
+                f"[{prv_idx}:v]scale=iw*0.75:ih*0.75,format=rgba,fade=t=in:st={prv_start:.2f}:d=0.25:alpha=1,fade=t=out:st={prv_fo:.2f}:d=0.35:alpha=1[prv_animated]"
+            )
+            filter_parts.append(
+                f"[{cur_v}][prv_animated]overlay=x='{prv_x}':y={prv_y}:enable='between(t,{prv_start:.2f},{prv_end:.2f})'[v_prv]"
+            )
+            cur_v = "v_prv"
+
         # Superposicion de palabras clave / anos flotantes (rotulos de enfasis sin cards)
         if keyword_callout_overlays:
             kw_dur = 2.1
@@ -1414,8 +1549,8 @@ class SceneEngine:
             filter_parts.append(f"[{cur_v}][v_remo]overlay=0:0[v_with_remo]")
             cur_v = "v_with_remo"
 
-        # Subtítulos con libass (Tamaño ergonómico y margen óptimo para no chocar con avatar PIP)
-        if srt_path and srt_path.exists() and self.subs_enabled:
+        # Subtítulos con libass (solo si burn_subtitles está activo; de lo contrario quedan limpios para el editor frontend)
+        if srt_path and srt_path.exists() and getattr(self, "burn_subtitles", False):
             esc_srt = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
             sub_size = 18 if self.is_vertical else 14
             margin_v = 40 if self.is_vertical else 20
@@ -1818,6 +1953,7 @@ class SceneEngine:
             "color_grade": self.color_grade,
             "sub_style": self.sub_style,
             "subs_enabled": self.subs_enabled,
+            "burn_subtitles": getattr(self, "burn_subtitles", False),
             "audio_normalize": self.audio_normalize,
             "bgm_volume": self.bgm_volume,
             "bgm_track": self.bgm_track,
@@ -1851,24 +1987,66 @@ class SceneEngine:
         except Exception:
             return 8.0
 
-    async def _get_scene_visual(self, query: str, scene_dir: Path, is_video_scene: bool = False) -> Optional[Path]:
-        """Obtiene un recurso visual de stock abierto para la escena."""
+    def _get_media_provenance(self, media_path: Optional[Path]) -> Optional[Dict[str, Any]]:
+        """Recupera los metadatos de procedencia, licencia y verificación del archivo multimedia."""
+        if not media_path:
+            return None
+        cand_files = [
+            media_path.with_name(f"{media_path.stem}_provenance.json"),
+            media_path.parent / f"{media_path.stem.split('_')[0]}_provenance.json",
+            self.orchestrator.target_dir / f"{media_path.stem}_provenance.json",
+        ]
+        for cf in cand_files:
+            if cf.exists():
+                try:
+                    return json.loads(cf.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+        return None
+
+    async def _get_scene_visual(
+        self,
+        query: str,
+        scene_dir: Path,
+        is_video_scene: bool = False,
+        intent: Optional[Any] = None,
+    ) -> Optional[Path]:
+        """Obtiene un recurso visual verificado de stock o archivo documental para la escena."""
         try:
             from core.models import BRollCue
+            from core.smart_media_curator import SmartMediaCurator
+
+            search_q = query
+            if intent:
+                search_q = SmartMediaCurator.build_targeted_search_query(intent, query)
+            elif query and len(query.split()) <= 2:
+                search_q = f"{query} documentary evidence 4k"
+
+            cue_id = f"scene_cue_{abs(hash(search_q or query)) % 10000}"
             cue = BRollCue(
-                cue_id=f"scene_cue_{abs(hash(query)) % 10000}",
+                cue_id=cue_id,
                 start_sec=0.0,
                 end_sec=10.0,
                 concept=query or "technology abstract",
-                search_query_en=query or "technology abstract",
+                search_query_en=search_q or query or "technology abstract",
                 reasoning="Escena visual de fondo",
                 asset_type="video" if is_video_scene else "photo",
             )
             res = await self.orchestrator._resolve_single_cue(cue)
             if res.local_file_path and Path(res.local_file_path).exists():
-                return Path(res.local_file_path)
+                p = Path(res.local_file_path)
+                # Copiar sidecar de procedencia al directorio de la escena si existe
+                prov_file = self.orchestrator.target_dir / f"{cue_id}_provenance.json"
+                if prov_file.exists():
+                    dest_prov = scene_dir / f"{p.stem}_provenance.json"
+                    try:
+                        dest_prov.write_text(prov_file.read_text(encoding="utf-8"), encoding="utf-8")
+                    except Exception:
+                        pass
+                return p
         except Exception as exc:
             safe_log(f"[SceneEngine] No se pudo descargar visual para '{query}': {exc}")
+        return None
     def _render_chips_overlay(self, chips: List[str], out_path: Path) -> Optional[Path]:
         """Renderiza una hilera horizontal de pastillas (chips) con banderas/iconos para referencias dinámicas."""
         if not chips:
