@@ -118,6 +118,7 @@ class DirectorBroadcastPlan:
                     case_frame=s.get("case_frame") if isinstance(s.get("case_frame"), int) else None,
                 )
             )
+        scenes = _deduplicate_cards_in_scenes(scenes)
         return cls(
             title=data.get("title", ""),
             topic=data.get("topic", ""),
@@ -126,6 +127,38 @@ class DirectorBroadcastPlan:
             chat_comments=data.get("chat_comments", []),
             total_est_duration=float(data.get("total_est_duration", 0.0)),
         )
+
+
+def _deduplicate_cards_in_scenes(scenes: List[DirectorScene]) -> List[DirectorScene]:
+    """Elimina tarjetas duplicadas o redundantes entre escenas,
+
+    convirtiéndolas en chips discretos para evitar saturación visual y repeticiones.
+    """
+    last_sig = None
+    seen_sigs = set()
+    for s in scenes:
+        if s.card:
+            hl = (getattr(s.card, "headline", "") or "").strip().lower()
+            st = (getattr(s.card, "stat", "") or "").strip().lower()
+            if not hl:
+                s.card = None
+                continue
+            sig = f"{hl}|{st}"
+            if sig == last_sig or sig in seen_sigs:
+                safe_log(
+                    f"[AIDirector] 🛡️ Tarjeta duplicada detectada en escena {s.scene_id} "
+                    f"('{s.card.headline}'). Convertida a chip periférico para evitar saturación."
+                )
+                if s.card.stat and s.card.stat not in s.chips:
+                    badge_lbl = getattr(s.card, "badge", "DATO") or "DATO"
+                    s.chips.append(f"{badge_lbl}: {s.card.stat}")
+                s.card = None
+            else:
+                last_sig = sig
+                seen_sigs.add(sig)
+        else:
+            last_sig = None
+    return scenes
 
 
 def _clean_beats(raw: Any) -> List[Dict[str, Any]]:
@@ -586,16 +619,16 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
             raw_scenes = data.get("scenes", [])
             for idx, s in enumerate(raw_scenes):
                 c_data = s.get("card")
-                card_obj = (
-                    SceneCard(
-                        headline=c_data.get("headline", "Dato Oficial"),
-                        body=c_data.get("body", "Información técnica verificada."),
-                        badge=c_data.get("badge", "DATO CLAVE"),
-                        stat=c_data.get("stat", ""),
-                    )
-                    if c_data
-                    else None
-                )
+                card_obj = None
+                if c_data and isinstance(c_data, dict):
+                    valid_card_keys = {k: v for k, v in c_data.items() if k in SceneCard.__dataclass_fields__}
+                    valid_card_keys.setdefault("headline", "Dato Oficial")
+                    valid_card_keys.setdefault("body", "Información técnica verificada.")
+                    valid_card_keys.setdefault("badge", "DATO CLAVE")
+                    valid_card_keys.setdefault("stat", "")
+                    card_obj = SceneCard(**valid_card_keys)
+                elif isinstance(c_data, SceneCard):
+                    card_obj = c_data
                 raw_speech = s.get("speech", "").strip()
                 from utils.speech_normalizer import normalize_speech_for_tts
                 polished_speech = normalize_speech_for_tts(raw_speech)
@@ -629,6 +662,8 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
 
             if not scenes:
                 raise ValueError("El director no devolvió escenas.")
+
+            scenes = _deduplicate_cards_in_scenes(scenes)
 
             return DirectorBroadcastPlan(
                 title=data.get("title", f"Transmisión KAI: {topic}"),

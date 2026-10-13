@@ -1794,168 +1794,14 @@ class WebCardRenderer:
         badge: str = "COMPARATIVA DIRECTA",
     ) -> str:
         """Diseño comparativa doble 100% unificado al nuevo estándar Matte Dark + Ámbar Glow."""
-        l_n = left_name.replace("<", "&lt;").replace(">", "&gt;")
-        l_s = left_stat.replace("<", "&lt;").replace(">", "&gt;")
-        r_n = right_name.replace("<", "&lt;").replace(">", "&gt;")
-        r_s = right_stat.replace("<", "&lt;").replace(">", "&gt;")
-        l_sb = left_sub.replace("<", "&lt;").replace(">", "&gt;")
-        r_sb = right_sub.replace("<", "&lt;").replace(">", "&gt;")
-        b_c = badge.replace("<", "&lt;").replace(">", "&gt;")
-
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-{HTML_FONTS}
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-  }}
-  .card-container {{
-    width: 660px;
-    min-height: 205px;
-    background: linear-gradient(145deg, #101217 0%, #0a0b0e 100%);
-    border: 1px solid rgba(255, 140, 40, 0.26);
-    box-shadow: 0 24px 56px rgba(0, 0, 0, 0.90),
-                0 0 32px rgba(255, 120, 20, 0.08),
-                inset 0 1px 0 rgba(255, 255, 255, 0.12),
-                inset 0 0 20px rgba(255, 120, 20, 0.03);
-    border-radius: 24px;
-    padding: 24px 28px;
-    position: relative;
-    overflow: hidden;
-    color: #ffffff;
-  }}
-  .card-top-pip {{
-    position: absolute;
-    top: -4px;
-    left: 20%;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #ff7a18;
-    box-shadow: 0 0 10px #ff7a18, 0 0 4px #ffb060;
-    z-index: 10;
-  }}
-  .card-top-glow {{
-    position: absolute;
-    top: -1px;
-    left: calc(20% - 66px);
-    width: 140px;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(255, 140, 40, 0.65), #ff7a18, rgba(255, 140, 40, 0.65), transparent);
-    pointer-events: none;
-    z-index: 9;
-  }}
-  .card-tag {{
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.13em;
-    color: #ff8a34;
-    text-transform: uppercase;
-    margin-bottom: 12px;
-  }}
-  .card-tag-dot {{
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #ff8a34;
-    box-shadow: 0 0 8px #ff7a18;
-  }}
-  .vs-columns {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }}
-  .col-side {{
-    flex: 1;
-    text-align: center;
-  }}
-  .col-name {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 17px;
-    font-weight: 800;
-    color: #ffffff;
-    margin-bottom: 6px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }}
-  .col-stat {{
-    font-family: 'Outfit', sans-serif;
-    font-size: 42px;
-    font-weight: 900;
-    line-height: 1;
-    color: #ff9436;
-    text-shadow: 0 2px 14px rgba(255, 148, 54, 0.35);
-    margin-bottom: 6px;
-  }}
-  .col-sub {{
-    font-size: 12px;
-    color: #94a3b8;
-    line-height: 1.35;
-  }}
-  .vs-divider {{
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 0 10px;
-  }}
-  .divider-line {{
-    width: 1px;
-    height: 28px;
-    background: rgba(255, 140, 40, 0.25);
-  }}
-  .vs-pill {{
-    background: rgba(255, 140, 40, 0.14);
-    border: 1px solid rgba(255, 140, 40, 0.35);
-    color: #ff9436;
-    font-family: 'Outfit', sans-serif;
-    font-weight: 900;
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    box-shadow: 0 0 14px rgba(255, 140, 40, 0.25);
-    letter-spacing: 1.5px;
-  }}
-</style>
-</head>
-<body>
-  <div class="card-container">
-    <div class="card-top-pip"></div>
-    <div class="card-top-glow"></div>
-    <div class="card-tag"><span class="card-tag-dot"></span> {b_c}</div>
-    <div class="vs-columns">
-      <div class="col-side">
-        <div class="col-name">{l_n}</div>
-        <div class="col-stat">{l_s}</div>
-        <div class="col-sub">{l_sb}</div>
-      </div>
-      <div class="vs-divider">
-        <div class="divider-line"></div>
-        <div class="vs-pill">VS</div>
-        <div class="divider-line"></div>
-      </div>
-      <div class="col-side">
-        <div class="col-name">{r_n}</div>
-        <div class="col-stat">{r_s}</div>
-        <div class="col-sub">{r_sb}</div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>"""
+        from core.visual_templates import VisualTemplatesLibrary
+        return VisualTemplatesLibrary(browser_bin=self.browser_bin).build_versus_split_html(
+            side_a=left_name,
+            side_b=right_name,
+            stat_a=left_stat,
+            stat_b=right_stat,
+            tag=badge,
+        )
 
     def render_split_versus_to_image(
         self,
@@ -1968,36 +1814,19 @@ class WebCardRenderer:
         right_sub: str = "",
         badge: str = "COMPARATIVA DIRECTA",
     ) -> Path:
-        """Renderiza la tarjeta split versus en alta definición con el nuevo estándar."""
-        out_png = Path(out_png)
-        out_png.parent.mkdir(parents=True, exist_ok=True)
-        html_file = out_png.with_suffix(".html")
-        html_content = self.generate_split_versus_html(
-            left_name=left_name,
-            left_stat=left_stat,
-            right_name=right_name,
-            right_stat=right_stat,
-            left_sub=left_sub,
-            right_sub=right_sub,
-            badge=badge,
+        """Renderiza la tarjeta split versus delegando a VisualTemplatesLibrary."""
+        res = self.render_visual_template(
+            template_name="versus_split",
+            out_png=out_png,
+            params={
+                "side_a": left_name,
+                "side_b": right_name,
+                "stat_a": left_stat,
+                "stat_b": right_stat,
+                "tag": badge,
+            },
         )
-        html_file.write_text(html_content, encoding="utf-8")
-        file_uri = html_file.resolve().as_uri()
-
-        args = [
-            self.browser_bin,
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--hide-scrollbars",
-            "--default-background-color=00000000",
-            f"--screenshot={out_png.resolve()}",
-            "--window-size=1200,600",
-            file_uri,
-        ]
-        subprocess.run(args, capture_output=True, check=True, timeout=15)
-        self._crop_transparent(out_png)
-        return out_png
+        return res or out_png
 
     def generate_chapter_tracker_html(
         self,
@@ -2669,66 +2498,13 @@ class WebCardRenderer:
         icon: str = "✓",
         tilt_deg: float = -3.5,
     ) -> str:
-        """
-        Genera el HTML del distintivo viral inclinado (Estilo Reels/TikTok: '✓ ganó Opus').
-        Píldora con borde blanco premium, fondo traslúcido frosted glass y tipografía serif elegante.
-        """
-        clean_headline = (headline or "Verificado").strip()
-        clean_icon = (icon or "✓").strip()
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-{HTML_FONTS}
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    overflow: hidden;
-  }}
-  .badge-stamp {{
-    display: inline-flex;
-    align-items: center;
-    gap: 18px;
-    padding: 18px 46px;
-    border: 3.5px solid rgba(255, 255, 255, 0.95);
-    border-radius: 22px;
-    background: rgba(20, 20, 28, 0.40);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.40);
-    transform: rotate({tilt_deg:.1f}deg);
-    color: #ffffff;
-    font-family: 'Playfair Display', Georgia, serif;
-    font-size: 56px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-    text-shadow: 0 3px 12px rgba(0, 0, 0, 0.6);
-    white-space: nowrap;
-  }}
-  .badge-icon {{
-    font-size: 48px;
-    font-weight: 900;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: #ffffff;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-  }}
-</style>
-</head>
-<body>
-  <div class="badge-stamp">
-    <span class="badge-icon">{clean_icon}</span>
-    <span>{clean_headline}</span>
-  </div>
-</body>
-</html>"""
+        """Genera el HTML del distintivo viral inclinado delegando en VisualTemplatesLibrary."""
+        from core.visual_templates import VisualTemplatesLibrary
+        return VisualTemplatesLibrary(browser_bin=self.browser_bin).build_verdict_badge_html(
+            headline=headline,
+            icon=icon,
+            tilt_deg=tilt_deg,
+        )
 
     def render_viral_verdict_badge_to_image(
         self,
@@ -2737,34 +2513,12 @@ class WebCardRenderer:
         icon: str = "✓",
         tilt_deg: float = -3.5,
     ) -> Optional[Path]:
-        """Renderiza a PNG transparente el distintivo viral inclinado '✓ ganó Opus'."""
-        try:
-            out_png = Path(out_png)
-            out_png.parent.mkdir(parents=True, exist_ok=True)
-            html_content = self.generate_viral_verdict_badge_html(headline=headline, icon=icon, tilt_deg=tilt_deg)
-            html_file = out_png.with_suffix(".html")
-            html_file.write_text(html_content, encoding="utf-8")
-            file_uri = html_file.resolve().as_uri()
-
-            args = [
-                self.browser_bin,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                "--default-background-color=00000000",
-                f"--screenshot={out_png.resolve()}",
-                "--window-size=1080,1920",
-                file_uri,
-            ]
-            subprocess.run(args, capture_output=True, check=True, timeout=15)
-            self._crop_transparent(out_png)
-            if out_png.exists() and out_png.stat().st_size > 500:
-                return out_png
-        except Exception as exc:
-            import logging
-            logging.getLogger("aethercut.web_renderer").warning(f"Error renderizando verdict badge: {exc}")
-        return None
+        """Renderiza a PNG transparente el distintivo viral inclinado delegando en VisualTemplatesLibrary."""
+        return self.render_visual_template(
+            template_name="verdict_badge",
+            out_png=out_png,
+            params={"headline": headline, "icon": icon, "tilt_deg": tilt_deg},
+        )
 
     def generate_tech_header_card_html(
         self,
@@ -2773,110 +2527,13 @@ class WebCardRenderer:
         author: str = "",
         repo_or_tag: str = "",
     ) -> str:
-        """
-        Genera el HTML de la tarjeta técnica flotante superior (Estilo: 'find-skills por Vercel · vercel-labs/skills').
-        Fondo oscuro #0d1117 con micro-matriz de puntos, tipografía mono de alta jerarquía y jerarquía limpia.
-        """
-        clean_title = (title or "tech-spec").strip()
-        
-        # Parsear si author y repo vienen combinados en subtitle (ej: "por Vercel · vercel-labs/skills")
-        clean_sub = subtitle.strip()
-        if not author and not repo_or_tag and "·" in clean_sub:
-            parts = [p.strip() for p in clean_sub.split("·", 1)]
-            author_part = parts[0]
-            repo_part = parts[1]
-            if author_part.lower().startswith("por "):
-                author = author_part[4:].strip()
-            else:
-                author = author_part
-            repo_or_tag = repo_part
-        elif not author and clean_sub:
-            author = clean_sub
-
-        meta_parts = []
-        if author:
-            meta_parts.append(f'<span>por <span class="tech-meta-author">{author}</span></span>')
-        if repo_or_tag:
-            if meta_parts:
-                meta_parts.append('<span class="tech-meta-sep">·</span>')
-            meta_parts.append(f'<span class="tech-meta-repo">{repo_or_tag}</span>')
-        meta_html = "".join(meta_parts) if meta_parts else f'<span>{clean_sub or "open-source"}</span>'
-
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-{HTML_FONTS}
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    overflow: hidden;
-  }}
-  .tech-card {{
-    position: relative;
-    width: 680px;
-    padding: 34px 40px;
-    border-radius: 20px;
-    background: #0d1117;
-    background-image: radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px);
-    background-size: 16px 16px;
-    border: 1.5px solid rgba(255, 255, 255, 0.14);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    gap: 10px;
-  }}
-  .tech-title {{
-    font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
-    font-size: 52px;
-    font-weight: 800;
-    color: #ffffff;
-    letter-spacing: -1.5px;
-    line-height: 1.1;
-    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-    word-break: break-word;
-  }}
-  .tech-meta {{
-    font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
-    font-size: 20px;
-    font-weight: 500;
-    color: #8b949e;
-    letter-spacing: -0.2px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }}
-  .tech-meta-author {{
-    color: #c9d1d9;
-    font-weight: 600;
-  }}
-  .tech-meta-sep {{
-    color: #484f58;
-  }}
-  .tech-meta-repo {{
-    color: #8b949e;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 18px;
-  }}
-</style>
-</head>
-<body>
-  <div class="tech-card">
-    <div class="tech-title">{clean_title}</div>
-    <div class="tech-meta">
-      {meta_html}
-    </div>
-  </div>
-</body>
-</html>"""
+        """Genera el HTML de la tarjeta técnica superior delegando en VisualTemplatesLibrary."""
+        from core.visual_templates import VisualTemplatesLibrary
+        sub = subtitle or (f"por {author} · {repo_or_tag}" if (author or repo_or_tag) else "")
+        return VisualTemplatesLibrary(browser_bin=self.browser_bin).build_tech_header_card_html(
+            title=title,
+            subtitle=sub,
+        )
 
     def render_tech_header_card_to_image(
         self,
@@ -2886,39 +2543,13 @@ class WebCardRenderer:
         author: str = "",
         repo_or_tag: str = "",
     ) -> Optional[Path]:
-        """Renderiza a PNG transparente la tarjeta técnica flotante superior 'find-skills'."""
-        try:
-            out_png = Path(out_png)
-            out_png.parent.mkdir(parents=True, exist_ok=True)
-            html_content = self.generate_tech_header_card_html(
-                title=title,
-                subtitle=subtitle,
-                author=author,
-                repo_or_tag=repo_or_tag,
-            )
-            html_file = out_png.with_suffix(".html")
-            html_file.write_text(html_content, encoding="utf-8")
-            file_uri = html_file.resolve().as_uri()
-
-            args = [
-                self.browser_bin,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                "--default-background-color=00000000",
-                f"--screenshot={out_png.resolve()}",
-                "--window-size=1080,1920",
-                file_uri,
-            ]
-            subprocess.run(args, capture_output=True, check=True, timeout=15)
-            self._crop_transparent(out_png)
-            if out_png.exists() and out_png.stat().st_size > 500:
-                return out_png
-        except Exception as exc:
-            import logging
-            logging.getLogger("aethercut.web_renderer").warning(f"Error renderizando tech header card: {exc}")
-        return None
+        """Renderiza a PNG transparente la tarjeta técnica flotante superior delegando en VisualTemplatesLibrary."""
+        sub = subtitle or (f"por {author} · {repo_or_tag}" if (author or repo_or_tag) else "")
+        return self.render_visual_template(
+            template_name="tech_card",
+            out_png=out_png,
+            params={"title": title, "subtitle": sub},
+        )
 
     def render_visual_template(
         self,

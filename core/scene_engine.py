@@ -768,7 +768,10 @@ class SceneEngine:
         free_title_blur_bg = False
         kinetic_word_paths = []
         free_data = getattr(scene, "free_title", None)
-        if not free_data and not card_img_path:
+        # Exclusión mutua Fase 2: si la escena ya cuenta con tarjeta renderizada, suprimir free_title
+        if card_img_path and card_img_path.exists():
+            free_data = None
+        elif not free_data and not card_img_path:
             name_low = scene.name.lower()
             m_top = re.search(r"(?:puesto|número|numero|top|#|factor|punto|clave)\s*(\d+)", name_low)
             if m_top:
@@ -897,7 +900,12 @@ class SceneEngine:
 
         # Remotion AI: Generación en marcha de componente React animado personalizado
         ai_remotion_mov: Optional[Path] = None
-        if getattr(self, "ai_remotion", None) and duration >= 3.0:
+        has_primary_foreground = bool(
+            (card_img_path and card_img_path.exists())
+            or (free_title_img_path and free_title_img_path.exists())
+            or (kinetic_word_paths and len(kinetic_word_paths) > 0)
+        )
+        if getattr(self, "ai_remotion", None) and duration >= 3.0 and not has_primary_foreground:
             try:
                 ai_remotion_mov = await self.ai_remotion.render_ai_overlay(
                     scene_name=scene.name,
@@ -909,6 +917,8 @@ class SceneEngine:
                 )
             except Exception as _re_err:
                 safe_log(f"[SceneEngine] Remotion AI overlay omitido: {_re_err}")
+        elif has_primary_foreground:
+            safe_log(f"[SceneEngine] 🛡️ Remotion AI omitido en escena {scene.scene_id} por exclusión mutua (tarjeta/título activo).")
 
         srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
 
@@ -1338,7 +1348,7 @@ class SceneEngine:
             filter_parts.append(f"[{cur_v}][chips_animated]overlay=x={chip_x}:y='{chip_y}':enable='between(t,{chip_start_time:.2f},{chip_end:.2f})'[v_chips]")
             cur_v = "v_chips"
 
-                # Superposicion de palabras clave / anos flotantes (rotulos de enfasis sin cards)
+        # Superposicion de palabras clave / anos flotantes (rotulos de enfasis sin cards)
         if keyword_callout_overlays:
             kw_dur = 2.1
             for k_i, k_data in enumerate(keyword_callout_overlays):
@@ -1347,15 +1357,27 @@ class SceneEngine:
                 # Determinar momento idoneo evitando colision con card o free_title
                 ideal_t = max(0.8, min(duration - kw_dur - 0.4, k_frac * duration))
                 if card_img_path and card_img_path.exists() and card_duration > 0:
-                    c_exit = 0.5 + card_duration
-                    if duration >= c_exit + kw_dur + 0.6:
-                        ideal_t = max(c_exit + 0.6, ideal_t)
+                    c_start = card_start_time
+                    c_exit = card_start_time + card_duration
+                    # Si cabe antes de la tarjeta con margen suficiente
+                    if c_start >= kw_dur + 0.8 and (ideal_t + kw_dur + 0.3) <= c_start:
+                        kw_start = ideal_t
+                    # O si cabe después de que finalice la tarjeta
+                    elif duration >= c_exit + kw_dur + 0.5:
+                        kw_start = max(c_exit + 0.5, ideal_t)
+                    else:
+                        safe_log(f"[SceneEngine] 🛡️ Keyword callout '{k_data.get('text')}' omitido en escena {scene.scene_id} por colisión con tarjeta [{c_start:.1f}s-{c_exit:.1f}s].")
+                        continue
                 elif free_title_img_path and free_title_img_path.exists() and free_title_dur > 0:
                     f_exit = 0.4 + free_title_dur
                     if duration >= f_exit + kw_dur + 0.6:
-                        ideal_t = max(f_exit + 0.6, ideal_t)
+                        kw_start = max(f_exit + 0.6, ideal_t)
+                    else:
+                        safe_log(f"[SceneEngine] 🛡️ Keyword callout '{k_data.get('text')}' omitido en escena {scene.scene_id} por colisión con free_title.")
+                        continue
+                else:
+                    kw_start = ideal_t
 
-                kw_start = ideal_t
                 kw_end = min(duration - 0.2, kw_start + kw_dur)
                 if kw_end - kw_start >= 1.2:
                     inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(k_path)])
@@ -1373,7 +1395,8 @@ class SceneEngine:
                     cur_v = f"v_kwo_{k_i}"
 
         # Superposición de Overlay Cinemático Remotion (React + Alpha ProRes)
-        if ai_remotion_mov and ai_remotion_mov.exists():
+        # Exclusión mutua estricta: asegurar que nunca se superponga sobre una tarjeta existente
+        if ai_remotion_mov and ai_remotion_mov.exists() and not (card_img_path and card_img_path.exists()):
             inputs.extend(["-t", dur_str, "-r", "25", "-i", str(ai_remotion_mov)])
             remo_idx = num_in
             num_in += 1
