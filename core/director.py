@@ -79,7 +79,7 @@ class DirectorBroadcastPlan:
     def from_dict(cls, data: Dict[str, Any]) -> "DirectorBroadcastPlan":
         scenes_data = data.get("scenes", [])
         scenes: List[DirectorScene] = []
-        for s in scenes_data:
+        for idx, s in enumerate(scenes_data):
             c = s.get("card")
             card_obj = None
             if c and isinstance(c, dict):
@@ -96,13 +96,24 @@ class DirectorBroadcastPlan:
                     vqs.append(vq)
                 if vq2:
                     vqs.append(vq2)
+
+            sc_type = s.get("type") or ("video_reaction" if idx == 0 else "card_focus")
+            if idx == 0 and sc_type == "avatar_cam":
+                sc_type = "video_reaction"
+
+            sc_cam = s.get("camera")
+            if not sc_cam:
+                sc_cam = "pip_delayed" if idx == 0 else "pip_corner"
+            elif idx == 0 and sc_cam == "hero_center":
+                sc_cam = "pip_delayed"
+
             scenes.append(
                 DirectorScene(
-                    scene_id=s.get("scene_id", 1),
-                    name=s.get("name", "Escena"),
-                    type=s.get("type", "avatar_cam"),
+                    scene_id=s.get("scene_id", idx + 1),
+                    name=s.get("name", f"Escena {idx + 1}"),
+                    type=sc_type,
                     emotion=s.get("emotion", "excited"),
-                    camera=s.get("camera", "pip_corner"),
+                    camera=sc_cam,
                     speech=s.get("speech", ""),
                     visual_query=vq,
                     visual_queries=vqs,
@@ -345,8 +356,23 @@ REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
 - Evita muletillas o saludos vacíos (como "Hola a todos" o "Bienvenidos a mi canal"); entra directo al tema con energía y datos interesantes.
 
 REGLAS DE RETENCIÓN Y VARIEDAD VISUAL (EDICIÓN PROFESIONAL):
-- VARIEDAD DE ESCENA: NUNCA dos escenas consecutivas del mismo "type" (excepto avatar_cam para abrir y cerrar). Alterna card_focus → video_reaction → vector_motion → chat_debate para que el encuadre respire y el ojo no se aburra del mismo formato.
-- PRIMEROS 15 SEGUNDOS DENSOS: el mayor abandono del espectador ocurre aquí. La escena 1 debe entregar el gancho + el dato más impactante del tema, sin contexto previo ni preámbulos.
+- APERTURA DE ALTO IMPACTO (Escena 1 - REGLA OBLIGATORIA):
+  * El video NUNCA debe comenzar mostrando al avatar hablando directamente a cámara en plano central (hero_center). Esto ralentiza el inicio y reduce drásticamente la retención.
+  * La Escena 1 DEBE comenzar mostrando INFORMACIÓN VISUAL RELEVANTE mientras la narración empieza desde el primer momento:
+    - Un fragmento relevante de video documental de archivo ('visual_query' específica y potente en inglés).
+    - Una frase impactante o pregunta visual con animación tipográfica ('free_title').
+    - Palabras clave sincronizadas con la voz o una cifra sorprendente representada visualmente ('card').
+    - O una secuencia rápida de imágenes relacionadas ('visual_beats').
+  * El avatar NO debe ocupar automáticamente el centro de la pantalla ni ser el primer elemento mostrado:
+    - Debe comenzar en una posición secundaria de apoyo ('camera': 'pip_corner' o 'pip_delayed' que entra tras los primeros segundos), o intervenir solo con voz en off durante la apertura ('camera': 'voice_over').
+    - NUNCA uses 'camera': 'hero_center' en la Escena 1.
+  * 'type' de la Escena 1: 'video_reaction', 'breaking_news', 'card_focus' o 'broll_focus'. NUNCA 'avatar_cam' estático de estudio.
+- VARIEDAD DE ESCENA Y ROL DEL AVATAR:
+  * NUNCA dos escenas consecutivas del mismo "type". Alterna card_focus → video_reaction → vector_motion → chat_debate.
+  * El avatar actúa como presentador o narrador visual de apoyo: convive con el contenido en recuadro PIP en esquina ('pip_corner') o split screen, con buen encuadre y sin tapar gráficos ni datos.
+  * En escenas puramente explicativas (gráficos, mapas, comparativas, citas documentales), el avatar debe reducir su presencia o intervenir en voz en off ('voice_over' / 'pip_corner').
+  * Solo en la escena final de despedida o cierre puede usar 'hero_center' si el guion lo requiere expresamente.
+- PRIMEROS 15 SEGUNDOS DENSOS: el mayor abandono del espectador ocurre aquí. La escena 1 debe entregar el gancho visual + el dato más impactante del tema, sin contexto previo ni preámbulos.
 - BEAT DE RE-ENGANCHE al 60-70% del guion: en esa zona incluye OBLIGATORIAMENTE una escena que reformule la tensión con una pregunta directa al espectador, un dato que invierta lo dicho, o un anticipo del desenlace ("y aquí es donde todo cambia...").
 - RITMO DE ORACIONES VARIADO: alterna frases cortas contundentes (6-9 palabras) con frases de desarrollo (14-18 palabras). La variación de cadencia retiene más que el vocabulario.
 - CARDS CONCISAS: el "body" de cada card se sostiene en pantalla solo lo que toma leerlo (~un tercio de segundo por palabra). Máximo 130 caracteres: si no cabe el dato esencial en esa cifra, simplifica el texto en vez de alargarlo.
@@ -633,13 +659,28 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
                 from utils.speech_normalizer import normalize_speech_for_tts
                 polished_speech = normalize_speech_for_tts(raw_speech)
 
+                sc_type = s.get("type") or ("video_reaction" if idx == 0 else "card_focus")
+                if idx == 0 and sc_type == "avatar_cam":
+                    sc_type = "video_reaction"
+
+                sc_cam = s.get("camera")
+                if not sc_cam:
+                    if idx == 0:
+                        sc_cam = "pip_delayed"
+                    elif idx == len(raw_scenes) - 1 and sc_type == "avatar_cam":
+                        sc_cam = "hero_center"
+                    else:
+                        sc_cam = "pip_corner"
+                elif idx == 0 and sc_cam == "hero_center":
+                    sc_cam = "pip_delayed"
+
                 scenes.append(
                     DirectorScene(
                         scene_id=idx + 1,
                         name=s.get("name", f"Escena {idx + 1}"),
-                        type=s.get("type", "avatar_cam"),
+                        type=sc_type,
                         emotion=s.get("emotion", "excited"),
-                        camera=s.get("camera", "hero_center" if idx in (0, len(raw_scenes) - 1) else "pip_corner"),
+                        camera=sc_cam,
                         speech=polished_speech or raw_speech,
                         visual_query=s.get("visual_query", topic),
                         visual_queries=[q for q in [s.get("visual_query"), s.get("visual_query2")] if q],

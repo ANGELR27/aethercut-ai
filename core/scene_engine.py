@@ -284,9 +284,11 @@ class SceneEngine:
 
         # 2. Descargar o seleccionar B-Roll temático para la escena
         broll_img = None
-        if scene.type == "avatar_cam" or scene.camera == "hero_center":
-            # Para planos de estudio donde el streamer habla de frente (intro, conclusiones y directos),
-            # usar el cuarto/setup de estudio del streamer con desenfoque de profundidad realista
+        is_opening_scene = (int(getattr(scene, "scene_id", 1)) == 1)
+
+        # Solo usar el estudio streamer si explícitamente se pide avatar_cam en escenas intermedias y NO hay visual_query
+        # En la apertura (escena 1), SIEMPRE se busca material visual/documental relevante del tema
+        if (scene.type == "avatar_cam" or scene.camera == "hero_center") and not is_opening_scene and not scene.visual_query:
             studio_blur_path = Path("assets/streamer_studio_blur_9_16.jpg" if self.is_vertical else "assets/streamer_studio_blur_16_9.jpg")
             if studio_blur_path.exists():
                 broll_img = studio_blur_path
@@ -317,7 +319,8 @@ class SceneEngine:
 
         if not broll_img or not broll_img.exists():
             # Priorizar video en movimiento para todas las escenas con B-Roll, reacción, noticias o contexto
-            is_video_reaction = (scene.type != "avatar_cam") or ("video" in (scene.visual_query or "").lower())
+            # En la apertura (escena 1), SIEMPRE es video documental de alto impacto
+            is_video_reaction = is_opening_scene or (scene.type != "avatar_cam") or ("video" in (scene.visual_query or "").lower())
             broll_img = await self._get_scene_visual(scene.visual_query, scene_dir, is_video_scene=is_video_reaction)
 
         # Garantizar que NUNCA quede un fondo negro vacío: si la descarga no encontró imagen externa,
@@ -1051,49 +1054,54 @@ class SceneEngine:
             av_idx = num_in
             num_in += 1
 
-            # REGLA DE RETENCIÓN DE AUDIENCIA:
-            # El avatar al frente en plano central ('hero_center' o 'avatar_cam') solo debe permanecer
-            # los primeros 3.0 a 3.8 segundos para soltar la frase de gancho (Hook). Luego pasa fluidamente a PIP
-            # en la esquina para que el contenido visual (video, broll, gráficos) sea el protagonista y la gente no se aburra.
-            if scene.camera == "hero_center" or scene.type == "avatar_cam":
-                hook_dur = min(3.8, max(2.5, duration * 0.28)) if duration > 5.0 else duration
-                if duration > 5.0:
-                    # Fase 1 (0 a hook_dur): Primer plano frontal del avatar diciendo el gancho
-                    # Fase 2 (hook_dur al final): Transición inmediata a recuadro PIP en esquina
-                    av_w_hero = int(self.W * (0.52 if not self.is_vertical else 0.68))
-                    av_x_hero = int((self.W - av_w_hero) / 2)
-                    av_y_hero = int(self.H - av_w_hero + 30)
+            # REGLA AUDIOVISUAL (FASES 4 Y 5): ROL DEL AVATAR Y APERTURA DINÁMICA
+            # El avatar actúa como presentador/narrador visual secundario.
+            # En la apertura (escena 1), el video comienza mostrando INFORMACIÓN VISUAL RELEVANTE desde t=0.
+            # El avatar NUNCA monopoliza el centro de la pantalla al inicio; entra suave en PIP a los ~2.2s
+            # o se mantiene en esquina PIP para no tapar el gancho documental ni la tipografía cinética.
+            is_opening = (int(getattr(scene, "scene_id", 1)) == 1)
+            cam = str(getattr(scene, "camera", "pip_corner") or "pip_corner").lower().strip()
+            sc_type = str(getattr(scene, "type", "video_reaction") or "video_reaction").lower().strip()
 
-                    av_w_pip = int(self.W * (0.26 if not self.is_vertical else 0.40))
-                    av_x_pip = int(self.W - av_w_pip - (45 if not self.is_vertical else 30))
-                    av_y_pip = int(self.H - av_w_pip - (45 if not self.is_vertical else 110))
+            av_w_pip = int(self.W * (0.24 if not self.is_vertical else 0.36))
+            av_x_pip = int(self.W - av_w_pip - (40 if not self.is_vertical else 26))
+            av_y_pip = int(self.H - av_w_pip - (40 if not self.is_vertical else 96))
 
-                    filter_parts.append(
-                        f"[{av_idx}:v]split=2[av_h_raw][av_p_raw];"
-                        f"[av_h_raw]scale={av_w_hero}:{av_w_hero},format=rgba[av_h];"
-                        f"[{cur_v}][av_h]overlay={av_x_hero}:{av_y_hero}:enable='between(t,0,{hook_dur:.2f})'[v_mid];"
-                        f"[av_p_raw]scale={av_w_pip}:{av_w_pip},format=rgba[av_p];"
-                        f"[v_mid][av_p]overlay={av_x_pip}:{av_y_pip}:enable='gte(t,{hook_dur:.2f})':eof_action=pass[v_av]"
-                    )
-                else:
-                    # Si la escena dura menos de 5s, avatar protagonista centrado
-                    av_w = int(self.W * (0.55 if not self.is_vertical else 0.70))
-                    av_x = int((self.W - av_w) / 2)
-                    av_y = int(self.H - av_w + 30)
-                    filter_parts.append(
-                        f"[{av_idx}:v]scale={av_w}:{av_w},format=rgba[avatar];"
-                        f"[{cur_v}][avatar]overlay={av_x}:{av_y}:eof_action=pass[v_av]"
-                    )
-            else:
-                # Avatar directamente en recuadro PIP en la esquina inferior derecha
-                av_w = int(self.W * (0.26 if not self.is_vertical else 0.40))
-                av_x = int(self.W - av_w - (45 if not self.is_vertical else 30))
-                av_y = int(self.H - av_w - (45 if not self.is_vertical else 110))
+            if cam in ("voice_over", "none", "hidden") or sc_type == "voice_over":
+                # Escena puramente visual o voz en off: el avatar no se superpone
+                safe_log(f"[SceneEngine] 🎙️ Escena {scene.scene_id}: Modo voz en off, pantalla completa para contenido visual.")
+
+            elif is_opening or cam == "pip_delayed":
+                # APERTURA DINÁMICA: Los primeros 2.0s a 2.5s están dedicados 100% al impacto visual
+                # (video documental de fondo, kinetic typography o tarjeta). El avatar entra suavemente
+                # en recuadro PIP en la esquina inferior derecha para apoyar la narración.
+                delay_t = min(2.5, max(1.8, round(duration * 0.22, 2))) if duration >= 5.0 else 1.2
                 filter_parts.append(
-                    f"[{av_idx}:v]scale={av_w}:{av_w},format=rgba[avatar];"
-                    f"[{cur_v}][avatar]overlay={av_x}:{av_y}:eof_action=pass[v_av]"
+                    f"[{av_idx}:v]scale={av_w_pip}:{av_w_pip},format=rgba,"
+                    f"fade=t=in:st={delay_t:.2f}:d=0.35:alpha=1[av_pip_delayed];"
+                    f"[{cur_v}][av_pip_delayed]overlay={av_x_pip}:{av_y_pip}:enable='gte(t,{delay_t:.2f})':eof_action=pass[v_av]"
                 )
-            cur_v = "v_av"
+                cur_v = "v_av"
+                safe_log(f"[SceneEngine] 🎬 Apertura dinámica activa en escena {scene.scene_id}: Avatar entra en PIP a los {delay_t:.1f}s.")
+
+            elif cam == "hero_center" and not is_opening and not (card_img_path and card_img_path.exists()):
+                # Solo permitido en escenas intermedias/finales sin tarjeta que bloquee el centro
+                av_w_hero = int(self.W * (0.50 if not self.is_vertical else 0.65))
+                av_x_hero = int((self.W - av_w_hero) / 2)
+                av_y_hero = int(self.H - av_w_hero + 30)
+                filter_parts.append(
+                    f"[{av_idx}:v]scale={av_w_hero}:{av_w_hero},format=rgba[avatar];"
+                    f"[{cur_v}][avatar]overlay={av_x_hero}:{av_y_hero}:eof_action=pass[v_av]"
+                )
+                cur_v = "v_av"
+
+            else:
+                # Comportamiento estándar ergonómico: Presentador en recuadro PIP en la esquina inferior derecha
+                filter_parts.append(
+                    f"[{av_idx}:v]scale={av_w_pip}:{av_w_pip},format=rgba[avatar];"
+                    f"[{cur_v}][avatar]overlay={av_x_pip}:{av_y_pip}:eof_action=pass[v_av]"
+                )
+                cur_v = "v_av"
 
         # Overlay adicional según tipo de escena: Texto Libre Cinemático o Tarjeta Bento
         if kinetic_word_paths:
