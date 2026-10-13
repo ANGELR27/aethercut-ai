@@ -184,6 +184,8 @@ class OpenStockAssetProvider(AssetProvider):
         print(f"[OpenStockProvider] Buscando fotografía real enciclopédica para '{query}'...")
         client = WikiMediaClient()
         res = await client.search(query, langs=["es", "en"])
+        if not res or not res.image_url:
+            res = await client.search_commons(query)
         if res and res.image_url:
             out_path = target_dir / f"{cue.cue_id}_wiki.jpg"
             if await client.download_image(res.image_url, out_path):
@@ -288,7 +290,7 @@ class WebPhotoAssetProvider(AssetProvider):
 class YouTubeReactionAssetProvider(AssetProvider):
     """
     Proveedor autónomo de video-clips reales de YouTube y redes sociales para B-Rolls dinámicos y video-reacciones.
-    Utiliza búsqueda integrada de YouTube y yt-dlp con Node.js para descargar un fragmento corto (12s) en HD 720p sin claves de API.
+    Utiliza búsqueda integrada de YouTube y yt-dlp con Node.js para descargar un fragmento corto (14s) en HD 720p sin claves de API.
     """
 
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
@@ -308,17 +310,18 @@ class YouTubeReactionAssetProvider(AssetProvider):
 
             try:
                 # Extraer un fragmento dinámico de 14 segundos variando el inicio para cada escena (evita inicios estáticos)
-                start_slice = 8 + (abs(hash(query)) % 15)
+                start_slice = 6 + (abs(hash(query)) % 14)
                 end_slice = start_slice + 14
                 ydl_opts = {
                     'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]/best',
                     'outtmpl': str(target_path.with_suffix('')) + '.%(ext)s',
                     'download_ranges': yt_dlp.utils.download_range_func(None, [(start_slice, end_slice)]),
                     'force_keyframes_at_cuts': False,
+                    'match_filter': yt_dlp.utils.match_filter_func('!is_live & duration > 8 & duration < 3600'),
                     'quiet': True,
                     'no_warnings': True,
                     'socket_timeout': 18,
-                    'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
+                    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
                     'postprocessor_args': {'ffmpeg': ['-threads', '2']},
                 }
                 # Si el usuario colocó un cookies.txt en storage o base, cargarlo automáticamente
@@ -328,23 +331,25 @@ class YouTubeReactionAssetProvider(AssetProvider):
                         print(f"[YouTubeReactionProvider] 🍪 Usando archivo de cookies: {c_cand.name}", flush=True)
                         break
 
-                # Priorizar material reciente en actualidad
+                # Limpiar query y evitar palabras repetidas redundantes
+                clean_q = " ".join(dict.fromkeys(query.replace("4k", "").replace("1080p", "").replace("video", "").split()))
                 import datetime as _dt
                 cur_yr = _dt.date.today().year
                 has_year = any(str(y) in query for y in range(2000, 2035))
-                search_term = f"{query} {cur_yr} 4k 1080p documentary video" if not has_year else f"{query} 4k 1080p documentary video"
+                search_term = f"{clean_q} {cur_yr} documentary 4k footage" if not has_year else f"{clean_q} documentary 4k footage"
                 search_query = f"ytsearch1:{search_term}"
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     try:
                         ydl.download([search_query])
                     except Exception:
                         try:
-                            # Fallback 1: búsqueda más amplia
-                            ydl.download([f"ytsearch1:{query} 4k 1080p video"])
+                            # Fallback 1: búsqueda directa sobre el query limpio
+                            ydl.download([f"ytsearch1:{clean_q} 4k video"])
                         except Exception:
                             try:
-                                # Fallback 2: búsqueda genérica sin restricciones
-                                ydl.download([f"ytsearch1:{query} video"])
+                                # Fallback 2: descarga desde t=0 si el rango falló
+                                ydl_opts['download_ranges'] = yt_dlp.utils.download_range_func(None, [(0, 14)])
+                                ydl.download([f"ytsearch1:{clean_q}"])
                             except Exception:
                                 pass
 

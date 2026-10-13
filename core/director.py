@@ -471,13 +471,19 @@ RESPONDE EXCLUSIVAMENTE EN FORMATO JSON VÁLIDO:
   "title": "Titular principal de la transmisión",
   "scenes": [
     {{
-      "name": "Gancho Inicial & Enigma",
-      "type": "avatar_cam",
+      "name": "Gancho Inicial & Enigma Visual",
+      "type": "video_reaction",
       "emotion": "excited",
-      "camera": "hero_center",
+      "camera": "pip_delayed",
       "speech": "¿Alguna vez te has preguntado cómo percibe el mundo un animal frente a nosotros? Los números son demoledores, y la evidencia científica más reciente cambia por completo nuestra perspectiva habitual.",
-      "visual_query": "high quality cinematic documentary 4k video",
-      "visual_query2": "nature wildlife cinematic motion footage hd",
+      "visual_query": "animal sensory perception wildlife documentary cinematic 4k footage",
+      "visual_query2": "nature wildlife macro vision footage hd",
+      "free_title": {{
+        "title": "EL ENIGMA SENSORIAL",
+        "tag": "EVIDENCIA CIENTÍFICA",
+        "highlight": "ENIGMA",
+        "blur_bg": true
+      }},
       "sfx": "whoosh",
       "duration_est_sec": {seconds_per_scene}
     }},

@@ -51,13 +51,62 @@ class WikiMediaClient:
     """
 
     API = "https://{lang}.wikipedia.org/w/api.php"
+    COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
     async def search(self, query: str, langs: Optional[List[str]] = None) -> Optional[WikiResult]:
         for lang in (langs or ["es", "en"]):
             result = await self._search_one(query, lang)
             if result:
                 return result
+        # Si no hubo resultado en artículos enciclopédicos, buscar directamente en el archivo multimedia de Commons
+        return await self.search_commons(query)
+
+    async def search_commons(self, query: str) -> Optional[WikiResult]:
+        """Busca directamente en el archivo fotográfico y documental de Wikimedia Commons."""
+        params = {
+            "action": "query",
+            "format": "json",
+            "generator": "search",
+            "gsrsearch": query,
+            "gsrnamespace": "6",
+            "gsrlimit": 5,
+            "prop": "imageinfo",
+            "iiprop": "url|size|mime",
+            "iiurlwidth": 1280,
+        }
+        try:
+            async with _session(HEADERS, 12) as session:
+                async with session.get(self.COMMONS_API, params=params) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json(content_type=None)
+        except Exception as exc:
+            print(f"[WikiMedia] Error buscando en Commons '{query}': {exc}")
+            return None
+
+        pages = (data.get("query") or {}).get("pages") or {}
+        if not pages:
+            return None
+
+        for page in sorted(pages.values(), key=lambda p: p.get("index", 99)):
+            imageinfo = (page.get("imageinfo") or [{}])[0]
+            thumb_url = imageinfo.get("thumburl") or imageinfo.get("url")
+            mime = (imageinfo.get("mime") or "").lower()
+            w = int(imageinfo.get("width") or 0)
+
+            if not thumb_url or "audio" in mime or "ogg" in mime or (w > 0 and w < 400):
+                continue
+
+            title = page.get("title", "").replace("File:", "").replace(".jpg", "").replace(".png", "")
+            return WikiResult(
+                title=title or query,
+                extract="Fotografía documental de archivo de Wikimedia Commons.",
+                image_url=thumb_url,
+                page_url=imageinfo.get("descriptionurl", "https://commons.wikimedia.org"),
+                lang="commons",
+            )
         return None
+
 
     async def _search_one(self, query: str, lang: str) -> Optional[WikiResult]:
         params = {
