@@ -1011,6 +1011,472 @@ class VisualTemplatesLibrary:
 </html>"""
 
     # =========================================================================
+    # 9. PLANTILLA: NEWSPAPER CLIPPING (Recorte de Prensa / Adrià Solà Pastor)
+    # =========================================================================
+    def build_newspaper_clipping_html(
+        self,
+        headline: str,
+        newspaper: str = "FINANCIAL TIMES",
+        date_str: str = "OCTUBRE 2026",
+        highlight_text: str = "",
+        body_lead: str = "",
+        tag: str = "EVIDENCIA EDITORIAL",
+        variant: str = "orange_noir",
+    ) -> str:
+        p = self.get_palette(variant)
+        clean_headline = (headline or "Titular de Investigación").strip()
+        clean_news = (newspaper or "FINANCIAL TIMES").strip().upper()
+        clean_body = (body_lead or "").strip()
+
+        # Resaltado fluorescente auténtico estilo marcador sobre el texto clave
+        if highlight_text and highlight_text in clean_headline:
+            clean_headline = clean_headline.replace(
+                highlight_text,
+                f'<mark class="highlighter-marker">{highlight_text}</mark>',
+            )
+        elif highlight_text and clean_body and highlight_text in clean_body:
+            clean_body = clean_body.replace(
+                highlight_text,
+                f'<mark class="highlighter-marker">{highlight_text}</mark>',
+            )
+        else:
+            # Resaltar automáticamente la primera frase de impacto si no se especificó
+            words = clean_headline.split()
+            if len(words) >= 4:
+                hl_target = " ".join(words[-3:])
+                clean_headline = clean_headline.replace(
+                    hl_target,
+                    f'<mark class="highlighter-marker">{hl_target}</mark>',
+                )
+
+        body_html = f'<div class="paper-body">{clean_body}</div>' if clean_body else ""
+
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+{HTML_FONTS}
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }}
+  .clipping-card {{
+    position: relative;
+    width: 820px;
+    background: #0d0f14;
+    border: 1.5px solid rgba(255, 255, 255, 0.14);
+    border-radius: 18px;
+    padding: 34px 44px;
+    box-shadow: 0 35px 80px rgba(0, 0, 0, 0.85), 0 0 40px rgba(255, 148, 54, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    transform: rotate(-1.2deg);
+  }}
+  .masthead-bar {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.22);
+    padding-bottom: 12px;
+  }}
+  .masthead-logo {{
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 26px;
+    font-weight: 900;
+    letter-spacing: 0.18em;
+    color: #ffffff;
+    text-transform: uppercase;
+  }}
+  .masthead-meta {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }}
+  .meta-tag {{
+    background: {p['pill_bg']};
+    border: 1px solid {p['border']};
+    color: {p['accent']};
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    padding: 3px 10px;
+    border-radius: 6px;
+    text-transform: uppercase;
+  }}
+  .meta-date {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #94a3b8;
+    letter-spacing: 0.08em;
+  }}
+  .paper-headline {{
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 38px;
+    line-height: 1.22;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -0.5px;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+  }}
+  .highlighter-marker {{
+    background: linear-gradient(104deg, rgba(255, 230, 0, 0) 0.5%, rgba(255, 235, 59, 0.92) 2.5%, rgba(255, 235, 59, 0.95) 92%, rgba(255, 230, 0, 0) 98%);
+    color: #0b0c10;
+    font-weight: 900;
+    padding: 2px 10px;
+    border-radius: 4px;
+    box-shadow: 0 0 20px rgba(255, 235, 59, 0.65);
+    display: inline;
+    line-height: 1.35;
+  }}
+  .paper-body {{
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 18px;
+    line-height: 1.55;
+    color: #cbd5e1;
+    border-left: 3px solid {p['accent']};
+    padding-left: 16px;
+    margin-top: 4px;
+  }}
+  .clipping-footer {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 14px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    color: #64748b;
+    letter-spacing: 0.12em;
+  }}
+</style>
+</head>
+<body>
+  <div class="clipping-card">
+    <div class="masthead-bar">
+      <div class="masthead-logo">{clean_news}</div>
+      <div class="masthead-meta">
+        <span class="meta-tag">{tag}</span>
+        <span class="meta-date">{date_str}</span>
+      </div>
+    </div>
+    <div class="paper-headline">{clean_headline}</div>
+    {body_html}
+    <div class="clipping-footer">
+      <span>ARCHIVADO &bull; EDICIÓN VERIFICADA</span>
+      <span style="color:{p['accent']}; font-weight:700;">AETHERCUT RESEARCH &bull; 2026</span>
+    </div>
+  </div>
+</body>
+</html>"""
+
+    # =========================================================================
+    # 10. PLANTILLA: SOCIAL POST (Publicación Verificada X / Twitter)
+    # =========================================================================
+    def build_social_post_html(
+        self,
+        author_name: str,
+        handle: str,
+        post_text: str,
+        highlight_phrase: str = "",
+        verified: bool = True,
+        metrics_likes: str = "128K",
+        metrics_reposts: str = "24.2K",
+        date_str: str = "Reciente",
+        variant: str = "orange_noir",
+    ) -> str:
+        p = self.get_palette(variant)
+        clean_author = (author_name or "Declaración Oficial").strip()
+        clean_handle = (handle or "@oficial").strip()
+        clean_text = (post_text or "Declaración pública contrastada.").strip()
+        initial = clean_author[0].upper() if clean_author else "A"
+
+        if highlight_phrase and highlight_phrase in clean_text:
+            clean_text = clean_text.replace(
+                highlight_phrase,
+                f'<span class="post-hl">{highlight_phrase}</span>',
+            )
+
+        verif_svg = """<svg class="v-badge" viewBox="0 0 24 24" width="20" height="20" fill="#1d9bf0"><path d="M22.25 12c0-1.43-.88-2.67-2.19-3.34.46-1.39.2-2.9-.81-3.91s-2.52-1.27-3.91-.81c-.67-1.31-1.91-2.19-3.34-2.19s-2.67.88-3.33 2.19c-1.4-.46-2.91-.2-3.92.81s-1.26 2.52-.8 3.91c-1.31.67-2.2 1.91-2.2 3.34s.89 2.67 2.2 3.34c-.46 1.39-.21 2.9.8 3.91s2.52 1.26 3.91.81c.67 1.31 1.91 2.19 3.34 2.19s2.67-.88 3.34-2.19c1.39.45 2.9.2 3.91-.81s1.27-2.52.81-3.91c1.31-.67 2.19-1.91 2.19-3.34zm-11.71 4.2L6.8 12.46l1.41-1.42 2.33 2.33 4.99-4.99 1.41 1.42-6.4 6.4z"/></svg>""" if verified else ""
+
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+{HTML_FONTS}
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }}
+  .social-card {{
+    position: relative;
+    width: 780px;
+    background: rgba(13, 16, 22, 0.94);
+    border: 1.5px solid rgba(255, 255, 255, 0.12);
+    border-radius: 22px;
+    padding: 32px 38px;
+    box-shadow: 0 30px 75px rgba(0, 0, 0, 0.85), 0 0 35px rgba(29, 155, 240, 0.20);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }}
+  .author-row {{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }}
+  .avatar-circle {{
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: {p['accent_gradient']};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Outfit', sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    color: #000000;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }}
+  .author-meta {{
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }}
+  .name-row {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }}
+  .author-name {{
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -0.3px;
+  }}
+  .author-handle {{
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 15px;
+    color: #94a3b8;
+  }}
+  .post-body {{
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 24px;
+    line-height: 1.45;
+    color: #f1f5f9;
+    letter-spacing: -0.2px;
+  }}
+  .post-hl {{
+    color: {p['accent']};
+    font-weight: 700;
+    background: {p['pill_bg']};
+    padding: 2px 8px;
+    border-radius: 6px;
+  }}
+  .metrics-row {{
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 14px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    color: #94a3b8;
+  }}
+  .metric-item {{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }}
+  .metric-bold {{
+    color: #ffffff;
+    font-weight: 700;
+  }}
+</style>
+</head>
+<body>
+  <div class="social-card">
+    <div class="author-row">
+      <div class="avatar-circle">{initial}</div>
+      <div class="author-meta">
+        <div class="name-row">
+          <span class="author-name">{clean_author}</span>
+          {verif_svg}
+        </div>
+        <div class="author-handle">{clean_handle} &bull; {date_str}</div>
+      </div>
+    </div>
+    <div class="post-body">{clean_text}</div>
+    <div class="metrics-row">
+      <div class="metric-item"><span class="metric-bold">{metrics_reposts}</span> Reposts</div>
+      <div class="metric-item"><span class="metric-bold">{metrics_likes}</span> Me gusta</div>
+      <div class="metric-item"><span class="metric-bold">Verificado</span> por AetherCut</div>
+    </div>
+  </div>
+</body>
+</html>"""
+
+    # =========================================================================
+    # 11. PLANTILLA: TIMELINE MILESTONES (Hitos Cronológicos / Documental)
+    # =========================================================================
+    def build_timeline_milestone_html(
+        self,
+        milestones: Optional[List[Dict[str, str]]] = None,
+        active_index: int = 1,
+        title: str = "HITOS CLAVE",
+        variant: str = "orange_noir",
+    ) -> str:
+        p = self.get_palette(variant)
+        milestones = milestones or [
+            {"year": "2008", "label": "Crisis Subprime"},
+            {"year": "2015", "label": "Algoritmo Aladdin"},
+            {"year": "2026", "label": "Dominio Global $10T"},
+        ]
+
+        nodes_html = []
+        for idx, m in enumerate(milestones):
+            is_active = (idx == active_index)
+            cls_active = "active-node" if is_active else ""
+            nodes_html.append(f"""
+            <div class="t-node {cls_active}">
+              <div class="t-circle"></div>
+              <div class="t-year">{m.get('year', '')}</div>
+              <div class="t-label">{m.get('label', '')}</div>
+            </div>
+            """)
+
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+{HTML_FONTS}
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }}
+  .timeline-card {{
+    position: relative;
+    width: 860px;
+    background: #0d0f14;
+    border: 1.5px solid rgba(255, 255, 255, 0.14);
+    border-radius: 22px;
+    padding: 34px 44px;
+    box-shadow: 0 35px 80px rgba(0, 0, 0, 0.85), 0 0 40px rgba(255, 148, 54, 0.20);
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }}
+  .timeline-header {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }}
+  .timeline-title {{
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.20em;
+    color: {p['accent']};
+    text-transform: uppercase;
+  }}
+  .timeline-track {{
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 10px 0;
+  }}
+  .timeline-track::before {{
+    content: '';
+    position: absolute;
+    top: 24px;
+    left: 40px;
+    right: 40px;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.16);
+    z-index: 1;
+  }}
+  .t-node {{
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 8px;
+    width: 180px;
+  }}
+  .t-circle {{
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #141824;
+    border: 3px solid #64748b;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+    transition: all 0.3s ease;
+  }}
+  .active-node .t-circle {{
+    background: {p['accent']};
+    border-color: #ffffff;
+    box-shadow: 0 0 25px {p['glow']}, 0 0 10px {p['accent']};
+    transform: scale(1.3);
+  }}
+  .t-year {{
+    font-family: 'Outfit', sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    color: #94a3b8;
+  }}
+  .active-node .t-year {{
+    color: #ffffff;
+  }}
+  .t-label {{
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 14px;
+    color: #94a3b8;
+    line-height: 1.35;
+  }}
+  .active-node .t-label {{
+    color: {p['accent']};
+    font-weight: 700;
+  }}
+</style>
+</head>
+<body>
+  <div class="timeline-card">
+    <div class="timeline-header">
+      <div class="timeline-title">{title}</div>
+      <div style="font-family:'JetBrains Mono'; font-size:12px; color:#64748b;">EVOLUCIÓN DOCUMENTADA</div>
+    </div>
+    <div class="timeline-track">
+      {"".join(nodes_html)}
+    </div>
+  </div>
+</body>
+</html>"""
+
+    # =========================================================================
     # MÉTODO MAESTRO DE RENDERIZADO A PNG
     # =========================================================================
     def render_template_to_image(
@@ -1084,6 +1550,35 @@ class VisualTemplatesLibrary:
             html = self.build_source_chip_html(
                 source_name=params.get("source_name") or params.get("source") or params.get("headline") or "Registro Oficial",
                 tag=params.get("tag", "FUENTE OFICIAL"),
+                variant=variant,
+            )
+        elif tmpl in ("newspaper_clipping", "newspaper", "press_clipping", "titular_prensa"):
+            html = self.build_newspaper_clipping_html(
+                headline=params.get("headline") or params.get("title") or "Titular de Investigación",
+                newspaper=params.get("newspaper") or params.get("source") or "FINANCIAL TIMES",
+                date_str=params.get("date_str") or params.get("date") or "EDICIÓN ESPECIAL 2026",
+                highlight_text=params.get("highlight_text") or params.get("highlight") or "",
+                body_lead=params.get("body_lead") or params.get("body") or "",
+                tag=params.get("tag", "EVIDENCIA EDITORIAL"),
+                variant=variant,
+            )
+        elif tmpl in ("social_post", "tweet", "x_post", "comunicado_social"):
+            html = self.build_social_post_html(
+                author_name=params.get("author_name") or params.get("author") or "Declaración Oficial",
+                handle=params.get("handle") or "@oficial",
+                post_text=params.get("post_text") or params.get("body") or params.get("headline") or "Declaración pública contrastada.",
+                highlight_phrase=params.get("highlight_phrase") or params.get("highlight") or "",
+                verified=bool(params.get("verified", True)),
+                metrics_likes=params.get("metrics_likes", "128K"),
+                metrics_reposts=params.get("metrics_reposts", "24.2K"),
+                date_str=params.get("date_str", "Reciente"),
+                variant=variant,
+            )
+        elif tmpl in ("timeline_milestone", "timeline", "cronologia", "hitos"):
+            html = self.build_timeline_milestone_html(
+                milestones=params.get("milestones"),
+                active_index=int(params.get("active_index", 1)),
+                title=params.get("title", "HITOS CLAVE"),
                 variant=variant,
             )
         else:
@@ -1196,6 +1691,54 @@ class VisualTemplatesLibrary:
                     "animation": "corner_pop",
                     "default_variant": "orange_noir",
                     "sample_params": {"source_name": "Laboratorio Acústico del Pacífico", "tag": "FUENTE OFICIAL"},
+                },
+                {
+                    "id": "newspaper_clipping",
+                    "name": "Recorte de Prensa / Periódico con Subrayador Neón (Estilo Adrià Solà Pastor / Vox)",
+                    "description": "Recorte editorial de prensa (Financial Times, WSJ, Bloomberg) con cabecera periodística y rotulador fluorescente amarillo animado sobre el titular clave.",
+                    "sfx": "whoosh",
+                    "animation": "smooth_rise",
+                    "default_variant": "orange_noir",
+                    "sample_params": {
+                        "headline": "BlackRock supera los 10 billones de dólares bajo gestión directa",
+                        "newspaper": "FINANCIAL TIMES",
+                        "highlight_text": "10 billones de dólares",
+                        "body_lead": "El algoritmo Aladdin consolida el mayor monopolio financiero de la historia moderna.",
+                        "tag": "EVIDENCIA EDITORIAL"
+                    },
+                },
+                {
+                    "id": "social_post",
+                    "name": "Publicación Verificada en Redes (X / Twitter Card)",
+                    "description": "Tarjeta oscura con insignia verificada, avatar, métricas y texto destacado para declaraciones de directivos, gobiernos o expertos.",
+                    "sfx": "pop",
+                    "animation": "spring_bounce",
+                    "default_variant": "orange_noir",
+                    "sample_params": {
+                        "author_name": "Elon Musk",
+                        "handle": "@elonmusk",
+                        "post_text": "La escala de computación requerida para este avance superó todas nuestras proyecciones.",
+                        "highlight_phrase": "superó todas nuestras proyecciones",
+                        "metrics_likes": "142K",
+                        "metrics_reposts": "31.8K"
+                    },
+                },
+                {
+                    "id": "timeline_milestone",
+                    "name": "Línea de Tiempo / Hitos Cronológicos Documentales",
+                    "description": "Cronología documental de 3 a 4 hitos con nodo activo pulsante y fechas clave para contextualizar la evolución del caso.",
+                    "sfx": "impact",
+                    "animation": "slide_in_left",
+                    "default_variant": "orange_noir",
+                    "sample_params": {
+                        "title": "CRONOLOGÍA DEL CASO",
+                        "active_index": 1,
+                        "milestones": [
+                            {"year": "2008", "label": "Colapso Financiero"},
+                            {"year": "2015", "label": "Despliegue Aladdin"},
+                            {"year": "2026", "label": "Control Sistémico"}
+                        ]
+                    },
                 },
             ]
         }

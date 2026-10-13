@@ -769,6 +769,56 @@ class SceneEngine:
                         card_visual_type = "quote_evidence"
                         safe_log(f"[SceneEngine] 📜 Cita/Evidencia Vox Style generada para escena {scene.scene_id}")
 
+                # 0i. Recorte de Periódico / Prensa con Subrayador Neón (Estilo Adrià Solà Pastor / Vox)
+                elif c_template in ("newspaper_clipping", "newspaper", "press_clipping", "titular_prensa") or any(k in c_badge for k in ("NOTICIA", "PRENSA", "PERIODICO", "PERIÓDICO", "TITULAR", "FINANCIAL", "BLOOMBERG", "WSJ", "REUTERS")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="newspaper_clipping",
+                        out_png=card_img_path,
+                        params={
+                            "headline": c_headline,
+                            "newspaper": c_stat or "FINANCIAL TIMES",
+                            "body_lead": c_body if c_body != c_headline else "",
+                            "tag": c_badge or "EVIDENCIA EDITORIAL",
+                            **c_params
+                        },
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "newspaper_clipping"
+                        safe_log(f"[SceneEngine] 📰 Recorte de Prensa con Subrayador Neón generado para escena {scene.scene_id}: {c_headline}")
+
+                # 0j. Publicación Verificada en Redes (X / Twitter Card)
+                elif c_template in ("social_post", "tweet", "x_post", "comunicado_social") or any(k in c_badge for k in ("TWEET", "TWITTER", "POST", "DECLARACION", "DECLARACIÓN", "X")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="social_post",
+                        out_png=card_img_path,
+                        params={
+                            "author_name": c_headline,
+                            "handle": c_stat if c_stat.startswith("@") else f"@{c_headline.lower().replace(' ', '')}",
+                            "post_text": c_body or c_headline,
+                            **c_params
+                        },
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "social_post"
+                        safe_log(f"[SceneEngine] 🐦 Publicación Social Verificada generada para escena {scene.scene_id}: {c_headline}")
+
+                # 0k. Cronología Documental / Línea de Tiempo
+                elif c_template in ("timeline_milestone", "timeline", "cronologia", "hitos") or any(k in c_badge for k in ("CRONOLOGIA", "CRONOLOGÍA", "TIMELINE", "EVOLUCIÓN", "EVOLUCION")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="timeline_milestone",
+                        out_png=card_img_path,
+                        params={
+                            "title": c_headline,
+                            **c_params
+                        },
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "timeline_milestone"
+                        safe_log(f"[SceneEngine] ⏳ Línea de Tiempo Documental generada para escena {scene.scene_id}: {c_headline}")
+
                 # 1. Mapa Geopolítico / Satelital Táctico GeoIntel (si aplica específicamente)
                 elif c_template in ("map", "geointel_map") or any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN", "UBICACION")) or "mapa" in c_headline.lower():
                     map_result = self.web_renderer.render_geointel_map_to_image(

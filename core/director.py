@@ -30,7 +30,7 @@ class SceneCard:
     style: str = "auto"       # auto, verdict_badge, tech_card, quote, bento, map
     icon: str = "✓"
     subtitle: str = ""
-    template: str = "auto"   # verdict_badge, tech_card, stat_counter, versus_split, quote_evidence, step_badge, alert_banner, source_chip
+    template: str = "auto"   # verdict_badge, tech_card, stat_counter, versus_split, quote_evidence, step_badge, alert_banner, source_chip, newspaper_clipping, social_post, timeline_milestone
     variant: str = "orange_noir"  # orange_noir, frosted_white, emerald_matrix, crimson_hazard, cyber_cyan, royal_gold
     params: Dict[str, Any] = field(default_factory=dict)
 
@@ -388,6 +388,9 @@ REGLAS PARA DATOS, MAPAS, ESTADÍSTICAS Y TARJETAS BENTO HUD (AL MENOS 60% DE LA
   * "stat": La cifra, métrica o relación clave destacada (ej: "300M vs 6M", "52.9%", "+450%", "Alianza Bilateral").
   * "body": Explicación sintética y contundente del dato con fuentes contrastadas.
   * "template" (o "style", elige la plantilla exacta de la librería para máximo impacto):
+    - "newspaper_clipping": Recorte editorial de periódico de prestigio (Financial Times, The Wall Street Journal, Bloomberg, Forbes, Reuters, El Confidencial) con cabecera oficial, fecha, titular en tipografía serif y rotulador fluorescente amarillo neón animado sobre las palabras clave. SFX "whoosh". (Estilo Adrià Solà Pastor / Vox).
+    - "social_post": Publicación verificada de alta resolución estilo X / Twitter / Threads con avatar, nombre, insignia de verificado, @handle, fecha y texto citado con términos clave resaltados en ámbar o azul. SFX "pop".
+    - "timeline_milestone": Cronología documental de hitos conectados por un rayo de luz con nodo activo pulsante y fechas clave (ej: 2008 -> 2015 -> 2026). SFX "impact".
     - "verdict_badge": Distintivo viral estilo sticker/sello inclinado con rebote elástico (ej: headline "ganó Opus", "100% Real", "Confirmado", icon "✓"). Entra con spring bounce y SFX "pop".
     - "tech_card": Tarjeta tecnológica superior dark slate con micro-matriz de puntos (ej: headline "find-skills", body "por Vercel · vercel-labs/skills"). Flota arriba con SFX "whoosh" o "pop".
     - "stat_counter": Cifra récord con número gigante en gradiente, medidor de barra y tendencia (ej: stat "+340%", headline "Récord Histórico"). SFX "chime".
@@ -406,6 +409,9 @@ REGLAS PARA DATOS, MAPAS, ESTADÍSTICAS Y TARJETAS BENTO HUD (AL MENOS 60% DE LA
     - "cyber_cyan": Negro profundo + Cian Neón para tecnología, software y código.
     - "royal_gold": Negro + Oro Solar para récords mundiales y tops #1.
   * "badge":
+    - "NOTICIA", "PRENSA", "PERIODICO", "TITULAR": Activa newspaper_clipping.
+    - "TWEET", "TWITTER", "POST", "DECLARACION": Activa social_post.
+    - "CRONOLOGIA", "TIMELINE", "HITOS", "EVOLUCION": Activa timeline_milestone.
     - "VEREDICTO", "GANADOR" o "SELLO": Activa verdict_badge.
     - "TECH", "HERRAMIENTA", "DEV" o "SKILL": Activa tech_card.
     - "ESTADÍSTICA", "RÉCORD", "CIFRA": Activa stat_counter.
@@ -414,7 +420,14 @@ REGLAS PARA DATOS, MAPAS, ESTADÍSTICAS Y TARJETAS BENTO HUD (AL MENOS 60% DE LA
     - "PASO", "FASE" o "HITO": Activa step_badge.
     - "ALERTA" o "PELIGRO": Activa alert_banner.
     - "FUENTE" o "ATRIBUCIÓN": Activa source_chip.
-- De esta manera el espectador ve el avatar hablando pero al mismo tiempo tiene en pantalla la tarjeta gráfica interactiva mostrando los mapas, números reales y comparativas en pantalla sin sentirse vacío.
+
+FILOSOFÍA DE MONTAJE Y ALTERNANCIA VISUAL (ESTILO ADRIA SOLÀ PASTOR / VIDEO-ENSAYO DE ALTA RETENCIÓN):
+- MÁXIMA VARIEDAD DE RECURSOS (CERO MONOTONÍA): Un video documental de calidad no repite el mismo formato visual dos veces seguidas. Debes alternar activamente los recursos de escena a escena:
+  1. Si una escena usó un clip de B-Roll cinematográfico puro -> La siguiente DEBE mostrar evidencia tangible: un recorte de periódico con fluorescente ("newspaper_clipping") o una publicación verificada ("social_post").
+  2. Si una escena mostró un titular de prensa -> La siguiente DEBE mostrar una animación de cifra contundente ("stat_counter" o Remotion React) o una comparativa directa ("versus_split").
+  3. Si una escena mostró datos numéricos -> La siguiente DEBE aterrizar en una fotografía real de archivo histórico o de satélite con ficha técnica ("tech_card") o mapa geopolítico ("map").
+  4. Avatar / KAI: Usa "avatar_cam" en el Hook inicial (3-4 segundos con energía máxima) y en la conclusión reflexiva. En las escenas intermedias de datos y análisis profundo, KAI debe estar en PiP ("pip_corner") para que el protagonismo absoluto lo tenga el material de apoyo real y la evidencia visual.
+- De esta manera el espectador se sumerge en una experiencia audiovisual rica, profesional y con la densidad informativa y el dinamismo de los mejores creadores de video-ensayos del mundo.
 
 REGLAS PARA TEXTO LIBRE ANIMADO CINEMÁTICO ("free_title") (SIN CAJAS, FLOTANTE EN PANTALLA):
 - Si la escena representa un TOP / RANKING (ej: "Puesto 3"), una ENUMERACIÓN DE COSAS IMPORTANTES (ej: "Factor #1: Velocidad", "Paso 2: Neutralización") o un CONCEPTO DE IMPACTO ("Guerra Sin Humanos", "Inversión Récord"), incluye el objeto "free_title" (flotará libre directamente sobre el video sin caja ni contenedor):
