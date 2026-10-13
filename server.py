@@ -356,6 +356,7 @@ async def process_video(
     enable_captions: bool = Form(True),
     enable_shorts: bool = Form(True),
     enable_cards: bool = Form(True),
+    voice: str = Form("es-MX-JorgeNeural"),
 ):
     ext = Path(video.filename or "").suffix.lower()
     if ext not in ALLOWED_EXT:
@@ -387,6 +388,7 @@ async def process_video(
     options = PipelineOptions(
         silence_threshold=max(0.8, min(3.0, silence_threshold)),
         broll=enable_broll, captions=enable_captions, shorts=enable_shorts, cards=enable_cards,
+        voice=voice,
     )
     ProjectStore(task_id).create(
         source_file=saved,
@@ -1580,44 +1582,215 @@ async def cleanup_storage_endpoint():
     }
 
 
+@app.get("/api/tts-preview")
 @app.post("/api/tts-preview")
-async def tts_preview_endpoint(payload: Dict[str, Any] = Body(...)):
-    """Genera una muestra de voz en tiempo real para preescucha en la ventana flotante del Studio."""
+async def tts_preview_endpoint(
+    payload: Optional[Dict[str, Any]] = Body(None),
+    voice: Optional[str] = None,
+    voice_query: Optional[str] = None,
+):
+    """Genera o entrega una muestra de voz en tiempo real para preescucha en el editor."""
     import edge_tts
     from utils.speech_normalizer import normalize_speech_for_tts
 
-    voice = str(payload.get("voice") or "es-MX-JorgeNeural").strip()
-    text = str(payload.get("text") or "").strip()
-    if not text:
-        text = "¡Paren las rotativas un segundo! La realidad y los números tienen otros planes: los registros oficiales confirman que la cifra real es contundente. ¡Dato mata relato, mi gente!"
+    data = payload or {}
+    raw_voice = str(voice or voice_query or data.get("voice") or "es-MX-JorgeNeural").strip()
+    raw_text = str(data.get("text") or "").strip()
 
-    effective_voice = voice
-    if voice == "voicestudio-omni-es":
-        effective_voice = "es-CO-GonzaloNeural"  # Perfil OmniVoice español neutro
-    elif voice == "voicestudio-piper-dave":
-        effective_voice = "es-US-AlonsoNeural"   # Perfil Piper locutor documental
+    # Mapeo de archivos pre-renderizados estáticos para respuesta instantánea (0 ms)
+    static_audio_map = {
+        "es-mx-jorgeneural": "es_la.mp3",
+        "neural-es-la": "es_la.mp3",
+        "neural v4 · es-la": "es_la.mp3",
+        "es-la": "es_la.mp3",
+        "es-es-alvaroneural": "es_es.mp3",
+        "neural-es-es": "es_es.mp3",
+        "neural v4 · es-es": "es_es.mp3",
+        "es-es": "es_es.mp3",
+        "es-co-gonzaloneural": "gonzalo.mp3",
+        "es-us-alonsoneural": "alonso.mp3",
+        "es-ar-tomasneural": "tomas.mp3",
+        "es-mx-dalianeural": "dalia.mp3",
+        "es-ar-elenaneural": "elena.mp3",
+        "voicestudio-omni-es": "omni_es.mp3",
+        "voicestudio-piper-dave": "piper_dave.mp3",
+        "clon-propio": "clone.mp3",
+        "neural-clon": "clone.mp3",
+        "clon de voz propio": "clone.mp3",
+        "clon": "clone.mp3",
+        "clone": "clone.mp3",
+        # Speechify Voces
+        "speechify:alejandro": "speechify_alejandro.mp3",
+        "speechify_alejandro": "speechify_alejandro.mp3",
+        "alejandro": "speechify_alejandro.mp3",
+        "speechify:aitana": "speechify_aitana.mp3",
+        "speechify_aitana": "speechify_aitana.mp3",
+        "aitana": "speechify_aitana.mp3",
+        "speechify:alejandra": "speechify_alejandra.mp3",
+        "speechify_alejandra": "speechify_alejandra.mp3",
+        "alejandra": "speechify_alejandra.mp3",
+        "speechify:alexa": "speechify_alexa.mp3",
+        "speechify_alexa": "speechify_alexa.mp3",
+        "alexa": "speechify_alexa.mp3",
+        "speechify:alondra": "speechify_alondra.mp3",
+        "speechify_alondra": "speechify_alondra.mp3",
+        "alondra": "speechify_alondra.mp3",
+    }
+    voice_key = raw_voice.lower()
 
-    norm_text = normalize_speech_for_tts(text)
+    is_sample_request = not raw_text or any(
+        x in raw_text.lower() for x in ["paren las rotativas", "prueba de voz", "muestra de voz"]
+    )
+    if is_sample_request and voice_key in static_audio_map:
+        static_file = STATIC_DIR / "audio" / static_audio_map[voice_key]
+        if static_file.exists():
+            return FileResponse(
+                str(static_file),
+                media_type="audio/mpeg",
+                headers={
+                    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                    "Content-Disposition": f"inline; filename=preview_{static_audio_map[voice_key]}"
+                }
+            )
 
+    # Texto a sintetizar
+    sample_text = raw_text
+    if not sample_text:
+        if "es-es" in voice_key or "alvaro" in voice_key:
+            sample_text = "Hola, soy la voz neutra española. Diseñada para divulgación, ritmo preciso y máxima retención."
+        elif "co" in voice_key or "clon" in voice_key or "gonzalo" in voice_key:
+            sample_text = "Esta es tu muestra de clonación vocal. Tono documental profundo y presencia de estudio."
+        else:
+            sample_text = "Hola, soy la voz neuronal cálida en español latinoamericano. Lista para narrar tus videos virales."
+
+    effective_voice = raw_voice
+    if raw_voice == "voicestudio-omni-es":
+        effective_voice = "es-CO-GonzaloNeural"
+    elif raw_voice == "voicestudio-piper-dave":
+        effective_voice = "es-US-AlonsoNeural"
+
+    norm_text = normalize_speech_for_tts(sample_text)
+    content_text = norm_text or sample_text
+
+    # Determinar acento / tld regional
+    tld = "com.mx"
+    accent_desc = "español latinoamericano cálido y amigable"
+    if any(x in voice_key for x in ["es-es", "alvaro"]):
+        tld = "es"
+        accent_desc = "español neutro de España, divulgación clara"
+    elif any(x in voice_key for x in ["es-co", "gonzalo", "clon", "clone"]):
+        tld = "com.co"
+        accent_desc = "voz profunda de narrador documental de estudio"
+
+    # Mapeo de identidad vocal única para que NINGUNA voz suene igual
+    studio_voice_map = {
+        "es-mx-jorgeneural": "angel",
+        "es-us-alonsoneural": "fernando",
+        "es-co-gonzaloneural": "jesus",
+        "es-ar-tomasneural": "carlos",
+        "es-mx-dalianeural": "carmen",
+        "es-ar-elenaneural": "carolina",
+        "es-es-alvaroneural": "unai",
+        "voicestudio-omni-es": "mariana",
+        "voicestudio-piper-dave": "maximiliano",
+        "clon-propio": "emiliano",
+        "neural-clon": "emiliano",
+        "clone": "emiliano",
+    }
+    target_sp_voice = studio_voice_map.get(voice_key, raw_voice.replace("speechify:", ""))
+
+    # 0. Síntesis de estudio de alta fidelidad con Speechify (voces humanas 100% distintas)
+    try:
+        from utils.speechify_tts import synthesize_speechify, has_speechify_credits
+        if has_speechify_credits():
+            sp_data = synthesize_speechify(content_text, target_sp_voice)
+            if sp_data and len(sp_data) > 500:
+                clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_voice)
+                return StreamingResponse(io.BytesIO(sp_data), media_type="audio/mpeg", headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Content-Disposition": f"inline; filename=preview_{clean_slug}.mp3"
+                })
+    except Exception as _sp_err:
+        safe_log(f"[TTSPreview] Speechify failover: {_sp_err}. Probando motor alternativo...")
+
+    # 1. Intentar Gemini TTS
+    try:
+        from config.settings import settings
+        import google.generativeai as genai
+        key = (getattr(settings, "GEMINI_API_KEY", "") or "").split(",")[0].strip()
+        if key:
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel("models/gemini-2.5-flash-preview-tts")
+            prompt = f"Lee con {accent_desc}: {content_text}"
+
+            loop = asyncio.get_running_loop()
+            res = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: model.generate_content(
+                    prompt,
+                    generation_config={"response_modalities": ["AUDIO"]}
+                )),
+                timeout=6.0
+            )
+            pcm = None
+            for p in res.candidates[0].content.parts:
+                if p.inline_data:
+                    pcm = p.inline_data.data
+                    break
+            if pcm:
+                cmd = [
+                    "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
+                    "-i", "pipe:0", "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", "pipe:1"
+                ]
+                proc = subprocess.run(cmd, input=pcm, capture_output=True)
+                if proc.returncode == 0 and len(proc.stdout) > 500:
+                    clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_voice)
+                    return StreamingResponse(io.BytesIO(proc.stdout), media_type="audio/mpeg", headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Content-Disposition": f"inline; filename=preview_{clean_slug}.mp3"
+                    })
+    except Exception:
+        pass
+
+    # 2. Intentar edge-tts
     try:
         mp3_buffer = io.BytesIO()
-        communicate = edge_tts.Communicate(norm_text or text, effective_voice, rate="+0%")
+        communicate = edge_tts.Communicate(content_text, effective_voice, rate="+0%")
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 mp3_buffer.write(chunk["data"])
-
         mp3_buffer.seek(0)
-        if mp3_buffer.getbuffer().nbytes == 0:
-            raise HTTPException(status_code=500, detail="No se pudo sintetizar el audio con esta voz.")
+        if mp3_buffer.getbuffer().nbytes > 500:
+            clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_voice)
+            return StreamingResponse(mp3_buffer, media_type="audio/mpeg", headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Content-Disposition": f"inline; filename=preview_{clean_slug}.mp3"
+            })
+    except Exception:
+        pass
 
-        clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', voice)
-        return StreamingResponse(mp3_buffer, media_type="audio/mpeg", headers={
+    # 3. Respaldo infalible con gTTS
+    try:
+        from gtts import gTTS
+        buf = io.BytesIO()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: gTTS(text=content_text, lang="es", tld=tld).write_to_fp(buf))
+        buf.seek(0)
+        clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_voice)
+        return StreamingResponse(buf, media_type="audio/mpeg", headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Content-Disposition": f"inline; filename=preview_{clean_slug}.mp3"
         })
     except Exception as exc:
-        safe_log(f"[TTSPreview] Error sintetizando '{voice}': {exc}")
+        safe_log(f"[TTSPreview] Error fatal sintetizando '{raw_voice}': {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/speechify/status")
+async def speechify_status_endpoint():
+    """Estado en tiempo real de los créditos y claves de Speechify."""
+    from utils.speechify_tts import get_speechify_status
+    return get_speechify_status()
 
 
 # ==============================================================================

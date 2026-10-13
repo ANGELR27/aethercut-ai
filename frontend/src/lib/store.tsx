@@ -98,12 +98,23 @@ type Ctx = {
   activeProjectId: string | null;
   activeProjectTitle: string;
   isUploading: boolean;
+  isCreating: boolean;
+  createProgress: number;
+  createStatusMessage: string;
   selectProject: (id: string) => void;
   loadProjects: () => Promise<void>;
   loadProject: (id: string) => Promise<void>;
   exportMaster: () => Promise<void>;
   importVideo: (file: File) => Promise<void>;
+  createVideo: (topic: string, opts?: { duration?: number; style?: string }) => Promise<string | null>;
 
+  /* voice */
+  selectedVoice: string;
+  setSelectedVoice: (v: string) => void;
+  playingVoiceId: string | null;
+  previewVoice: (voiceId: string) => void;
+
+  flash: (msg: string) => void;
   log: LogEntry[];
   toast: string | null;
 };
@@ -147,6 +158,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [activeProjectTitle, setActiveProjectTitle] = useState<string>("Ritmo Nocturno — EP.02");
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [createProgress, setCreateProgress] = useState(0);
+  const [createStatusMessage, setCreateStatusMessage] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const pushLog = useCallback((text: string, kind: LogEntry["kind"] = "ai") => {
@@ -160,6 +174,75 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
+
+  /* Voice selection with persistent localStorage */
+  const [selectedVoice, setSelectedVoiceState] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("lumen_selected_voice") || "es-MX-JorgeNeural";
+    }
+    return "es-MX-JorgeNeural";
+  });
+
+  const setSelectedVoice = useCallback(
+    (voiceId: string) => {
+      setSelectedVoiceState(voiceId);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("lumen_selected_voice", voiceId);
+        } catch (_) {}
+      }
+      pushLog(`Voz de locución activa: ${voiceId}`, "info");
+      flash("Voz seleccionada para los próximos videos");
+    },
+    [pushLog, flash],
+  );
+
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
+
+  const previewVoice = useCallback(
+    (voiceId: string) => {
+      try {
+        if (audioPreviewRef.current) {
+          audioPreviewRef.current.pause();
+          audioPreviewRef.current.currentTime = 0;
+          audioPreviewRef.current = null;
+        }
+
+        if (playingVoiceId === voiceId) {
+          setPlayingVoiceId(null);
+          return;
+        }
+
+        setPlayingVoiceId(voiceId);
+        pushLog(`Escuchando muestra de locución: ${voiceId}`, "info");
+
+        const audioUrl = `/api/tts-preview?voice=${encodeURIComponent(voiceId)}&t=${Date.now()}`;
+        const audio = new Audio(audioUrl);
+        audioPreviewRef.current = audio;
+
+        audio.onended = () => {
+          setPlayingVoiceId(null);
+          audioPreviewRef.current = null;
+        };
+
+        audio.onerror = () => {
+          setPlayingVoiceId(null);
+          audioPreviewRef.current = null;
+          pushLog("No se pudo reproducir la muestra de voz", "warn");
+        };
+
+        audio.play().catch((e) => {
+          console.warn("Reproducción de audio prevenida:", e);
+          setPlayingVoiceId(null);
+        });
+      } catch (err: any) {
+        setPlayingVoiceId(null);
+        console.warn("Error en previewVoice:", err);
+      }
+    },
+    [playingVoiceId, pushLog],
+  );
 
   /* ---------------- playback engine ---------------- */
   const raf = useRef<number>(0);
@@ -372,6 +455,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         form.append("cards", "true");
         form.append("captions", "true");
         form.append("shorts", "true");
+        form.append("voice", selectedVoice);
 
         const res = await fetch("/api/process-video", {
           method: "POST",
@@ -412,6 +496,76 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     [pushLog, flash, loadProjects, loadProject],
   );
 
+  const createVideo = useCallback(
+    async (topic: string, opts?: { duration?: number; style?: string }) => {
+      const cleanTopic = topic.trim();
+      if (!cleanTopic) return null;
+
+      try {
+        setIsCreating(true);
+        setCreateProgress(10);
+        setCreateStatusMessage(`Investigando: «${cleanTopic}»...`);
+        pushLog(`Iniciando creación de video: ${cleanTopic}`, "ai");
+        flash(`Creando video: ${cleanTopic.slice(0, 30)}...`);
+
+        const res = await fetch("/api/streamer/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic: cleanTopic,
+            duration_sec: opts?.duration || 45,
+            aspect_ratio: ratio || "16:9",
+            style: opts?.style || "divulgacion",
+            voice: selectedVoice,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Error al iniciar la creación");
+
+        const taskId = data.task_id || data.project_id;
+        pushLog(`Tarea iniciada con ID: ${taskId}`, "info");
+
+        const es = new EventSource(`/api/stream-progress/${taskId}`);
+        es.onmessage = (ev) => {
+          try {
+            const p = JSON.parse(ev.data);
+            if (typeof p.progress === "number") {
+              setCreateProgress(Math.max(10, Math.min(100, p.progress)));
+            }
+            if (p.message) {
+              setCreateStatusMessage(p.message);
+              pushLog(p.message, "ai");
+            }
+            if (p.completed) {
+              es.close();
+              setCreateProgress(100);
+              setCreateStatusMessage("¡Video creado con éxito!");
+              setIsCreating(false);
+              flash("¡Video creado y masterizado!");
+              loadProjects();
+              loadProject(taskId);
+            } else if (p.error) {
+              es.close();
+              setIsCreating(false);
+              setCreateStatusMessage(`Error: ${p.error}`);
+              pushLog(`Error en creación: ${p.error}`, "warn");
+              flash(`Error: ${p.error}`);
+            }
+          } catch (_) {}
+        };
+        return taskId;
+      } catch (err: any) {
+        setIsCreating(false);
+        setCreateStatusMessage(`Fallo: ${err.message}`);
+        pushLog(`Error al crear video: ${err.message}`, "warn");
+        flash(`Error: ${err.message}`);
+        return null;
+      }
+    },
+    [ratio, pushLog, flash, loadProjects, loadProject],
+  );
+
   /* ---------------- keyboard ---------------- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -430,7 +584,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   }, [seek, time, toggle, handleSetRate, rate]);
 
   /* ---------------- AI engine ---------------- */
-  const running = Object.keys(progress).length > 0 || isUploading;
+  const running = Object.keys(progress).length > 0 || isUploading || isCreating;
 
   const run = useCallback(
     (id: string) => {
@@ -534,11 +688,20 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     activeProjectId,
     activeProjectTitle,
     isUploading,
+    isCreating,
+    createProgress,
+    createStatusMessage,
     selectProject,
     loadProjects,
     loadProject,
     exportMaster,
     importVideo,
+    createVideo,
+    selectedVoice,
+    setSelectedVoice,
+    playingVoiceId,
+    previewVoice,
+    flash,
     log,
     toast,
   };

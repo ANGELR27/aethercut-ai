@@ -77,6 +77,20 @@
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(79, 123, 255, 0.4);
   }
+
+  .subtle-scrollbar::-webkit-scrollbar {
+    width: 3.5px;
+  }
+  .subtle-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .subtle-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 99px;
+  }
+  .subtle-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(79, 123, 255, 0.45);
+  }
 }
 
 @layer components {

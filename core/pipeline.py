@@ -28,12 +28,13 @@ StateCb = Callable[..., None]
 
 class PipelineOptions:
     def __init__(self, silence_threshold: float = 1.5, broll: bool = True, captions: bool = True,
-                 shorts: bool = True, cards: bool = True):
+                 shorts: bool = True, cards: bool = True, voice: str = "es-MX-JorgeNeural"):
         self.silence_threshold = silence_threshold
         self.broll = broll
         self.captions = captions
         self.shorts = shorts
         self.cards = cards
+        self.voice = voice
 
 
 class VideoPipeline:
@@ -324,7 +325,7 @@ class VideoPipeline:
             from core.avatar_narrator import AvatarNarrator
             from core.avatar_renderer import AvatarRenderer
 
-            narrator = AvatarNarrator()
+            narrator = AvatarNarrator(voice=getattr(self.opt, "voice", "es-MX-JorgeNeural"))
             avatar_rnd = AvatarRenderer(badge_size=int(min(frame_w, frame_h) * 0.28))
 
             async def prepare_avatars():

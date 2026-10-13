@@ -156,23 +156,114 @@ REGLAS ESTRICTAS:
 
     async def synthesize(self, text: str, out_path: Path, voice: Optional[str] = None) -> Tuple[Path, float]:
         """Genera el archivo de audio MP3 y devuelve su duración exacta en segundos con entonación natural."""
-        chosen_voice = voice or self.voice
+        chosen_voice = voice or self.voice or DEFAULT_VOICE
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         from utils.speech_normalizer import normalize_speech_for_tts
         norm_text = normalize_speech_for_tts(text)
+        content_text = norm_text or text
 
-        # Síntesis directa de una sola pasada para máxima fluidez, prosodia y naturalidad humana
+        if chosen_voice == "voicestudio-omni-es":
+            chosen_voice = "es-CO-GonzaloNeural"
+        elif chosen_voice == "voicestudio-piper-dave":
+            chosen_voice = "es-US-AlonsoNeural"
+
+        # Determinar acento / tld regional
+        cv_lower = chosen_voice.lower()
+        tld = "com.mx"
+        accent_desc = "español latinoamericano cálido y amigable"
+        if any(x in cv_lower for x in ["es-es", "alvaro", "es_es"]):
+            tld = "es"
+            accent_desc = "español neutro de España con ritmo claro de divulgación"
+        elif any(x in cv_lower for x in ["es-co", "gonzalo", "clon", "clone", "muestra"]):
+            tld = "com.co"
+            accent_desc = "voz profunda de narrador documental de estudio"
+        elif any(x in cv_lower for x in ["es-ar", "tomas", "elena"]):
+            tld = "com.ar"
+            accent_desc = "español rioplatense dinámico y expresivo"
+
+        generated = False
+
+        # Mapeo de identidad vocal única para que cada locutor suene con voz humana propia y distinta
+        studio_voice_map = {
+            "es-mx-jorgeneural": "angel",
+            "es-us-alonsoneural": "fernando",
+            "es-co-gonzaloneural": "jesus",
+            "es-ar-tomasneural": "carlos",
+            "es-mx-dalianeural": "carmen",
+            "es-ar-elenaneural": "carolina",
+            "es-es-alvaroneural": "unai",
+            "voicestudio-omni-es": "mariana",
+            "voicestudio-piper-dave": "maximiliano",
+            "clon-propio": "emiliano",
+            "neural-clon": "emiliano",
+            "clone": "emiliano",
+        }
+        sp_target = studio_voice_map.get(cv_lower, chosen_voice.replace("speechify:", ""))
+
+        # 0. Intentar síntesis con Speechify
         try:
-            communicate = edge_tts.Communicate(norm_text or text, chosen_voice, rate="+0%")
-            await communicate.save(str(out_path))
-        except Exception as _e:
-            from core.llm import safe_log
-            safe_log(f"[AvatarNarrator] Edge-TTS error ({_e}). Usando gTTS de respaldo...")
+            from utils.speechify_tts import synthesize_speechify, has_speechify_credits
+            if has_speechify_credits():
+                loop = asyncio.get_running_loop()
+                sp_bytes = await loop.run_in_executor(None, lambda: synthesize_speechify(content_text, sp_target))
+                if sp_bytes and len(sp_bytes) > 500:
+                    with open(out_path, "wb") as f:
+                        f.write(sp_bytes)
+                    generated = True
+        except Exception:
+            pass
+
+        # 1. Intentar Gemini TTS de alta fidelidad si está configurado
+        if not generated:
+            try:
+                from config.settings import settings
+                import google.generativeai as genai
+                key = (getattr(settings, "GEMINI_API_KEY", "") or "").split(",")[0].strip()
+                if key:
+                    genai.configure(api_key=key)
+                    model = genai.GenerativeModel("models/gemini-2.5-flash-preview-tts")
+                    prompt = f"Lee con {accent_desc}: {content_text}"
+
+                loop = asyncio.get_running_loop()
+                res = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: model.generate_content(
+                        prompt,
+                        generation_config={"response_modalities": ["AUDIO"]}
+                    )),
+                    timeout=8.0
+                )
+                pcm = None
+                for p in res.candidates[0].content.parts:
+                    if p.inline_data:
+                        pcm = p.inline_data.data
+                        break
+                if pcm:
+                    cmd = [
+                        "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
+                        "-i", "pipe:0", "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", str(out_path)
+                    ]
+                    proc = subprocess.run(cmd, input=pcm, capture_output=True)
+                    if proc.returncode == 0 and out_path.exists() and out_path.stat().st_size > 500:
+                        generated = True
+            except Exception:
+                pass
+
+        # 2. Intentar edge-tts
+        if not generated:
+            try:
+                communicate = edge_tts.Communicate(content_text, chosen_voice, rate="+0%")
+                await asyncio.wait_for(communicate.save(str(out_path)), timeout=8.0)
+                if out_path.exists() and out_path.stat().st_size > 500:
+                    generated = True
+            except Exception:
+                pass
+
+        # 3. Respaldo infalible con gTTS (cero caídas, prosodia regional)
+        if not generated:
             from gtts import gTTS
-            lang_code = "es" if any(x in (chosen_voice or "").lower() for x in ["es-", "es_", "spanish"]) else "es"
-            gtts_obj = gTTS(text=norm_text or text, lang=lang_code)
-            gtts_obj.save(str(out_path))
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: gTTS(text=content_text, lang="es", tld=tld).save(str(out_path)))
 
         duration = self.get_audio_duration(out_path)
         return out_path, duration

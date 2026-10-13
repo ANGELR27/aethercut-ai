@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { ASSET_FOLDERS, AUTOMATIONS, PRESETS, type Automation } from "@/lib/data";
 import { useEditor } from "@/lib/store";
 import { cn } from "@/utils/cn";
@@ -127,27 +127,74 @@ const CATEGORY_LABEL: Record<Automation["category"], string> = {
 };
 
 function AITab() {
-  const { progress, applied, run } = useEditor();
+  const {
+    progress,
+    applied,
+    run,
+    isCreating,
+    createProgress,
+    createStatusMessage,
+    createVideo,
+  } = useEditor();
+  const [topicPrompt, setTopicPrompt] = useState("");
   const groups = ["narrativa", "ritmo", "acabado", "distribución"] as const;
   const done = applied.length;
   const total = AUTOMATIONS.length;
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (topicPrompt.trim() && !isCreating) {
+        const text = topicPrompt.trim();
+        setTopicPrompt("");
+        createVideo(text);
+      }
+    }
+  };
 
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.04] to-transparent p-3">
         <div className="flex items-center justify-between">
-          <span className="micro-sm text-white/30">Pipeline automatizado</span>
+          <span className="micro-sm text-white/30">
+            {isCreating ? "Creando video IA" : "Pipeline automatizado"}
+          </span>
           <span className="tnum text-[10px] text-beam-200">
-            {done}/{total}
+            {isCreating ? `${Math.round(createProgress)}%` : `${done}/${total}`}
           </span>
         </div>
         <div className="mt-2.5">
-          <Meter value={(done / total) * 100} />
+          <Meter value={isCreating ? createProgress : (done / total) * 100} />
         </div>
-        <p className="mt-2.5 text-[10px] leading-relaxed text-white/35">
-          Cada acción se procesa sobre el máster sin re-render. Vista previa
-          recalculada en tiempo real.
-        </p>
+        {isCreating ? (
+          <p className="mt-2.5 text-[10px] leading-relaxed text-beam-200/90 truncate">
+            {createStatusMessage || "Procesando video con IA..."}
+          </p>
+        ) : (
+          <textarea
+            value={topicPrompt}
+            onChange={(e) => setTopicPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={2}
+            placeholder="Cada acción se procesa sobre el máster sin re-render. Escribe aquí el tema o especificaciones..."
+            className="mt-2.5 w-full resize-none border-0 bg-transparent p-0 text-[10px] leading-relaxed text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-0"
+          />
+        )}
+        {topicPrompt.trim().length > 0 && !isCreating && (
+          <div className="mt-1 flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                const text = topicPrompt.trim();
+                setTopicPrompt("");
+                createVideo(text);
+              }}
+              className="micro-sm text-beam-300 hover:text-beam-100 transition-colors"
+            >
+              Crear video ↵
+            </button>
+          </div>
+        )}
       </div>
 
       {groups.map((g) => {
@@ -373,7 +420,42 @@ function TextTab() {
 }
 
 function AudioTab() {
+  const { selectedVoice, setSelectedVoice, playingVoiceId, previewVoice, flash } = useEditor();
+  const [speechifyCredits, setSpeechifyCredits] = useState<boolean>(true);
+
+  useEffect(() => {
+    fetch("/api/speechify/status")
+      .then((r) => r.json())
+      .then((d) => {
+        if (typeof d.has_credits === "boolean") {
+          setSpeechifyCredits(d.has_credits);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const bars = [0.4, 0.75, 0.55, 0.9, 0.35, 0.65, 1, 0.5, 0.8, 0.45, 0.7, 0.3, 0.6, 0.95, 0.4, 0.68];
+
+  const voices = [
+    // --- Voces VoiceStudio (Español) ---
+    { id: "es-MX-JorgeNeural", n: "Jorge · México", d: "Conversacional & Dinámico · 1.0×", provider: "voicestudio" },
+    { id: "es-US-AlonsoNeural", n: "Alonso · Latino", d: "Broadcast Internacional · 1.0×", provider: "voicestudio" },
+    { id: "es-CO-GonzaloNeural", n: "Gonzalo · Colombia", d: "Neutro & Calmo · 0.95×", provider: "voicestudio" },
+    { id: "es-AR-TomasNeural", n: "Tomás · Argentina", d: "Directo & Enérgico · 1.0×", provider: "voicestudio" },
+    { id: "es-MX-DaliaNeural", n: "Dalia · México", d: "Femenina Cálida · 1.0×", provider: "voicestudio" },
+    { id: "es-AR-ElenaNeural", n: "Elena · Argentina", d: "Femenina Expresiva · 0.95×", provider: "voicestudio" },
+    { id: "es-ES-AlvaroNeural", n: "Álvaro · España", d: "Tech & Divulgación · 0.95×", provider: "voicestudio" },
+    { id: "voicestudio-omni-es", n: "OmniVoice · Neutro", d: "VoiceStudio Multilingüe · 1.0×", provider: "voicestudio" },
+    { id: "voicestudio-piper-dave", n: "Piper Dave · Docu", d: "VoiceStudio Locutor · 0.95×", provider: "voicestudio" },
+    { id: "clon-propio", n: "Clon de voz propio", d: "Muestra de estudio 12 s", provider: "voicestudio" },
+    // --- Voces Speechify (Español) ---
+    { id: "speechify:alejandro", n: "Alejandro", d: "Speechify · Cálida · 1.0×", provider: "speechify" },
+    { id: "speechify:aitana", n: "Aitana", d: "Speechify · Brillante · 1.0×", provider: "speechify" },
+    { id: "speechify:alejandra", n: "Alejandra", d: "Speechify · Narrativa · 0.95×", provider: "speechify" },
+    { id: "speechify:alexa", n: "Alexa", d: "Speechify · Estudio · 1.0×", provider: "speechify" },
+    { id: "speechify:alondra", n: "Alondra", d: "Speechify · Documental · 0.95×", provider: "speechify" },
+  ];
+
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-3">
@@ -398,26 +480,96 @@ function AudioTab() {
       </div>
 
       <div className="space-y-2">
-        <SectionLabel>Locución neuronal</SectionLabel>
-        {[
-          { n: "Neural v4 · es-LA", d: "Cálida · 1.0×", on: true },
-          { n: "Neural v4 · es-ES", d: "Neutra · 0.95×" },
-          { n: "Clon de voz propio", d: "Muestra 12 s" },
-        ].map((v) => (
-          <div
-            key={v.n}
-            className={cn(
-              "flex items-center justify-between rounded-xl border p-2.5",
-              v.on ? "border-beam-400/30 bg-beam-500/[0.07]" : "border-white/[0.06] bg-white/[0.012]",
-            )}
-          >
-            <span>
-              <span className="block text-[11px] text-white/80">{v.n}</span>
-              <span className="micro-sm mt-1 block text-white/25">{v.d}</span>
-            </span>
-            <IconMusic className="h-3.5 w-3.5 text-white/25" />
+        <div className="flex items-center justify-between">
+          <SectionLabel>Locución neuronal</SectionLabel>
+          <span className="micro-sm text-white/30 tracking-wider">
+            {voices.length} VOCES
+          </span>
+        </div>
+
+        <div className="relative">
+          <div className="max-h-[178px] overflow-y-auto space-y-2 pr-1.5 subtle-scrollbar">
+            {voices.map((v) => {
+              const isSelected = selectedVoice === v.id || (v.id === "es-MX-JorgeNeural" && !voices.some((x) => x.id === selectedVoice));
+              const isPlaying = playingVoiceId === v.id;
+              const isBlocked = v.provider === "speechify" && !speechifyCredits;
+
+              return (
+                <div
+                  key={v.id}
+                  onClick={() => {
+                    if (isBlocked) {
+                      flash("Créditos agotados en Speechify. Clave bloqueada.");
+                      return;
+                    }
+                    setSelectedVoice(v.id);
+                  }}
+                  className={cn(
+                    "group flex items-center justify-between rounded-xl border p-2.5 transition-colors",
+                    isBlocked
+                      ? "cursor-not-allowed opacity-40 border-white/[0.04] bg-white/[0.008]"
+                      : isSelected
+                      ? "cursor-pointer border-beam-400/30 bg-beam-500/[0.07]"
+                      : "cursor-pointer border-white/[0.06] bg-white/[0.012] hover:border-white/[0.12]",
+                  )}
+                >
+                  <span className="min-w-0 pr-2">
+                    <span className="flex items-center gap-1.5">
+                      <span className={cn("block text-[11px] truncate", isSelected ? "text-white/95 font-medium" : "text-white/80")}>
+                        {v.n}
+                      </span>
+                      {v.provider === "speechify" && (
+                        <span
+                          className={cn(
+                            "rounded-[4px] px-1 py-0.5 text-[8.5px] uppercase tracking-wider font-mono",
+                            isBlocked
+                              ? "border border-rose-500/25 bg-rose-500/10 text-rose-300/80"
+                              : "border border-beam-500/25 bg-beam-500/15 text-beam-300",
+                          )}
+                        >
+                          {isBlocked ? "Agotada" : "Speechify"}
+                        </span>
+                      )}
+                      {v.provider === "voicestudio" && (
+                        <span className="rounded-[4px] px-1 py-0.5 text-[8.5px] uppercase tracking-wider font-mono border border-cyan-500/25 bg-cyan-500/10 text-cyan-300">
+                          VoiceStudio
+                        </span>
+                      )}
+                    </span>
+                    <span className="micro-sm mt-1 block text-white/25 truncate">{v.d}</span>
+                  </span>
+
+                  <button
+                    type="button"
+                    disabled={isBlocked}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isBlocked) {
+                        flash("Voz bloqueada sin créditos.");
+                        return;
+                      }
+                      previewVoice(v.id);
+                    }}
+                    title={isBlocked ? "Voz bloqueada sin créditos" : isPlaying ? "Pausar muestra" : "Reproducir muestra de voz"}
+                    className={cn(
+                      "shrink-0 rounded-md p-1 transition-colors",
+                      isBlocked
+                        ? "cursor-not-allowed text-white/10 opacity-30"
+                        : isPlaying
+                        ? "text-beam-400"
+                        : "text-white/25 hover:text-white/70",
+                    )}
+                  >
+                    <IconMusic className={cn("h-3.5 w-3.5", isPlaying && "animate-pulse text-beam-400")} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
-        ))}
+
+          {/* Gradiente degradé inferior suave */}
+          <div className="pointer-events-none absolute -bottom-0.5 left-0 right-0 h-6 bg-gradient-to-t from-[#0e0f15]/95 via-[#0e0f15]/60 to-transparent" />
+        </div>
       </div>
 
       <Hairline />
