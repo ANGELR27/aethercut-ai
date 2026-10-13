@@ -235,6 +235,7 @@ class WebPhotoAssetProvider(AssetProvider):
         from core.web_media import WikiMediaClient
 
         query = cue.search_query_en or cue.concept
+        clean_q = " ".join(dict.fromkeys(re.sub(r'[\.\,\;]+$', '', query).replace("4k", "").replace("1080p", "").replace("video", "").split()))
 
         def search() -> list:
             try:
@@ -242,7 +243,7 @@ class WebPhotoAssetProvider(AssetProvider):
                 with DDGS() as ddgs:
                     # Priorizar imágenes reales de prensa, artículos científicos, foros y web editorial
                     res = []
-                    search_term = f"{query} news report editorial press photograph -stock -watermark -shutterstock -alamy"
+                    search_term = f"{clean_q} documentary press photograph -stock -watermark"
                     try:
                         res = list(ddgs.images(search_term, size="Wallpaper", max_results=15))
                     except Exception:
@@ -253,9 +254,9 @@ class WebPhotoAssetProvider(AssetProvider):
                         except Exception:
                             pass
                     if not res:
-                        res = list(ddgs.images(f"{query} real photo documentary article -stock", size="Large", max_results=15))
+                        res = list(ddgs.images(f"{clean_q} real photograph -stock", size="Large", max_results=15))
                     if not res:
-                        res = list(ddgs.images(query, max_results=15))
+                        res = list(ddgs.images(clean_q, max_results=15))
 
                 clean_items = []
                 for r in res:
@@ -364,8 +365,12 @@ class YouTubeReactionAssetProvider(AssetProvider):
                 clean_q = " ".join(dict.fromkeys(query.replace("4k", "").replace("1080p", "").replace("video", "").split()))
                 import datetime as _dt
                 cur_yr = _dt.date.today().year
-                has_year = any(str(y) in query for y in range(2000, 2035))
-                search_term = f"{clean_q} {cur_yr} documentary 4k footage" if not has_year else f"{clean_q} documentary 4k footage"
+                has_year = any(str(y) in query for y in range(1900, 2035))
+                is_breaking = any(k in query.lower() for k in ("news", "breaking", "actualidad", "noticia", "report"))
+                if is_breaking and not has_year:
+                    search_term = f"{clean_q} {cur_yr} documentary 4k footage"
+                else:
+                    search_term = f"{clean_q} documentary 4k footage"
                 search_query = f"ytsearch1:{search_term}"
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     try:

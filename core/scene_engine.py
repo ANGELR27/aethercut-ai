@@ -601,6 +601,40 @@ class SceneEngine:
                 visual_intent, sentence_boundaries, duration
             )
 
+        # 3b. Remotion AI: Evaluación prioritaria para animaciones React (MetricCounter / VersusComparison)
+        ai_remotion_mov: Optional[Path] = None
+        if getattr(self, "ai_remotion", None) and self.ai_remotion.remotion.available() and duration >= 3.0:
+            c_templ_cand = str(getattr(scene.card, "template", "") if hasattr(scene.card, "template") else (scene.card.get("template", "") if isinstance(scene.card, dict) else "")).lower() if scene.card else ""
+            c_stat_cand = str(getattr(scene.card, "stat", "") if hasattr(scene.card, "stat") else (scene.card.get("stat", "") if isinstance(scene.card, dict) else "")) if scene.card else ""
+            is_stat_candidate = (
+                c_templ_cand in ("stat_counter", "stat_card")
+                or (visual_intent and visual_intent.intent_type == VisualIntentType.STAT_NUMBER)
+                or ("%" in c_stat_cand or (c_stat_cand and any(ch.isdigit() for ch in c_stat_cand) and len(c_stat_cand) < 14))
+            )
+            is_versus_candidate = (
+                c_templ_cand in ("versus_split", "versus", "vs")
+                or (visual_intent and visual_intent.intent_type == VisualIntentType.VERSUS_COMPARISON)
+                or (scene.card and " vs " in (getattr(scene.card, "headline", "") or "").lower())
+            )
+            if is_stat_candidate or is_versus_candidate:
+                try:
+                    ai_remotion_mov = await self.ai_remotion.render_ai_overlay(
+                        scene_name=scene.name,
+                        speech_text=speech_text,
+                        duration=duration,
+                        out_dir=scene_dir,
+                        vertical=self.is_vertical,
+                        theme_spec=getattr(self, "style_spec", None),
+                        card=scene.card,
+                        intent=visual_intent,
+                    )
+                    if ai_remotion_mov and ai_remotion_mov.exists() and ai_remotion_mov.stat().st_size > 20000:
+                        safe_log(f"[SceneEngine] ⚛️ Remotion React overlay animado generado para escena {scene.scene_id}: {ai_remotion_mov.name}")
+                        scene.card = None  # Remotion toma el protagonismo; evitamos tarjeta estática redundante
+                except Exception as _re_err:
+                    safe_log(f"[SceneEngine] Remotion React overlay omitido, fallback a estático: {_re_err}")
+                    ai_remotion_mov = None
+
         if scene.card:
             card_img_path = scene_dir / f"card_{scene.scene_id}.png"
             c_badge = str(scene.card.get("badge") if isinstance(scene.card, dict) else getattr(scene.card, "badge", "") or "").upper()
@@ -1017,27 +1051,26 @@ class SceneEngine:
         except Exception as _kwe:
             safe_log(f"[SceneEngine] Fallback en palabras clave flotantes: {_kwe}")
 
-        # Remotion AI: Generación en marcha de componente React animado personalizado
-        ai_remotion_mov: Optional[Path] = None
-        has_primary_foreground = bool(
-            (card_img_path and card_img_path.exists())
-            or (free_title_img_path and free_title_img_path.exists())
-            or (kinetic_word_paths and len(kinetic_word_paths) > 0)
-        )
-        if getattr(self, "ai_remotion", None) and duration >= 3.0 and not has_primary_foreground:
-            try:
-                ai_remotion_mov = await self.ai_remotion.render_ai_overlay(
-                    scene_name=scene.name,
-                    speech_text=speech_text,
-                    duration=duration,
-                    out_dir=scene_dir,
-                    vertical=self.is_vertical,
-                    theme_spec=getattr(self, "style_spec", None),
-                )
-            except Exception as _re_err:
-                safe_log(f"[SceneEngine] Remotion AI overlay omitido: {_re_err}")
-        elif has_primary_foreground:
-            safe_log(f"[SceneEngine] 🛡️ Remotion AI omitido en escena {scene.scene_id} por exclusión mutua (tarjeta/título activo).")
+        # Remotion AI: Si no se renderizó antes, evaluar si la escena se beneficia de uno
+        if not ai_remotion_mov:
+            has_primary_foreground = bool(
+                (card_img_path and card_img_path.exists())
+                or (free_title_img_path and free_title_img_path.exists())
+            )
+            if getattr(self, "ai_remotion", None) and duration >= 3.0 and not has_primary_foreground:
+                try:
+                    ai_remotion_mov = await self.ai_remotion.render_ai_overlay(
+                        scene_name=scene.name,
+                        speech_text=speech_text,
+                        duration=duration,
+                        out_dir=scene_dir,
+                        vertical=self.is_vertical,
+                        theme_spec=getattr(self, "style_spec", None),
+                        card=scene.card,
+                        intent=visual_intent,
+                    )
+                except Exception as _re_err:
+                    safe_log(f"[SceneEngine] Remotion AI overlay omitido: {_re_err}")
 
         srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
 
@@ -1220,7 +1253,7 @@ class SceneEngine:
                 cur_v = "v_av"
 
         # Overlay adicional según tipo de escena: Texto Libre Cinemático o Tarjeta Bento
-        if kinetic_word_paths:
+        if kinetic_word_paths and not (ai_remotion_mov and ai_remotion_mov.exists()):
             # ── TIPOGRAFÍA CINÉTICA VIRAL (palabra a palabra) ──
             # Cada palabra estalla en pantalla con fade + rise (ease-out cúbico)
             # escalonadas 0.32s, apiladas verticalmente como bloque central. La

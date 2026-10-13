@@ -189,6 +189,97 @@ Responde ÚNICAMENTE con un objeto JSON sin formato markdown extra:
             logger.warning("[AIRemotionGenerator] Fallback en decisión IA: %s", e)
         return None
 
+    def build_props_from_intent_or_card(
+        self,
+        scene_name: str,
+        speech_text: str,
+        duration: float,
+        vertical: bool = False,
+        theme_spec: Optional[Dict[str, Any]] = None,
+        card: Optional[Any] = None,
+        intent: Optional[Any] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Construye props directas para Remotion desde un card o un intent detectado sin latencia de red."""
+        c_template = ""
+        c_headline = ""
+        c_body = ""
+        c_stat = ""
+        if card:
+            c_template = str(getattr(card, "template", "") if hasattr(card, "template") else (card.get("template", "") if isinstance(card, dict) else "")).lower()
+            c_headline = str(getattr(card, "headline", "") if hasattr(card, "headline") else (card.get("headline", "") if isinstance(card, dict) else ""))
+            c_body = str(getattr(card, "body", "") if hasattr(card, "body") else (card.get("body", "") if isinstance(card, dict) else ""))
+            c_stat = str(getattr(card, "stat", "") if hasattr(card, "stat") else (card.get("stat", "") if isinstance(card, dict) else ""))
+
+        # 1. Caso Métrica Numérica (MetricCounter)
+        raw_stat = c_stat or (getattr(intent, "stat_value", "") if intent else "")
+        is_stat = (
+            c_template in ("stat_counter", "stat_card")
+            or (intent and getattr(intent, "intent_type", None) and intent.intent_type.value == "stat_number")
+            or ("%" in raw_stat or (raw_stat and any(ch.isdigit() for ch in raw_stat) and len(raw_stat) < 14))
+        )
+        if is_stat and raw_stat:
+            m_num = re.search(r"(\d+(?:[.,]\d+)?)", raw_stat)
+            if m_num:
+                num_str = m_num.group(1).replace(",", ".")
+                try:
+                    val = float(num_str) if "." in num_str else int(num_str)
+                    pref = "+" if "+" in raw_stat else ("$" if "$" in raw_stat else "")
+                    suff = "%" if "%" in raw_stat else ("M" if ("m" in raw_stat.lower() or "millon" in speech_text.lower()) else ("x" if "x" in raw_stat.lower() else ""))
+                    title_txt = c_headline or (getattr(intent, "entity_name", "") if intent else "") or scene_name or "MÉTRICA CLAVE"
+                    sub_txt = c_body or (getattr(intent, "raw_sentence", "")[:60] if intent else "") or "DATO VERIFICADO"
+                    props: Dict[str, Any] = {
+                        "durationSec": round(min(duration, 3.8), 2),
+                        "width": 1080 if vertical else 1920,
+                        "height": 1920 if vertical else 1080,
+                        "fps": 30,
+                        "vertical": vertical,
+                        "title": title_txt.upper(),
+                        "fromValue": 0,
+                        "toValue": val,
+                        "prefix": pref,
+                        "suffix": suff,
+                        "subtitle": sub_txt[:70],
+                        "theme": {
+                            "primary": (theme_spec or {}).get("primary", "#38BDF8"),
+                            "accent": (theme_spec or {}).get("accent", "#FFE14D"),
+                        },
+                    }
+                    return {"component": "MetricCounter", "props": props}
+                except Exception:
+                    pass
+
+        # 2. Caso Comparativa Versus (VersusComparison)
+        is_versus = (
+            c_template in ("versus_split", "versus", "vs")
+            or (intent and getattr(intent, "intent_type", None) and intent.intent_type.value == "versus_comparison")
+            or (" vs " in c_headline.lower() or " vs " in c_body.lower())
+        )
+        if is_versus:
+            s_a = c_headline or (getattr(intent, "entity_name", "") if intent else "") or "ANTES"
+            s_b = c_body or (getattr(intent, "secondary_entity", "") if intent else "") or "AHORA"
+            if " vs " in c_headline.lower():
+                parts = c_headline.split(" vs ", 1)
+                s_a, s_b = parts[0].strip(), parts[1].strip()
+            props = {
+                "durationSec": round(min(duration, 3.8), 2),
+                "width": 1080 if vertical else 1920,
+                "height": 1920 if vertical else 1080,
+                "fps": 30,
+                "vertical": vertical,
+                "tagA": "LADO A",
+                "labelA": s_a.upper()[:40],
+                "tagB": "LADO B",
+                "labelB": s_b.upper()[:40],
+                "category": "ANÁLISIS COMPARATIVO",
+                "theme": {
+                    "primary": (theme_spec or {}).get("primary", "#F43F5E"),
+                    "accent": (theme_spec or {}).get("accent", "#10B981"),
+                },
+            }
+            return {"component": "VersusComparison", "props": props}
+
+        return None
+
     async def render_ai_overlay(
         self,
         scene_name: str,
@@ -197,12 +288,22 @@ Responde ÚNICAMENTE con un objeto JSON sin formato markdown extra:
         out_dir: Path,
         vertical: bool = False,
         theme_spec: Optional[Dict[str, Any]] = None,
+        card: Optional[Any] = None,
+        intent: Optional[Any] = None,
     ) -> Optional[Path]:
-        """Ejecuta la decisión de la IA y renderiza el componente React en Remotion con alpha."""
+        """Ejecuta la decisión de Remotion y renderiza el componente React en MOV ProRes 4444 con canal alpha."""
         if not self.remotion.available():
             return None
 
-        spec = self.decide_overlay_for_scene(scene_name, speech_text, duration, vertical, theme_spec=theme_spec)
+        # 1. Intentar construir props directas desde el card o el intent (0ms latencia)
+        spec = self.build_props_from_intent_or_card(
+            scene_name, speech_text, duration, vertical=vertical, theme_spec=theme_spec, card=card, intent=intent
+        )
+
+        # 2. Si no hay datos directos, consultar al Director IA de Remotion
+        if not spec:
+            spec = self.decide_overlay_for_scene(scene_name, speech_text, duration, vertical, theme_spec=theme_spec)
+
         if not spec:
             return None
 

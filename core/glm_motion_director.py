@@ -27,7 +27,7 @@ class GLMMotionDirector:
             self._client = OpenAI(
                 base_url="https://integrate.api.nvidia.com/v1",
                 api_key=self.api_key,
-                timeout=12.0,
+                timeout=3.0,
             )
         return self._client
 

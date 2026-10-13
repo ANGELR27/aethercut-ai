@@ -188,16 +188,24 @@ class SmartMediaCurator:
             is_year_candidate = bool(re.match(r"^(18\d\d|19\d\d|20[0-3]\d)$", val_str))
             if not is_year_candidate and (any(c in val_str for c in "%x$€") or len(val_str) >= 2):
                 # Extraer etiqueta breve y significativa (filtrar palabras vacías)
-                stopwords = {"de", "la", "el", "un", "una", "en", "por", "al", "los", "las", "del", "que", "se", "y", "o", "a", "subió", "subio", "aumentó", "aumento", "bajó", "bajo", "creció", "crecio"}
+                stopwords = {
+                    "de", "la", "el", "un", "una", "en", "por", "al", "los", "las", "del", "que", "se", "y", "o", "a",
+                    "subió", "subio", "aumentó", "aumento", "bajó", "bajo", "creció", "crecio", "más", "mas", "menos",
+                    "este", "esta", "estos", "estas", "con", "sin", "su", "sus", "como", "cuando", "donde", "sobre",
+                    "entre", "hasta", "hacia", "desde", "para", "fue", "era", "son", "es", "han", "ha", "había", "habia",
+                    "según", "segun", "casi", "alrededor", "aproximadamente", "esto"
+                }
                 match_start = stat_match.start()
                 pre_text = clean_text[max(0, match_start - 45):match_start].strip()
                 post_text = clean_text[stat_match.end():min(len(clean_text), stat_match.end() + 45)].strip()
                 pre_words = [re.sub(r'^[^\w]+|[^\w]+$', '', w) for w in pre_text.split()]
-                pre_meaningful = [w for w in pre_words if w and w.lower() not in stopwords]
+                pre_meaningful = [w for w in pre_words if w and w.lower() not in stopwords and len(w) >= 3]
                 post_words = [re.sub(r'^[^\w]+|[^\w]+$', '', w) for w in post_text.split()]
-                post_meaningful = [w for w in post_words if w and w.lower() not in stopwords]
+                post_meaningful = [w for w in post_words if w and w.lower() not in stopwords and len(w) >= 3]
                 meaningful = pre_meaningful[-2:] + post_meaningful[:1]
                 label_str = " ".join(meaningful).strip().title() if meaningful else (scene_title or "Métrica Clave")
+                if len(label_str) < 4 or label_str.lower() in stopwords:
+                    label_str = scene_title or "Métrica Clave"
                 return VisualIntent(
                     intent_type=VisualIntentType.STAT_NUMBER,
                     entity_name=label_str,
@@ -296,29 +304,65 @@ class SmartMediaCurator:
     # --------------------------------------------------------------------------
     @classmethod
     def build_targeted_search_query(cls, intent: VisualIntent, topic: str = "") -> str:
-        """Construye un query en inglés hiper-específico anclado a la entidad real del caso."""
-        ent = intent.entity_name or topic or "documentary investigation"
+        """Construye un query en inglés hiper-específico anclado al tema real y a la entidad del caso."""
+        stopwords_lower = {
+            "más de", "mas de", "el error que", "según", "segun", "aumentó", "aumento",
+            "era de", "fue de", "esto", "esta", "este", "métrica clave", "metrica clave", "contexto documental"
+        }
+        topic_str = (topic or "").strip()
+        is_topic_meaningful = bool(
+            topic_str
+            and len(topic_str) >= 5
+            and topic_str.lower() not in ("technology abstract", "video reaction", "broll", "video", "photo")
+        )
+
+        # Si el Director ya diseñó un visual_query concreto en inglés, preservarlo como base inmutable
+        if is_topic_meaningful:
+            clean_t = re.sub(r'[\.\,\;]+$', '', topic_str).strip()
+            clean_words = dict.fromkeys(clean_t.split())
+            clean_topic = " ".join(clean_words)
+
+            if intent.intent_type == VisualIntentType.HISTORICAL_EVENT and intent.year:
+                year_str = str(intent.year)
+                y_part = f" {year_str}" if year_str not in clean_topic else ""
+                loc_part = f" {intent.location}" if (intent.location and intent.location.lower() not in clean_topic.lower()) else ""
+                return f"{clean_topic}{loc_part}{y_part} historical original archive photograph documentary 4k footage"
+
+            if intent.intent_type == VisualIntentType.GEO_LOCATION and intent.location:
+                loc_part = f" {intent.location}" if intent.location.lower() not in clean_topic.lower() else ""
+                return f"{clean_topic}{loc_part} authentic landscape documentary footage 4k"
+
+            if intent.intent_type == VisualIntentType.STAT_NUMBER and intent.stat_value:
+                return f"{clean_topic} documentary footage 4k"
+
+            return f"{clean_topic} documentary footage 4k"
+
+        # Si no hubo topic del Director, recurrir a la entidad detectada asegurando que no sea stopword
+        ent = (intent.entity_name or "").strip()
+        if not ent or ent.lower() in stopwords_lower or len(ent) < 3:
+            ent = topic_str or "scientific documentary investigation"
+
         ent_clean = re.sub(r'[\.\,\;]+$', '', ent).strip()
 
         if intent.intent_type == VisualIntentType.HISTORICAL_EVENT and intent.year:
             loc_part = f" {intent.location}" if intent.location else ""
             year_str = str(intent.year)
             year_part = f" {year_str}" if year_str not in ent_clean else ""
-            return f"{ent_clean}{loc_part}{year_part} historical original archive photograph documentary evidence"
+            return f"{ent_clean}{loc_part}{year_part} historical archive photograph documentary 4k"
 
         if intent.intent_type == VisualIntentType.GEO_LOCATION and intent.location:
-            return f"{ent_clean} {intent.location} authentic geography aerial landscape documentary footage 4k"
+            return f"{ent_clean} {intent.location} landscape documentary footage 4k"
 
         if intent.intent_type == VisualIntentType.VERSUS_COMPARISON and intent.secondary_entity:
-            return f"{ent_clean} vs {intent.secondary_entity} scientific comparison study"
+            return f"{ent_clean} vs {intent.secondary_entity} comparison study documentary footage 4k"
 
         if intent.intent_type == VisualIntentType.COMPLEX_CONCEPT:
-            return f"{ent_clean} laboratory scientific diagram technology visualization 4k"
+            return f"{ent_clean} scientific visualization documentary footage 4k"
 
         if intent.intent_type == VisualIntentType.STAT_NUMBER and intent.stat_value:
-            return f"{ent_clean} official report data statistics metric"
+            return f"{ent_clean} documentary footage 4k"
 
-        return f"{ent_clean} official report documentary footage 4k"
+        return f"{ent_clean} documentary footage 4k"
 
     # --------------------------------------------------------------------------
     # 3, 4, 5, 6, 7 & 8: Evaluación, Verificación, Distinción y Descarte
