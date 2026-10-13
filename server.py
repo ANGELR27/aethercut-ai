@@ -193,10 +193,18 @@ def cleanup_cancelled_task_files(task_id: str, input_file: Path) -> None:
             path.unlink(missing_ok=True)
 
 
+FRONTEND_DIST_INDEX = Path(__file__).resolve().parent / "frontend" / "dist" / "index.html"
+
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
+    if FRONTEND_DIST_INDEX.exists():
+        response = FileResponse(str(FRONTEND_DIST_INDEX), media_type="text/html")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
     template = jinja_env.get_template("index.html")
     return HTMLResponse(content=template.render())
+
 
 
 async def run_pipeline_task(task_id: str, input_file: Path, options: PipelineOptions) -> None:
