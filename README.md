@@ -1,3 +1,13 @@
+---
+title: AetherCut AI
+emoji: 🎬
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # AetherCut AI
 
 AetherCut AI es una aplicación local para preparar videos hablados. Analiza el video con Gemini, detecta pausas largas en el audio y genera una versión editada con cortes, material de apoyo, tarjetas informativas verificadas, subtítulos y Shorts verticales.

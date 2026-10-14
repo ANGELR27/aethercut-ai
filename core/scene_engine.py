@@ -32,6 +32,7 @@ from core.director import DirectorBroadcastPlan, DirectorScene, SceneCard
 from core.models import InfoCard
 from core.orchestrator import AssetOrchestrator
 from core.llm import safe_log
+from utils.file_manager import FileManager
 
 
 # Presets de subtítulos (ASS force_style). 'classic' = estilo original de la app.
@@ -1644,13 +1645,14 @@ class SceneEngine:
             cur_v = "v_sub"
 
         # Título superior / HUD y Marca de Agua Ángel R sutil
-        font_path = "C\\:/Windows/Fonts/segoeuib.ttf"
+        font_p = FileManager.get_system_font_path()
+        font_opt = f":fontfile='{font_p}'" if font_p else ""
         clean_tag = re.sub(r"[^\w\s-]", "", scene.name).strip()[:30] or "EN VIVO"
         hud_fontsize = 18 if self.is_vertical else 20
         wm_fontsize = 16 if self.is_vertical else 18
         filter_parts.append(
-            f"[{cur_v}]drawtext=fontfile='{font_path}':text='● EN VIVO  |  {clean_tag.upper()}':fontcolor=white:fontsize={hud_fontsize}:x=44:y=34:box=1:boxcolor=black@0.65:boxborderw=8,"
-            f"drawtext=fontfile='{font_path}':text='Ángel R':fontcolor=white@0.35:fontsize={wm_fontsize}:x=w-tw-44:y=34[v_out]"
+            f"[{cur_v}]drawtext{font_opt}:text='● EN VIVO  |  {clean_tag.upper()}':fontcolor=white:fontsize={hud_fontsize}:x=44:y=34:box=1:boxcolor=black@0.65:boxborderw=8,"
+            f"drawtext{font_opt}:text='Ángel R':fontcolor=white@0.35:fontsize={wm_fontsize}:x=w-tw-44:y=34[v_out]"
         )
 
         # Audio mix: voz de la escena + BGM sutil + SFX de transición

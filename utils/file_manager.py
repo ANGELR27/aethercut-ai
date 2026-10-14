@@ -51,6 +51,21 @@ class FileManager:
             return {"duration": 0.0, "width": 0, "height": 0, "fps": 30.0, "error": str(e)}
 
     @staticmethod
+    def get_system_font_path() -> Optional[str]:
+        """Devuelve la ruta normalizada para drawtext de FFmpeg compatible con Windows y Linux."""
+        candidates = [
+            Path("C:/Windows/Fonts/segoeuib.ttf"),
+            Path("C:/Windows/Fonts/arialbd.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+            Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+            Path("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
+        ]
+        for c in candidates:
+            if c.exists():
+                return str(c.resolve()).replace("\\", "/").replace(":", "\\:")
+        return None
+
+    @staticmethod
     def create_analysis_proxy(source: Path, destination: Path,
                               cancel_event: Optional[Event] = None) -> Path:
         """Crea una copia liviana únicamente para el análisis remoto.
