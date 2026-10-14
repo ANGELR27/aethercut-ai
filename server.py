@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -772,13 +773,15 @@ async def get_project(task_id: str):
         plan_data = document.get("plan")
         editor = editor_snapshot(VideoEditingPlan.model_validate(plan_data)) if plan_data else None
 
-    # Asegurar compatibilidad de URLs del video editado
+    # Asegurar compatibilidad de URLs del video editado y sincronizar duración real
     if document.get("result") and isinstance(document["result"], dict):
         res = document["result"]
         if "media_url" in res and "master_video_url" not in res:
             res["master_video_url"] = res["media_url"]
         if "master_video_url" in res and "media_url" not in res:
             res["media_url"] = res["master_video_url"]
+        if editor and isinstance(editor, dict) and editor.get("duration"):
+            res["duration"] = editor["duration"]
 
     # No se exponen rutas del equipo local a la interfaz.
     public = {key: value for key, value in document.items() if key not in {"source_file", "preview_file", "plan"}}
@@ -810,8 +813,78 @@ async def get_broadcast_plan(task_id: str):
     return {"scenes": scenes, "title": raw.get("title", ""), "available": True}
 
 
+def prune_old_projects(keep_max: int = 5, protect_id: Optional[str] = None) -> int:
+    """Conserva únicamente los 5 proyectos más recientes y elimina permanentemente los anteriores para liberar espacio."""
+    projects_dir = settings.PROJECTS_DIR
+    if not projects_dir.exists():
+        return 0
+
+    manifests = list(projects_dir.glob("*/project.json"))
+    project_items = []
+    for m in manifests:
+        pid = m.parent.name
+        try:
+            mtime = m.stat().st_mtime
+            doc = json.loads(m.read_text(encoding="utf-8"))
+            updated_at = doc.get("updated_at") or doc.get("created_at") or ""
+            project_items.append((pid, mtime, str(updated_at)))
+        except Exception:
+            try:
+                project_items.append((pid, m.stat().st_mtime, ""))
+            except Exception:
+                pass
+
+    project_items.sort(key=lambda x: (x[2], x[1]), reverse=True)
+
+    if len(project_items) <= keep_max:
+        return 0
+
+    to_keep = set()
+    if protect_id:
+        to_keep.add(protect_id)
+
+    for pid, _, _ in project_items:
+        if len(to_keep) < keep_max:
+            to_keep.add(pid)
+        else:
+            break
+
+    deleted_count = 0
+    freed_mb = 0.0
+    for pid, _, _ in project_items:
+        if pid not in to_keep and pid not in task_jobs:
+            try:
+                store = ProjectStore(pid)
+                rep = store.delete(include_source=True, include_outputs=True)
+                for sh in settings.OUTPUTS_DIR.glob(f"short_{pid}_*.mp4"):
+                    try:
+                        sh.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                deleted_count += 1
+                freed_mb += rep.get("freed_bytes", 0) / (1024 * 1024)
+            except Exception as _e_del:
+                safe_log(f"[Prune] Error eliminando proyecto antiguo {pid}: {_e_del}")
+
+    if deleted_count > 0:
+        safe_log(f"[Prune] Se conservaron {len(to_keep)} proyectos recientes. Se eliminaron {deleted_count} proyectos antiguos ({round(freed_mb, 1)} MB liberados).")
+
+    # Limpiar directorios huérfanos sin manifest
+    for d in projects_dir.iterdir():
+        if d.is_dir() and d.name not in to_keep and not (d / "project.json").exists():
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+            except Exception:
+                pass
+
+    return deleted_count
+
+
 @app.get("/api/projects")
 async def list_projects():
+    # Mantener estricto límite de 5 proyectos más recientes en disco
+    prune_old_projects(keep_max=5)
+
     projects = []
     for manifest in settings.PROJECTS_DIR.glob("*/project.json"):
         try:
@@ -852,7 +925,7 @@ async def list_projects():
         except (OSError, json.JSONDecodeError):
             continue
     projects.sort(key=lambda project: project.get("updated_at") or "", reverse=True)
-    return {"projects": projects[:50]}
+    return {"projects": projects[:5]}
 
 
 @app.delete("/api/projects/{task_id}")
@@ -908,6 +981,127 @@ async def get_project_preview(task_id: str):
     )
 
 
+def get_downloads_folder() -> Path:
+    """Retorna la carpeta de Descargas del usuario de forma robusta."""
+    dl = Path.home() / "Downloads"
+    if dl.exists() and dl.is_dir():
+        return dl
+    dl_es = Path.home() / "Descargas"
+    if dl_es.exists() and dl_es.is_dir():
+        return dl_es
+    dl.mkdir(parents=True, exist_ok=True)
+    return dl
+
+
+def format_srt_time(seconds: float) -> str:
+    hrs = int(seconds // 3600)
+    mins = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int(round((seconds - int(seconds)) * 1000))
+    return f"{hrs:02d}:{mins:02d}:{secs:02d},{millis:03d}"
+
+
+def parse_srt_time(ts: str) -> float:
+    ts = ts.strip().replace(",", ".")
+    parts = ts.split(":")
+    if len(parts) == 3:
+        return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+    elif len(parts) == 2:
+        return float(parts[0]) * 60 + float(parts[1])
+    return float(parts[0])
+
+
+def _prepare_subtitled_master(task_id: str, master_file: Path, style: str = "classic") -> Path:
+    """Genera versión con subtítulos quemados garantizando offsets de tiempo correctos por escena,
+    encuadre seguro adaptado a la relación de aspecto (9:16 vs 16:9) y estilo visual seleccionado."""
+    sub_master = settings.OUTPUTS_DIR / f"{task_id}_master_subtitled_{style}.mp4"
+
+    proj_dir = settings.PROJECTS_DIR / task_id
+    full_srt = proj_dir / "work" / "full_subtitles.srt"
+
+    # Si ya existe el subtitulado y es más reciente que el full_srt, reutilizar
+    if sub_master.exists() and sub_master.stat().st_size > 50000:
+        if full_srt.exists() and sub_master.stat().st_mtime >= full_srt.stat().st_mtime:
+            return sub_master
+
+    # Determinar si el video es vertical (9:16) o horizontal (16:9)
+    is_vertical = False
+    try:
+        p_doc = ProjectStore(task_id).read()
+        p_opts = p_doc.get("options") or {}
+        is_vertical = p_opts.get("aspect_ratio") == "9:16"
+    except Exception:
+        pass
+    if not is_vertical and master_file.exists():
+        try:
+            meta = FileManager.get_media_metadata(master_file)
+            if meta.get("height", 0) > meta.get("width", 0):
+                is_vertical = True
+        except Exception:
+            pass
+
+    all_srt_blocks = []
+    scene_dirs = sorted(
+        (proj_dir / "work").glob("scene_*"),
+        key=lambda p: int(p.name.replace("scene_", "")) if p.name.replace("scene_", "").isdigit() else 999
+    ) if (proj_dir / "work").exists() else []
+
+    cum_offset = 0.0
+    sub_index = 1
+    for sc_dir in scene_dirs:
+        srt_path = sc_dir / "scene_subtitles.srt"
+        scene_mp4 = sc_dir / f"{sc_dir.name}.mp4"
+        sc_dur = 0.0
+        if scene_mp4.exists():
+            try:
+                sc_dur = FileManager.get_media_metadata(scene_mp4).get("duration", 0.0)
+            except Exception:
+                pass
+        if srt_path.exists():
+            try:
+                raw_srt = srt_path.read_text(encoding="utf-8").strip()
+                if raw_srt:
+                    blocks = raw_srt.split("\n\n")
+                    for blk in blocks:
+                        lns = [l.strip() for l in blk.splitlines() if l.strip()]
+                        if len(lns) >= 3 and "-->" in lns[1]:
+                            tp = lns[1].split("-->")
+                            t_start = parse_srt_time(tp[0]) + cum_offset
+                            t_end = parse_srt_time(tp[1]) + cum_offset
+                            text_content = "\n".join(lns[2:])
+                            all_srt_blocks.append(
+                                f"{sub_index}\n{format_srt_time(t_start)} --> {format_srt_time(t_end)}\n{text_content}"
+                            )
+                            sub_index += 1
+            except Exception as _e_sc_srt:
+                safe_log(f"[Download] Error procesando SRT de {sc_dir.name}: {_e_sc_srt}")
+        cum_offset += sc_dur
+
+    if all_srt_blocks:
+        try:
+            full_srt.write_text("\n\n".join(all_srt_blocks), encoding="utf-8")
+            esc_srt = str(full_srt.resolve()).replace("\\", "/").replace(":", "\\:")
+            from core.scene_engine import subtitle_force_style
+            sub_size = 22 if is_vertical else 18
+            margin_v = 75 if is_vertical else 35
+            force_style = subtitle_force_style(style, sub_size, margin_v)
+            cmd = [
+                "ffmpeg", "-y", "-i", str(master_file),
+                "-vf", f"subtitles='{esc_srt}':force_style='{force_style}'",
+                "-c:a", "copy",
+                "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                str(sub_master)
+            ]
+            burn_timeout = max(300, int(cum_offset * 1.5)) if cum_offset > 0 else 300
+            subprocess.run(cmd, capture_output=True, timeout=burn_timeout)
+            if sub_master.exists() and sub_master.stat().st_size > 50000:
+                return sub_master
+        except Exception as _burn_err:
+            safe_log(f"[Download] Fallo al quemar subtítulos en export: {_burn_err}")
+
+    return master_file
+
+
 @app.get("/api/projects/{task_id}/download")
 @app.get("/api/projects/{task_id}/download/{filename}")
 async def download_project_master(
@@ -938,46 +1132,7 @@ async def download_project_master(
 
     file_to_send = master_file
     if burn_subtitles:
-        sub_master = settings.OUTPUTS_DIR / f"{task_id}_master_subtitled_{style}.mp4"
-        if sub_master.exists() and sub_master.stat().st_size > 50000:
-            file_to_send = sub_master
-        else:
-            proj_dir = settings.PROJECTS_DIR / task_id
-            full_srt = proj_dir / "work" / "full_subtitles.srt"
-            all_srt_blocks = []
-            scene_dirs = sorted(
-                (proj_dir / "work").glob("scene_*"),
-                key=lambda p: int(p.name.replace("scene_", "")) if p.name.replace("scene_", "").isdigit() else 999
-            ) if (proj_dir / "work").exists() else []
-
-            for sc_dir in scene_dirs:
-                srt_path = sc_dir / "scene_subtitles.srt"
-                if srt_path.exists():
-                    try:
-                        content = srt_path.read_text(encoding="utf-8").strip()
-                        if content:
-                            all_srt_blocks.append(content)
-                    except Exception:
-                        pass
-
-            if all_srt_blocks:
-                try:
-                    full_srt.write_text("\n\n".join(all_srt_blocks), encoding="utf-8")
-                    esc_srt = str(full_srt.resolve()).replace("\\", "/").replace(":", "\\:")
-                    font_path = "C\\:/Windows/Fonts/segoeuib.ttf"
-                    force_style = "FontName=Segoe UI,Bold=1,PrimaryColour=&H00FFFFFF,BorderStyle=1,Outline=3,Shadow=0,OutlineColour=&H00000000,FontSize=20,MarginV=45"
-                    cmd = [
-                        "ffmpeg", "-y", "-i", str(master_file),
-                        "-vf", f"subtitles='{esc_srt}':force_style='{force_style}'",
-                        "-c:a", "copy",
-                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-                        str(sub_master)
-                    ]
-                    subprocess.run(cmd, capture_output=True, timeout=90)
-                    if sub_master.exists() and sub_master.stat().st_size > 50000:
-                        file_to_send = sub_master
-                except Exception as _burn_err:
-                    safe_log(f"[Download] Fallo al quemar subtítulos en export: {_burn_err}")
+        file_to_send = _prepare_subtitled_master(task_id, master_file, style)
 
     import unicodedata
     if not filename:
@@ -1001,6 +1156,60 @@ async def download_project_master(
             "Content-Type": "video/mp4",
         }
     )
+
+
+@app.post("/api/projects/{task_id}/export-to-downloads")
+async def export_project_to_downloads(
+    task_id: str,
+    payload: Dict[str, Any] = Body(default_factory=dict)
+):
+    """Copia directa e inmediata del video final a la carpeta Descargas del usuario local."""
+    store = ProjectStore(task_id)
+    try:
+        document = store.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
+
+    master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+    if not master_file.exists():
+        res = document.get("result") or {}
+        candidate = Path(res.get("output_file") or "")
+        if candidate.exists() and candidate.is_file():
+            master_file = candidate
+        else:
+            prev = Path(document.get("preview_file") or "")
+            if prev.exists() and prev.is_file():
+                master_file = prev
+            else:
+                raise HTTPException(status_code=404, detail="El video master todavía no está generado.")
+
+    burn_subtitles = bool(payload.get("burn_subtitles", False))
+    style = str(payload.get("style", "classic"))
+    custom_title = payload.get("title")
+
+    file_to_send = master_file
+    if burn_subtitles:
+        file_to_send = _prepare_subtitled_master(task_id, master_file, style)
+
+    import unicodedata, shutil
+    raw_title = custom_title or document.get("original_name") or (document.get("result") or {}).get("title") or f"KAI_{task_id}"
+    ascii_title = unicodedata.normalize("NFKD", str(raw_title)).encode("ascii", "ignore").decode("ascii")
+    safe_title = re.sub(r"[^\w\s-]", "", ascii_title).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
+    out_filename = f"{safe_title}.mp4" if not safe_title.lower().endswith(".mp4") else safe_title
+
+    downloads_dir = get_downloads_folder()
+    dest_path = downloads_dir / out_filename
+
+    shutil.copy2(file_to_send, dest_path)
+    safe_log(f"[Export] Video copiado exitosamente a: {dest_path} ({round(dest_path.stat().st_size / 1024 / 1024, 2)} MB)")
+
+    return {
+        "ok": True,
+        "filename": dest_path.name,
+        "path": str(dest_path),
+        "size_mb": round(dest_path.stat().st_size / (1024 * 1024), 2),
+        "message": f"¡Video exportado directamente a Descargas! ({dest_path.name})"
+    }
 
 
 @app.get("/api/projects/{task_id}/clips")

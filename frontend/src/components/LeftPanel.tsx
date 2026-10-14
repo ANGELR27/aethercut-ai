@@ -24,10 +24,13 @@ import {
   IconType,
   IconPin,
   IconRefresh,
+  IconFolder,
+  IconTrash,
+  IconPlay,
 } from "./Icons";
 
 const TABS = [
-  { id: "media", label: "Medios", icon: IconLayers },
+  { id: "media", label: "Proyectos", icon: IconFolder },
   { id: "ai", label: "IA", icon: IconSparkle },
   { id: "text", label: "Texto", icon: IconType },
   { id: "audio", label: "Audio", icon: IconMusic },
@@ -86,7 +89,7 @@ export function LeftPanel() {
             </h2>
             <p className="micro-sm mt-1.5 text-white/25">
               {tab === "ai" && "Automatización neuronal"}
-              {tab === "media" && "Tomas y generativos"}
+              {tab === "media" && "Recientes en disco (máx. 5)"}
               {tab === "text" && "Subtítulos y titulares"}
               {tab === "audio" && "Pista y locución"}
               {tab === "fx" && "LUT, grano y reencuadre"}
@@ -839,79 +842,176 @@ function AITab() {
 }
 
 function MediaTab() {
-  const { seek, clips } = useEditor();
+  const { seek, clips, projects, activeProjectId, selectProject, deleteProject } = useEditor();
   const realScenes = clips.filter((c) => c.kind === "scene");
+  const recentProjects = (projects || []).slice(0, 5);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      {/* 1. PROYECTOS RECIENTES EN DISCO (MÁXIMO 5) */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-0.5">
+          <SectionLabel
+            right={
+              <span className="rounded-full bg-beam-500/10 border border-beam-400/20 px-1.5 py-0.2 text-[9px] font-semibold text-beam-300 font-mono">
+                {recentProjects.length}/5 en disco
+              </span>
+            }
+          >
+            Proyectos Recientes
+          </SectionLabel>
+        </div>
+
+        {recentProjects.length === 0 ? (
+          <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 text-center">
+            <IconFolder className="mx-auto h-6 w-6 text-white/20 mb-1.5" />
+            <p className="text-[11px] text-white/50">No hay proyectos recientes</p>
+            <p className="text-[9.5px] text-white/25 mt-0.5">Genera uno desde la pestaña IA</p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {recentProjects.map((p) => {
+              const isActive = p.id === activeProjectId;
+              const title = p.name || p.topic || `Proyecto ${p.id}`;
+              const durSec = p.duration ? Math.round(p.duration) : null;
+              const durStr = durSec
+                ? durSec >= 60
+                  ? `${Math.floor(durSec / 60)}m ${durSec % 60}s`
+                  : `${durSec}s`
+                : null;
+
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => selectProject(p.id)}
+                  className={cn(
+                    "group relative flex w-full items-center gap-2.5 rounded-xl border p-2 text-left transition-all duration-200 cursor-pointer",
+                    isActive
+                      ? "border-beam-400/50 bg-beam-500/15 shadow-[0_0_15px_-3px_rgba(79,123,255,0.3)] ring-1 ring-beam-400/30"
+                      : "border-white/[0.06] bg-white/[0.015] hover:border-white/[0.15] hover:bg-white/[0.04]",
+                  )}
+                >
+                  {/* Thumbnail / Frame */}
+                  <div className="relative h-12 w-[34px] shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/50">
+                    {p.thumbnail_url ? (
+                      <img
+                        src={p.thumbnail_url}
+                        alt=""
+                        className="no-drag h-full w-full object-cover opacity-85 transition-opacity group-hover:opacity-100"
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center bg-gradient-to-br from-beam-900/40 via-ink-900 to-black text-beam-300/40">
+                        <IconPlay className="h-3.5 w-3.5" />
+                      </div>
+                    )}
+                    {isActive && (
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-beam-400" />
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          "truncate text-[11px] font-medium leading-tight",
+                          isActive ? "text-white" : "text-white/80 group-hover:text-white",
+                        )}
+                        title={title}
+                      >
+                        {title}
+                      </span>
+                    </div>
+
+                    <div className="mt-1 flex items-center gap-2 text-[9.5px]">
+                      {durStr && (
+                        <span className="font-mono text-white/50 bg-white/[0.04] px-1 py-0.2 rounded border border-white/[0.04]">
+                          ⏱ {durStr}
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          "flex items-center gap-1",
+                          p.has_result ? "text-emerald-400/90" : "text-amber-400/90",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            p.has_result ? "bg-emerald-400" : "bg-amber-400",
+                          )}
+                        />
+                        {p.has_result ? "Listo" : p.status || "En proceso"}
+                      </span>
+                      {isActive && (
+                        <span className="text-beam-300 font-semibold text-[8.5px] uppercase tracking-wider ml-auto">
+                          Activo
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Acciones: botón eliminar */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`¿Eliminar «${title.slice(0, 30)}...» de disco?`)) {
+                        deleteProject(p.id);
+                      }
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0"
+                    title="Eliminar proyecto de disco y liberar espacio"
+                  >
+                    <IconTrash className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 2. ESCENAS DEL PROYECTO ACTIVO */}
       {realScenes.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-2 pt-2 border-t border-white/[0.06]">
           <SectionLabel
             right={<span className="tnum text-[9px] text-white/25">{realScenes.length}</span>}
           >
-            Escenas del Proyecto
+            Escenas del Proyecto Activo
           </SectionLabel>
-          {realScenes.map((sc) => (
-            <button
-              key={sc.id}
-              onClick={() => seek(sc.start)}
-              className="group flex w-full items-center gap-2.5 rounded-xl border border-white/[0.05] bg-white/[0.012] p-2 text-left transition-all duration-300 hover:border-beam-300/25 hover:bg-white/[0.04]"
-            >
-              <div className="relative h-11 w-[30px] shrink-0 overflow-hidden rounded-md border border-white/10">
-                {sc.frame ? (
-                  <img
-                    src={sc.frame}
-                    alt=""
-                    className="no-drag h-full w-full object-cover opacity-80 transition-opacity group-hover:opacity-100"
-                  />
-                ) : (
-                  <div className="h-full w-full bg-gradient-to-br from-abyss-700 to-ink-900" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[11px] text-white/80">{sc.label}</div>
-                <div className="micro-sm mt-1 text-white/25">
-                  {Math.round(sc.start)}s · {Math.round(sc.duration)}s dur
+          <div className="space-y-1.5">
+            {realScenes.map((sc) => (
+              <button
+                key={sc.id}
+                onClick={() => seek(sc.start)}
+                className="group flex w-full items-center gap-2.5 rounded-xl border border-white/[0.05] bg-white/[0.012] p-2 text-left transition-all duration-200 hover:border-beam-300/25 hover:bg-white/[0.04]"
+              >
+                <div className="relative h-11 w-[30px] shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/40">
+                  {sc.frame ? (
+                    <img
+                      src={sc.frame}
+                      alt=""
+                      className="no-drag h-full w-full object-cover opacity-80 transition-opacity group-hover:opacity-100"
+                    />
+                  ) : (
+                    <div className="h-full w-full bg-gradient-to-br from-abyss-700 to-ink-900" />
+                  )}
                 </div>
-              </div>
-              <IconChevron className="h-3 w-3 shrink-0 text-white/15 transition-transform group-hover:translate-x-0.5 group-hover:text-white/40" />
-            </button>
-          ))}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[11px] text-white/80 group-hover:text-white">
+                    {sc.label}
+                  </div>
+                  <div className="micro-sm mt-1 text-white/30">
+                    {Math.round(sc.start)}s · {Math.round(sc.duration)}s dur
+                  </div>
+                </div>
+                <IconChevron className="h-3 w-3 shrink-0 text-white/15 transition-transform group-hover:translate-x-0.5 group-hover:text-white/40" />
+              </button>
+            ))}
+          </div>
         </div>
       )}
-
-      {ASSET_FOLDERS.map((folder) => (
-        <div key={folder.name} className="space-y-2">
-          <SectionLabel
-            right={<span className="tnum text-[9px] text-white/25">{folder.count}</span>}
-          >
-            {folder.name}
-          </SectionLabel>
-          {folder.items.map((it) => (
-            <button
-              key={it.name}
-              className="group flex w-full items-center gap-2.5 rounded-xl border border-white/[0.05] bg-white/[0.012] p-2 text-left transition-all duration-300 hover:border-beam-300/25 hover:bg-white/[0.04]"
-            >
-              <div className="relative h-11 w-[30px] shrink-0 overflow-hidden rounded-md border border-white/10">
-                {it.frame ? (
-                  <img
-                    src={it.frame}
-                    alt=""
-                    className="no-drag h-full w-full object-cover opacity-80 transition-opacity group-hover:opacity-100"
-                  />
-                ) : (
-                  <div className="h-full w-full bg-gradient-to-br from-abyss-700 to-ink-900" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[11px] text-white/80">{it.name}</div>
-                <div className="micro-sm mt-1 text-white/25">{it.meta}</div>
-              </div>
-              <IconChevron className="h-3 w-3 shrink-0 text-white/15 transition-transform group-hover:translate-x-0.5 group-hover:text-white/40" />
-            </button>
-          ))}
-        </div>
-      ))}
     </div>
   );
 }

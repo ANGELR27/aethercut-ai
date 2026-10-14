@@ -49,11 +49,11 @@ SUBTITLE_STYLES: Dict[str, str] = {
 
 
 def subtitle_force_style(sub_style: str, font_size: int, margin_v: int) -> str:
-    """Devuelve el force_style de libass para el preset pedido (fallback: classic)."""
+    """Devuelve el force_style de libass para el preset pedido (fallback: classic) con alineación centrada y márgenes seguros."""
     base = SUBTITLE_STYLES.get((sub_style or "classic").strip().lower(), SUBTITLE_STYLES["classic"])
     if (sub_style or "").strip().lower() == "viral":
         font_size = int(font_size * 1.15)
-    return f"{base},FontSize={font_size},MarginV={margin_v}"
+    return f"{base},FontSize={font_size},MarginV={margin_v},Alignment=2,MarginL=40,MarginR=40"
 
 
 # Modulación de voz emocional real (rate=velocidad, pitch=tono)
@@ -1635,8 +1635,8 @@ class SceneEngine:
         # Subtítulos con libass (solo si burn_subtitles está activo; de lo contrario quedan limpios para el editor frontend)
         if srt_path and srt_path.exists() and getattr(self, "burn_subtitles", False):
             esc_srt = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
-            sub_size = 18 if self.is_vertical else 14
-            margin_v = 40 if self.is_vertical else 20
+            sub_size = 22 if self.is_vertical else 18
+            margin_v = 75 if self.is_vertical else 35
             force_style = subtitle_force_style(self.sub_style, sub_size, margin_v)
             filter_parts.append(
                 f"[{cur_v}]subtitles='{esc_srt}':force_style='{force_style}'[v_sub]"
@@ -1739,25 +1739,20 @@ class SceneEngine:
                 )
                 audio_mix_inputs.append("[a_chip_sfx]")
 
-        # Aplicar color grading cinematográfico al output final si no es 'raw'
+        # Normalizar a espacio de color estándar broadcast (bt709, limitado tv, yuv420p)
+        # Esto previene desfases de SPS o decodificación JPEG yuvj420p entre escenas en concat copy
         grade_filter = COLOR_GRADE_FILTERS.get(getattr(self, 'color_grade', 'cinema'), '')
+        scale_limit = "scale=out_color_matrix=bt709:out_range=limited,format=yuv420p"
         if grade_filter:
-            filter_parts.append(f"[v_out]format=yuv420p,{grade_filter}[v_graded]")
+            filter_parts.append(f"[v_out]{scale_limit},{grade_filter}[v_graded]")
             final_v = "v_graded"
         else:
-            # Asegurar yuv420p si no hay grading
-            filter_parts.append("[v_out]format=yuv420p[v_graded]")
+            filter_parts.append(f"[v_out]{scale_limit}[v_graded]")
             final_v = "v_graded"
 
-        # Transición dip-to-black entre escenas (estándar broadcast): cada escena
-        # entra desde negro y sale a negro (0.25s). En la concatenación se lee
-        # como un corte con dip rápido y elegante; la primera escena abre desde
-        # negro (apertura) y la última cierra a negro (final). Coste cero: forma
-        # parte del encode propio de la escena, sin re-codificar en el concat.
-        filter_parts.append(
-            f"[{final_v}]fade=t=in:st=0:d=0.25,"
-            f"fade=t=out:st={max(0.0, duration - 0.28):.2f}:d=0.28[v_final]"
-        )
+        # Corte directo limpio entre escenas (eliminando el apagón dip-to-black de 0.5s)
+        # Permite continuidad fluida sin parpadeos negros que causaban pausas perceptibles en el reproductor
+        filter_parts.append(f"[{final_v}]copy[v_final]")
         final_v = "v_final"
 
         inputs_tags = "".join(audio_mix_inputs)
@@ -1784,8 +1779,12 @@ class SceneEngine:
             "-preset", "veryfast",
             "-crf", str(scene_crf),
             "-pix_fmt", "yuv420p",
+            "-color_range", "tv",
+            "-colorspace", "bt709",
+            "-color_primaries", "bt709",
+            "-color_trc", "bt709",
             "-r", str(scene_fps),
-            "-x264-params", f"threads=2:rc-lookahead=10",
+            "-x264-params", "threads=2:rc-lookahead=10:colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off",
             "-c:a", "aac",
             "-b:a", "256k",
             "-ar", "48000",
@@ -2328,34 +2327,59 @@ class SceneEngine:
             ms = int((t - int(t)) * 1000)
             return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
+        def _chunk_words(text_str: str) -> List[str]:
+            """Subdivide el texto en bloques concisos de 3 a 4 palabras para que nunca saturen la pantalla."""
+            raw_w = text_str.split()
+            if not raw_w:
+                return []
+            chunks = []
+            cur = []
+            for i, w in enumerate(raw_w):
+                cur.append(w)
+                remaining = len(raw_w) - (i + 1)
+                has_punct = bool(re.search(r"[.,!?;:]", w))
+                # Cortar si llegamos a 4 palabras, o a 3 palabras si hay puntuación o quedan palabras suficientes
+                if len(cur) >= 4 or (len(cur) >= 3 and remaining != 1) or (has_punct and len(cur) >= 2 and remaining >= 2):
+                    chunks.append(" ".join(cur))
+                    cur = []
+            if cur:
+                if len(cur) <= 2 and chunks:
+                    prev_words = chunks[-1].split()
+                    if len(prev_words) <= 3:
+                        chunks[-1] = chunks[-1] + " " + " ".join(cur)
+                    else:
+                        chunks.append(" ".join(cur))
+                else:
+                    chunks.append(" ".join(cur))
+            return chunks
+
         # 1. Si tenemos timestamps precisos de Edge TTS por oración
         if boundaries and len(boundaries) > 0:
             idx = 1
             for st, en, text in boundaries:
-                # Subdividir frases largas si tienen más de 7 palabras para que no ocupen toda la pantalla
-                w_list = text.split()
-                if len(w_list) > 6:
-                    mid = len(w_list) // 2
-                    dur_half = (en - st) / 2
-                    sub1 = " ".join(w_list[:mid]).strip().replace(":", "")
-                    sub2 = " ".join(w_list[mid:]).strip().replace(":", "")
-                    srt_lines.append(f"{idx}\n{_fmt_srt(st)} --> {_fmt_srt(st + dur_half)}\n{sub1}\n")
+                sentence_chunks = _chunk_words(text)
+                if not sentence_chunks:
+                    continue
+                total_chars = sum(len(c) for c in sentence_chunks) or 1
+                span = max(0.4, en - st)
+                c_start = st
+                for chunk_idx, chunk in enumerate(sentence_chunks):
+                    weight = len(chunk) / total_chars
+                    c_dur = span * weight
+                    c_end = en if chunk_idx == len(sentence_chunks) - 1 else round(c_start + c_dur, 3)
+                    clean_txt = chunk.strip().replace(":", "")
+                    srt_lines.append(f"{idx}\n{_fmt_srt(c_start)} --> {_fmt_srt(c_end)}\n{clean_txt}\n")
                     idx += 1
-                    srt_lines.append(f"{idx}\n{_fmt_srt(st + dur_half)} --> {_fmt_srt(en)}\n{sub2}\n")
-                    idx += 1
-                else:
-                    clean = text.strip().replace(":", "")
-                    srt_lines.append(f"{idx}\n{_fmt_srt(st)} --> {_fmt_srt(en)}\n{clean}\n")
-                    idx += 1
-            srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
-            return srt_path
+                    c_start = c_end
+            if srt_lines:
+                srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
+                return srt_path
 
-        # 2. Fallback ponderado por caracteres
+        # 2. Fallback ponderado por caracteres en fragmentos cortos de 3 a 4 palabras
         words = speech.split()
         if not words:
             return None
-        chunk_size = 4
-        sub_chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+        sub_chunks = _chunk_words(speech)
         if not sub_chunks:
             return None
 
@@ -2366,7 +2390,7 @@ class SceneEngine:
         curr_t = start_lead
         for idx, chunk in enumerate(sub_chunks):
             chunk_weight = len(chunk) / total_chars
-            chunk_dur = max(0.85, active_speech_time * chunk_weight)
+            chunk_dur = max(0.7, active_speech_time * chunk_weight)
             st = curr_t
             en = min(duration - 0.1, curr_t + chunk_dur)
             curr_t = en

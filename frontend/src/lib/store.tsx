@@ -55,6 +55,7 @@ type Ctx = {
   seek: (t: number) => void;
   setRate: (r: number) => void;
   setLoop: (v: boolean) => void;
+  setDuration: (d: number) => void;
 
   /* viewer */
   ratio: Ratio;
@@ -108,6 +109,7 @@ type Ctx = {
   exportMaster: (opts?: { burnSubtitles?: boolean; style?: string; title?: string }) => Promise<void>;
   importVideo: (file: File) => Promise<void>;
   createVideo: (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => Promise<string | null>;
+  deleteProject: (id: string) => Promise<void>;
   cancelCreation: () => Promise<void>;
   resumeProject: (taskId: string) => Promise<void>;
 
@@ -397,11 +399,14 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           } catch (_) {}
         }
 
+        const sceneSum = data.editor?.scenes
+          ? data.editor.scenes.reduce((acc: number, s: any) => acc + (s.duration || 0), 0)
+          : 0;
         const dur =
+          (data.editor?.duration && data.editor.duration > 0 ? data.editor.duration : null) ||
+          (sceneSum > 0 ? sceneSum : null) ||
           proj.result?.duration ||
-          (data.editor?.scenes
-            ? data.editor.scenes.reduce((acc: number, s: any) => acc + (s.duration || 0), 0)
-            : 0);
+          45;
         if (dur && dur > 0) {
           setDuration(Math.round(dur));
         }
@@ -687,6 +692,32 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     [pushLog, flash, attachCreationStream],
   );
 
+  const deleteProject = useCallback(
+    async (id: string) => {
+      try {
+        pushLog(`Eliminando proyecto ${id}...`, "info");
+        const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Error al eliminar proyecto");
+        }
+        flash("Proyecto eliminado.");
+        pushLog(`✓ Proyecto ${id} eliminado y espacio liberado`, "ai");
+        await loadProjects();
+        if (activeProjectId === id) {
+          const remaining = projects.filter((p) => p.id !== id);
+          if (remaining.length > 0) {
+            loadProject(remaining[0].id);
+          }
+        }
+      } catch (err: any) {
+        flash(`Error al eliminar: ${err.message}`);
+        pushLog(`Fallo al eliminar proyecto: ${err.message}`, "warn");
+      }
+    },
+    [activeProjectId, projects, flash, pushLog, loadProjects, loadProject],
+  );
+
   useEffect(() => {
     loadProjects();
     (window as any).openProject = (id: string) => {
@@ -776,19 +807,45 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const finalMp4Name = safeBase.toLowerCase().endsWith(".mp4") ? safeBase : `${safeBase}.mp4`;
 
       try {
-        pushLog(`Exportando máster: ${downloadTitle} (${burnSubs ? "Con subtítulos" : "Video limpio"})...`, "info");
-        const downloadUrl = `/api/projects/${targetId}/download/${encodeURIComponent(finalMp4Name)}?burn_subtitles=${burnSubs ? "true" : "false"}&style=${encodeURIComponent(subStyle)}`;
+        pushLog(`Guardando en Descargas: ${downloadTitle} (${burnSubs ? "Con subtítulos" : "Video limpio"})...`, "info");
+        flash("Exportando directamente a tu carpeta de Descargas...");
 
-        // Descarga directa en el navegador con nombre de archivo explícito
-        const a = document.createElement("a");
-        a.href = downloadUrl;
-        a.download = finalMp4Name;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => a.remove(), 1500);
+        // 1. Petición directa a la API local para transferir a C:\Users\angel\Downloads
+        let savedDirectly = false;
+        try {
+          const exportRes = await fetch(`/api/projects/${targetId}/export-to-downloads`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              burn_subtitles: burnSubs,
+              style: subStyle,
+              title: downloadTitle,
+            }),
+          });
 
-        flash(`Descargando: ${finalMp4Name}`);
+          const exportData = await exportRes.json();
+          if (exportRes.ok && exportData.ok) {
+            savedDirectly = true;
+            pushLog(`✓ ¡Video guardado en Descargas!: ${exportData.path}`, "ai");
+            flash(`¡Guardado en Descargas!: ${exportData.filename}`);
+          }
+        } catch {
+          savedDirectly = false;
+        }
+
+        // 2. Si falló la copia local directa, recurrir a la descarga estándar del navegador
+        if (!savedDirectly) {
+          const downloadUrl = `/api/projects/${targetId}/download/${encodeURIComponent(finalMp4Name)}?burn_subtitles=${burnSubs ? "true" : "false"}&style=${encodeURIComponent(subStyle)}`;
+          const a = document.createElement("a");
+          a.href = downloadUrl;
+          a.download = finalMp4Name;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => a.remove(), 1500);
+          pushLog(`Descargando a través del navegador: ${finalMp4Name}`, "info");
+        }
       } catch (e: any) {
+        pushLog(`Fallo en exportación: ${e.message}`, "warn");
         flash(`Error al exportar: ${e.message}`);
       }
     },
@@ -1007,6 +1064,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     exportMaster,
     importVideo,
     createVideo,
+    deleteProject,
     cancelCreation,
     resumeProject,
     selectedVoice,
@@ -1023,6 +1081,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     isMuted,
     setIsMuted,
     toggleMute,
+    setDuration,
     flash,
     log,
     toast,

@@ -41,14 +41,18 @@ Tu objetivo es elevar la calidad de este plan de video sobre el tema: "{topic}".
 REVISA Y OPTIMIZA CADA ESCENA:
 1. "speech" (Locución para síntesis de voz):
    - Elimina muletillas o frases acartonadas.
+   - NUNCA MENCIONAR TIEMPO: Si la locución dice "en estos 30 minutos", "en los próximos minutos", "en este video de media hora", ELIMÍNALO por completo. La locución debe ser atemporal.
+   - DESPEDIDAS SOLO EN LA ÚLTIMA ESCENA: Si una escena intermedia (cualquiera excepto la última) contiene despedidas ("gracias por acompañarme", "suscríbanse", "nos vemos en el próximo video"), ELIMÍNALAS y sustitúyelas por una transición lógica hacia el siguiente punto.
    - Corrige puntuación y ritmo para que la voz neuronal suene natural, fluida y sin frenazos.
    - Números y siglas: Escribe números en palabras si conviene (ej: "diez por ciento" en vez de "10%"). NUNCA uses guiones entre las letras de una sigla (escribe "ADN", "NASA", "IA", NUNCA "A-D-N" ni "N-A-S-A", ya que los guiones hacen que la voz neuronal de Microsoft tartamudee o suene robótica con pausas forzadas).
-2. "visual_query" y "visual_query2":
+2. "name" (Título de la escena):
+   - NUNCA uses nombres genéricos como "Relleno" o "Relleno Estructural". Asigna un título descriptivo real sobre el dato o evento que se narra.
+3. "visual_query" y "visual_query2":
    - Asegura que estén en inglés, sean HIPER-ESPECÍFICOS (evita términos vagos como 'abstract 4k' o 'cinematic background').
    - Deben reflejar exactamente la entidad, lugar o acción concreta mencionada en ese segundo.
-3. "visual_beats":
+4. "visual_beats":
    - Comprueba que el 'trigger' sea una subcadena literal que sí existe dentro del 'speech'. Si no coincide, ajústalo.
-4. "case_frame" (SI EXISTE):
+5. "case_frame" (SI EXISTE):
    - CONSERVA el valor exacto sin cambios en cada escena que lo tenga. Es el índice de un fotograma REAL del video fuente del caso: modificarlo o eliminarlo rompe el análisis visual.
 
 PLAN ACTUAL:
@@ -73,11 +77,12 @@ RESPONDE EXCLUSIVAMENTE CON UN JSON VÁLIDO conteniendo el array de escenas opti
                     if isinstance(orig, dict) and orig.get("case_frame") is not None:
                         if isinstance(opt_scenes[i], dict) and opt_scenes[i].get("case_frame") is None:
                             opt_scenes[i]["case_frame"] = orig["case_frame"]
-                from utils.speech_normalizer import clean_hyphenated_acronyms
-                for sc in opt_scenes:
+                from utils.speech_normalizer import clean_hyphenated_acronyms, normalize_speech_for_tts
+                for sc_idx, sc in enumerate(opt_scenes):
                     if isinstance(sc, dict):
+                        is_last = (sc_idx == len(opt_scenes) - 1)
                         if "speech" in sc and isinstance(sc["speech"], str):
-                            sc["speech"] = clean_hyphenated_acronyms(sc["speech"])
+                            sc["speech"] = normalize_speech_for_tts(sc["speech"], is_final_scene=is_last)
                         c = sc.get("card")
                         if isinstance(c, dict):
                             for k in ("headline", "body", "stat"):

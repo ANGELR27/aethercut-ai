@@ -349,6 +349,9 @@ REGLAS DE FIDELIDAD TEMÁTICA, LISTAS Y RANKINGS (TOP 10, TOP 5, COMPARATIVAS):
 - PROHIBIDO GENERALIZAR O DILUIR TEMAS EN ABSTRACCIONES: Está estrictamente prohibido hablar de "la inestabilidad regional" o "la crisis en general" sin mencionar con nombre y apellido a los personajes centrales del tema solicitado. El espectador entró a ver un TOP con nombres concretos; entregar un discurso genérico sin nombrar a los personajes arruina la producción.
 
 REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
+- PROHIBICIÓN TOTAL DE MENCIONAR TIEMPO O DURACIÓN: Queda TERMINANTEMENTE PROHIBIDO que el narrador mencione la duración o el tiempo del video en su discurso. NUNCA digas "vamos a analizar en estos 30 minutos", "a lo largo de estos 20 minutos", "en este video de media hora", etc. La narración debe ser completamente atemporal y enfocada en los datos y los hechos.
+- DESPEDIDA EXCLUSIVA EN LA ÚLTIMA ESCENA: ESTRICTAMENTE PROHIBIDO despedirse, agradecer o pedir suscripción ("gracias por acompañarme", "suscríbanse", "nos vemos en el próximo video", "hasta aquí llegamos") en escenas intermedias. La despedida y llamado a la acción ocurre ÚNICA Y EXCLUSIVAMENTE en la última escena (Escena {num_scenes}).
+- PROHIBIDO EL RELLENO: NUNCA titules escenas como "Relleno" o "Relleno Estructural". Cada escena debe tener un contenido temático real, sustantivo y relevante.
 - Redacta cada escena como un guion audiovisual para locutor profesional: con cadencia rítmica, pausas de respiración y excelente ortografía en español.
 - CADA ORACIÓN debe tener longitud moderada (de 10 a 16 palabras) separada por comas y puntos. ESTRICTAMENTE PROHIBIDO redactar párrafos de 30 o 40 palabras seguidas sin comas intermedias.
 - Usa comas antes de conjunciones y conectores naturales (ej: ", porque...", ", mientras...", ", donde...", ", pero...", ", y con ello...").
@@ -678,7 +681,8 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
                     card_obj = c_data
                 raw_speech = s.get("speech", "").strip()
                 from utils.speech_normalizer import normalize_speech_for_tts
-                polished_speech = normalize_speech_for_tts(raw_speech)
+                is_final_scene = (idx == len(raw_scenes) - 1)
+                polished_speech = normalize_speech_for_tts(raw_speech, is_final_scene=is_final_scene)
 
                 sc_type = s.get("type") or ("video_reaction" if idx == 0 else "card_focus")
                 if idx == 0 and sc_type == "avatar_cam":

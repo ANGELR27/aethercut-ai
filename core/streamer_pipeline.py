@@ -546,12 +546,20 @@ class StreamerPipeline:
         self.project_store.save_plan(edit_plan)
 
         media_url = f"/media/{output_file.name}"
+        real_duration = 0.0
+        try:
+            real_duration = FileManager.get_media_metadata(output_file).get("duration", 0.0)
+        except Exception:
+            pass
+        if not real_duration or real_duration <= 0:
+            real_duration = round(cum_sec, 2) if cum_sec > 0 else plan.total_est_duration
+
         result_payload = {
             "output_file": str(output_file),
             "media_url": media_url,
             "master_video_url": media_url,
             "title": plan.title,
-            "duration": plan.total_est_duration,
+            "duration": real_duration,
             "topic": self.options.topic,
             "style": self.options.style,
             "scenes_count": len(plan.scenes),

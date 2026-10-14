@@ -42,6 +42,7 @@ function Frame() {
     subtitleStyle,
     subtitleFont,
     isMuted,
+    setDuration,
   } = useEditor();
   const scene = sceneAt(time);
   const starts = [0, 11.5, 23.5];
@@ -176,6 +177,12 @@ function Frame() {
           src={previewVideoUrl}
           playsInline
           muted={isMuted}
+          onLoadedMetadata={(e) => {
+            const d = e.currentTarget.duration;
+            if (d && isFinite(d) && d > 0) {
+              setDuration(Math.round(d));
+            }
+          }}
           className="no-drag absolute inset-0 z-10 h-full w-full object-cover"
         />
       ) : (
@@ -253,7 +260,10 @@ function Frame() {
       {/* interactive live captions (unburned preview with live styling) */}
       {cap && (
         <div
-          className="absolute inset-x-[8%] bottom-[9%] sm:bottom-[11%] z-20 pointer-events-none select-none flex justify-center items-end"
+          className={cn(
+            "absolute inset-x-[6%] z-20 pointer-events-none select-none flex justify-center items-end transition-all duration-300",
+            ratio === "9:16" ? "bottom-[16%] sm:bottom-[18%]" : "bottom-[8%] sm:bottom-[10%]"
+          )}
           style={fontStyle}
         >
           {subtitleStyle === "karaoke" ? (

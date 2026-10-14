@@ -241,3 +241,15 @@ export const IconRefresh = (p: P) => (
   </S>
 );
 
+export const IconTrash = (p: P) => (
+  <S {...p}>
+    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" />
+  </S>
+);
+
+export const IconFolder = (p: P) => (
+  <S {...p}>
+    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+  </S>
+);
+
