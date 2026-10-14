@@ -33,6 +33,7 @@ export type LogEntry = {
 export type BackendProject = {
   id: string;
   name: string;
+  topic?: string;
   status: string;
   duration: number;
   updated_at?: string;
@@ -107,6 +108,7 @@ type Ctx = {
   createStatusMessage: string;
   selectProject: (id: string) => void;
   loadProjects: () => Promise<void>;
+  loadProject: (id: string) => Promise<void>;
   exportMaster: (opts?: { burnSubtitles?: boolean; style?: string; title?: string }) => Promise<void>;
   importVideo: (file: File) => Promise<void>;
   createVideo: (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => Promise<string | null>;
