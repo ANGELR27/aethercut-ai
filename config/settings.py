@@ -44,8 +44,8 @@ class Settings:
     MIN_SPEECH_SEGMENT_SEC: float = float(os.getenv("MIN_SPEECH_SEGMENT_SEC", "0.4"))
     DEFAULT_VIDEO_FPS: int = int(os.getenv("DEFAULT_VIDEO_FPS", "30"))
 
-    # Rutas de almacenamiento
-    STORAGE_DIR: Path = BASE_DIR / "storage"
+    # Rutas de almacenamiento (admite AETHERCUT_STORAGE_DIR para Google Drive o ruta externa persistente)
+    STORAGE_DIR: Path = Path(os.getenv("AETHERCUT_STORAGE_DIR") or (BASE_DIR / "storage"))
     INPUTS_DIR: Path = STORAGE_DIR / "inputs"
     OUTPUTS_DIR: Path = STORAGE_DIR / "outputs"
     TEMP_DIR: Path = STORAGE_DIR / "temp"

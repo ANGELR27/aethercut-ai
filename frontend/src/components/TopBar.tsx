@@ -40,12 +40,13 @@ export function TopBar() {
     activeProjectTitle,
     selectProject,
     exportMaster,
+    exportProgress,
+    exportStatusText,
     duration,
     ratio,
     subtitleStyle,
     overlays,
   } = useEditor();
-  const [exporting, setExporting] = useState<number | null>(null);
   const [projectOpen, setProjectOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -60,21 +61,8 @@ export function TopBar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    if (exporting === null) return;
-    if (exporting >= 100) {
-      const t = window.setTimeout(() => setExporting(null), 1800);
-      return () => window.clearTimeout(t);
-    }
-    const t = window.setTimeout(
-      () => setExporting((e) => Math.min(100, (e ?? 0) + 4 + Math.random() * 7)),
-      90,
-    );
-    return () => window.clearTimeout(t);
-  }, [exporting]);
-
   const handleExportClick = () => {
-    if (exporting !== null) return;
+    if (exportProgress !== null && exportProgress < 100) return;
     setModalOpen(true);
   };
 
@@ -85,7 +73,6 @@ export function TopBar() {
     title: string;
   }) => {
     setModalOpen(false);
-    setExporting(0);
     exportMaster({
       burnSubtitles: opts.burnSubtitles,
       style: subtitleStyle,
@@ -260,24 +247,27 @@ export function TopBar() {
         <button
           type="button"
           onClick={handleExportClick}
-          className="relative flex h-8 shrink-0 items-center gap-2 whitespace-nowrap overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-white/[0.14] to-white/[0.04] px-3.5 text-[11px] font-medium text-white shadow-[0_1px_0_0_rgba(255,255,255,0.18)_inset,0_10px_30px_-14px_rgba(47,92,255,0.9)] transition-all duration-300 hover:border-beam-300/40 hover:from-beam-500/25"
+          disabled={exportProgress !== null && exportProgress < 100}
+          className="relative flex h-8 shrink-0 items-center gap-2 whitespace-nowrap overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-white/[0.14] to-white/[0.04] px-3.5 text-[11px] font-medium text-white shadow-[0_1px_0_0_rgba(255,255,255,0.18)_inset,0_10px_30px_-14px_rgba(47,92,255,0.9)] transition-all duration-300 hover:border-beam-300/40 hover:from-beam-500/25 disabled:cursor-not-allowed disabled:opacity-90"
         >
-          {exporting !== null && exporting < 100 && (
+          {exportProgress !== null && exportProgress < 100 && (
             <span
-              className="absolute inset-y-0 left-0 bg-beam-500/25 transition-[width] duration-150"
-              style={{ width: `${exporting}%` }}
+              className="absolute inset-y-0 left-0 bg-beam-500/35 transition-[width] duration-150"
+              style={{ width: `${exportProgress}%` }}
             />
           )}
-          {exporting === null && <IconDownload className="relative h-3.5 w-3.5 shrink-0" />}
-          {exporting !== null && exporting < 100 ? (
-            <span className="relative tnum whitespace-nowrap">Renderizando {Math.round(exporting)}%</span>
-          ) : exporting !== null ? (
+          {exportProgress === null && <IconDownload className="relative h-3.5 w-3.5 shrink-0" />}
+          {exportProgress !== null && exportProgress < 100 ? (
+            <span className="relative tnum whitespace-nowrap font-medium text-beam-200">
+              {exportStatusText || `Descargando ${Math.round(exportProgress)}%`}
+            </span>
+          ) : exportProgress !== null ? (
             <>
               <IconCheck className="relative h-3.5 w-3.5 shrink-0 text-signal-400" />
-              <span className="relative whitespace-nowrap">Máster listo</span>
+              <span className="relative whitespace-nowrap text-signal-300 font-medium">¡Descarga completa!</span>
             </>
           ) : null}
-          {exporting === null && <span className="relative whitespace-nowrap">Exportar</span>}
+          {exportProgress === null && <span className="relative whitespace-nowrap">Exportar</span>}
         </button>
 
         {/* avatar */}

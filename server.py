@@ -39,6 +39,17 @@ from utils.file_manager import FileManager
 
 app = FastAPI(title="AetherCut AI Video Editor")
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Length", "Content-Disposition", "Accept-Ranges"],
+)
+
 WEB_DIR = Path(__file__).resolve().parent / "web"
 TEMPLATES_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
@@ -1161,6 +1172,7 @@ async def download_project_master(
             "Accept-Ranges": "bytes",
             "Content-Disposition": f'attachment; filename="{out_filename}"',
             "Cache-Control": "no-cache",
+            "Access-Control-Expose-Headers": "Content-Length, Content-Disposition, Accept-Ranges",
         }
     )
 

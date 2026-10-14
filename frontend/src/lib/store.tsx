@@ -109,6 +109,8 @@ type Ctx = {
   selectProject: (id: string) => void;
   loadProjects: () => Promise<void>;
   loadProject: (id: string) => Promise<void>;
+  exportProgress: number | null;
+  exportStatusText: string;
   exportMaster: (opts?: { burnSubtitles?: boolean; style?: string; title?: string }) => Promise<void>;
   importVideo: (file: File) => Promise<void>;
   createVideo: (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => Promise<string | null>;
@@ -189,6 +191,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [isCreating, setIsCreating] = useState(false);
   const [createProgress, setCreateProgress] = useState(0);
   const [createStatusMessage, setCreateStatusMessage] = useState("");
+  const [exportProgress, setExportProgress] = useState<number | null>(null);
+  const [exportStatusText, setExportStatusText] = useState<string>("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const activeEsRef = useRef<EventSource | null>(null);
 
@@ -842,22 +846,70 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const finalMp4Name = safeBase.toLowerCase().endsWith(".mp4") ? safeBase : `${safeBase}.mp4`;
 
       try {
-        pushLog(`Iniciando descarga: ${downloadTitle} (${burnSubs ? "Con subtítulos" : "Video limpio"})...`, "info");
-        flash(`Iniciando descarga de ${downloadTitle}...`);
+        setExportProgress(0);
+        setExportStatusText(burnSubs ? "Quemando subtítulos..." : "Conectando...");
+        pushLog(`Iniciando descarga: ${downloadTitle} (${burnSubs ? "Con subtítulos quemados" : "Video limpio"})...`, "info");
+        flash(`Preparando descarga de ${downloadTitle}...`);
 
         const downloadUrl = `/api/projects/${targetId}/download/${encodeURIComponent(finalMp4Name)}?burn_subtitles=${burnSubs ? "true" : "false"}&style=${encodeURIComponent(subStyle)}&v=${Date.now()}`;
 
-        // 1. Disparar SIEMPRE la descarga directa a través del navegador web a la computadora del usuario
+        // Fetch con streaming real para calcular el porcentaje real byte a byte
+        const response = await fetch(downloadUrl);
+        if (!response.ok) {
+          throw new Error(`El servidor respondió con código ${response.status}`);
+        }
+
+        const contentLengthHeader = response.headers.get("content-length");
+        const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
+
+        let blob: Blob;
+
+        if (response.body && typeof response.body.getReader === "function") {
+          const reader = response.body.getReader();
+          let loadedBytes = 0;
+          const chunks: Uint8Array[] = [];
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              chunks.push(value);
+              loadedBytes += value.length;
+              if (totalBytes > 0) {
+                const pct = Math.min(99, Math.round((loadedBytes / totalBytes) * 100));
+                setExportProgress(pct);
+                const loadedMb = (loadedBytes / (1024 * 1024)).toFixed(1);
+                const totalMb = (totalBytes / (1024 * 1024)).toFixed(1);
+                setExportStatusText(`${pct}% (${loadedMb}/${totalMb} MB)`);
+              } else {
+                const loadedMb = (loadedBytes / (1024 * 1024)).toFixed(1);
+                setExportProgress(50);
+                setExportStatusText(`Descargando (${loadedMb} MB)...`);
+              }
+            }
+          }
+          blob = new Blob(chunks, { type: "video/mp4" });
+        } else {
+          blob = await response.blob();
+        }
+
+        setExportProgress(100);
+        setExportStatusText("¡Descarga completa!");
+
+        // 1. Guardar en disco del navegador inmediatamente con el Blob completo en memoria
+        const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = downloadUrl;
+        a.href = blobUrl;
         a.download = finalMp4Name;
-        a.target = "_blank";
         document.body.appendChild(a);
         a.click();
-        setTimeout(() => a.remove(), 2500);
+        setTimeout(() => {
+          a.remove();
+          URL.revokeObjectURL(blobUrl);
+        }, 5000);
 
-        pushLog(`✓ Descargando video máster a tu computadora: ${finalMp4Name}`, "ai");
-        flash(`¡Descargando video!: ${finalMp4Name}. Revisa la bandeja de descargas.`);
+        pushLog(`✓ Video máster descargado a tu computadora: ${finalMp4Name}`, "ai");
+        flash(`¡Descarga completada!: ${finalMp4Name}`);
 
         // 2. Si el servidor se ejecuta en la misma máquina local (localhost), también guardar copia directa
         const isLocalhost = typeof window !== "undefined" &&
@@ -872,14 +924,16 @@ export function EditorProvider({ children }: { children: ReactNode }) {
               style: subStyle,
               title: downloadTitle,
             }),
-          }).then(async (r) => {
-            const data = await r.json();
-            if (data?.ok) {
-              pushLog(`✓ Copia guardada en disco local: ${data.path}`, "info");
-            }
           }).catch(() => {});
         }
+
+        setTimeout(() => {
+          setExportProgress(null);
+          setExportStatusText("");
+        }, 2500);
       } catch (e: any) {
+        setExportProgress(null);
+        setExportStatusText("");
         pushLog(`Fallo en exportación: ${e.message}`, "warn");
         flash(`Error al exportar: ${e.message}`);
       }
@@ -1097,6 +1151,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     selectProject,
     loadProjects,
     loadProject,
+    exportProgress,
+    exportStatusText,
     exportMaster,
     importVideo,
     createVideo,
