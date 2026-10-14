@@ -840,13 +840,29 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const finalMp4Name = safeBase.toLowerCase().endsWith(".mp4") ? safeBase : `${safeBase}.mp4`;
 
       try {
-        pushLog(`Guardando en Descargas: ${downloadTitle} (${burnSubs ? "Con subtítulos" : "Video limpio"})...`, "info");
-        flash("Exportando directamente a tu carpeta de Descargas...");
+        pushLog(`Iniciando descarga: ${downloadTitle} (${burnSubs ? "Con subtítulos" : "Video limpio"})...`, "info");
+        flash(`Iniciando descarga de ${downloadTitle}...`);
 
-        // 1. Petición directa a la API local para transferir a C:\Users\angel\Downloads
-        let savedDirectly = false;
-        try {
-          const exportRes = await fetch(`/api/projects/${targetId}/export-to-downloads`, {
+        const downloadUrl = `/api/projects/${targetId}/download/${encodeURIComponent(finalMp4Name)}?burn_subtitles=${burnSubs ? "true" : "false"}&style=${encodeURIComponent(subStyle)}&v=${Date.now()}`;
+
+        // 1. Disparar SIEMPRE la descarga directa a través del navegador web a la computadora del usuario
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = finalMp4Name;
+        a.target = "_blank";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 2500);
+
+        pushLog(`✓ Descargando video máster a tu computadora: ${finalMp4Name}`, "ai");
+        flash(`¡Descargando video!: ${finalMp4Name}. Revisa la bandeja de descargas.`);
+
+        // 2. Si el servidor se ejecuta en la misma máquina local (localhost), también guardar copia directa
+        const isLocalhost = typeof window !== "undefined" &&
+          (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+        if (isLocalhost) {
+          fetch(`/api/projects/${targetId}/export-to-downloads`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -854,28 +870,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
               style: subStyle,
               title: downloadTitle,
             }),
-          });
-
-          const exportData = await exportRes.json();
-          if (exportRes.ok && exportData.ok) {
-            savedDirectly = true;
-            pushLog(`✓ ¡Video guardado en Descargas!: ${exportData.path}`, "ai");
-            flash(`¡Guardado en Descargas!: ${exportData.filename}`);
-          }
-        } catch {
-          savedDirectly = false;
-        }
-
-        // 2. Si falló la copia local directa, recurrir a la descarga estándar del navegador
-        if (!savedDirectly) {
-          const downloadUrl = `/api/projects/${targetId}/download/${encodeURIComponent(finalMp4Name)}?burn_subtitles=${burnSubs ? "true" : "false"}&style=${encodeURIComponent(subStyle)}`;
-          const a = document.createElement("a");
-          a.href = downloadUrl;
-          a.download = finalMp4Name;
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => a.remove(), 1500);
-          pushLog(`Descargando a través del navegador: ${finalMp4Name}`, "info");
+          }).then(async (r) => {
+            const data = await r.json();
+            if (data?.ok) {
+              pushLog(`✓ Copia guardada en disco local: ${data.path}`, "info");
+            }
+          }).catch(() => {});
         }
       } catch (e: any) {
         pushLog(`Fallo en exportación: ${e.message}`, "warn");

@@ -1156,9 +1156,11 @@ async def download_project_master(
         path=file_to_send,
         media_type="video/mp4",
         filename=out_filename,
+        content_disposition_type="attachment",
         headers={
+            "Accept-Ranges": "bytes",
             "Content-Disposition": f'attachment; filename="{out_filename}"',
-            "Content-Type": "video/mp4",
+            "Cache-Control": "no-cache",
         }
     )
 
