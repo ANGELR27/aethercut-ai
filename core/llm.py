@@ -13,7 +13,7 @@ from cancellation import CancellationRequested
 # modelo que respondió y conservamos los demás para recuperarnos de una caída.
 # 3.8 agotó el tiempo incluso con una consulta mínima durante la comprobación
 # del 2026-10-05. Se excluye del camino crítico para no atascar cada proyecto.
-FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
+FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.1-flash-lite"]
 
 
 def safe_log(msg: str) -> None:
@@ -60,6 +60,8 @@ class LLMClient:
         # or grab the next one to distribute the load.
         
         primary = primary_model or settings.GEMINI_MODEL or "gemini-flash-lite-latest"
+        if "2.5" in primary or "3.8" in primary:
+            primary = "gemini-flash-lite-latest"
         self.models: List[str] = [primary] + [m for m in FALLBACK_MODELS if m != primary]
         self.last_model_used: Optional[str] = None
         self._active_client = None
