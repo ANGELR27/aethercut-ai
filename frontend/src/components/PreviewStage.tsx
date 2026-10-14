@@ -43,7 +43,17 @@ function Frame() {
     subtitleFont,
     isMuted,
     setDuration,
+    setPlaying,
+    loop,
+    toggle,
   } = useEditor();
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = 1.0;
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted, previewVideoUrl, videoRef]);
   const scene = sceneAt(time);
   const starts = [0, 11.5, 23.5];
   const idx = starts.findIndex((s) => time >= s);
@@ -163,7 +173,8 @@ function Frame() {
 
   return (
     <div
-      className="relative overflow-hidden rounded-[20px] border border-white/[0.09] bg-black shadow-[0_60px_120px_-50px_rgba(0,0,0,1),0_0_120px_-60px_rgba(47,92,255,0.9)]"
+      onClick={toggle}
+      className="relative cursor-pointer overflow-hidden rounded-[20px] border border-white/[0.09] bg-black shadow-[0_60px_120px_-50px_rgba(0,0,0,1),0_0_120px_-60px_rgba(47,92,255,0.9)]"
       style={{ aspectRatio: String(RATIO_VALUE[ratio]) }}
     >
       {/* ambient shadows & tints (detrás del video para que no lo oscurezcan) */}
@@ -182,6 +193,14 @@ function Frame() {
             if (d && isFinite(d) && d > 0) {
               setDuration(Math.round(d));
             }
+          }}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => {
+            if (!loop) setPlaying(false);
+          }}
+          onError={(e) => {
+            console.error("[PreviewStage] Error en video tag:", e);
           }}
           className="no-drag absolute inset-0 z-10 h-full w-full object-cover"
         />

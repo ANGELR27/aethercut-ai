@@ -978,6 +978,11 @@ async def get_project_preview(task_id: str):
         path=path,
         media_type="video/mp4",
         filename=filename,
+        content_disposition_type="inline",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        },
     )
 
 

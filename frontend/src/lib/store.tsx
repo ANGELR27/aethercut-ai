@@ -45,6 +45,7 @@ export type BackendProject = {
 type Ctx = {
   /* playback */
   playing: boolean;
+  setPlaying: (p: boolean) => void;
   time: number;
   duration: number;
   rate: number;
@@ -200,6 +201,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const next = !prev;
       if (videoRef.current) {
         videoRef.current.muted = next;
+        if (!next) {
+          videoRef.current.volume = 1.0;
+        }
       }
       return next;
     });
@@ -344,30 +348,51 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     [duration],
   );
 
-  const play = useCallback(() => {
-    setPlaying(true);
-    if (videoRef.current) {
-      videoRef.current.play().catch(() => {});
+  const play = useCallback(async () => {
+    if (videoRef.current && previewVideoUrl) {
+      try {
+        videoRef.current.volume = 1.0;
+        videoRef.current.muted = isMuted;
+        await videoRef.current.play();
+        setPlaying(true);
+      } catch (err: any) {
+        console.warn("[Player] Playback rejected by browser, checking autoplay policy:", err);
+        if (err?.name === "NotAllowedError") {
+          try {
+            videoRef.current.muted = true;
+            setIsMuted(true);
+            await videoRef.current.play();
+            setPlaying(true);
+          } catch (_) {
+            setPlaying(false);
+          }
+        } else {
+          setPlaying(false);
+        }
+      }
+    } else {
+      setPlaying(true);
     }
-  }, []);
+  }, [previewVideoUrl, isMuted]);
 
   const pause = useCallback(() => {
-    setPlaying(false);
-    if (videoRef.current) {
+    if (videoRef.current && previewVideoUrl) {
       videoRef.current.pause();
     }
-  }, []);
+    setPlaying(false);
+  }, [previewVideoUrl]);
 
   const toggle = useCallback(() => {
-    setPlaying((p) => {
-      const next = !p;
-      if (videoRef.current) {
-        if (next) videoRef.current.play().catch(() => {});
-        else videoRef.current.pause();
+    if (videoRef.current && previewVideoUrl) {
+      if (videoRef.current.paused) {
+        play();
+      } else {
+        pause();
       }
-      return next;
-    });
-  }, []);
+    } else {
+      setPlaying((p) => !p);
+    }
+  }, [play, pause, previewVideoUrl]);
 
   const handleSetRate = useCallback((r: number) => {
     setRate(r);
@@ -409,6 +434,14 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           45;
         if (dur && dur > 0) {
           setDuration(Math.round(dur));
+        }
+
+        // Reset de reproducción limpio para proyecto nuevo
+        setTime(0);
+        setPlaying(false);
+        if (videoRef.current) {
+          videoRef.current.currentTime = 0;
+          videoRef.current.pause();
         }
 
         // Conectar url de previsualización sin subtítulos quemados
@@ -1019,6 +1052,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
 
   const value: Ctx = {
     playing,
+    setPlaying,
     time,
     duration,
     rate,
