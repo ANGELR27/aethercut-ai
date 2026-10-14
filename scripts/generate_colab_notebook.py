@@ -73,7 +73,7 @@ notebook = {
                 "        f'GLM_API_KEY={GLM_API_KEY or \"\"}',\n",
                 "        f'GLM_FLASH_API_KEY={GLM_FLASH_API_KEY or \"\"}',\n",
                 "        f'KIMI_API_KEY={KIMI_API_KEY or \"\"}',\n",
-                "        'GEMINI_MODEL=gemini-2.5-flash',\n",
+                "        'GEMINI_MODEL=gemini-flash-lite-latest',\n",
                 "    ]\n",
                 "    with open('.env', 'w', encoding='utf-8') as f:\n",
                 "        f.write('\\n'.join(env_lines) + '\\n')\n",
