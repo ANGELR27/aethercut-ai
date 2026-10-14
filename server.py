@@ -1262,7 +1262,7 @@ async def extract_project_clips(task_id: str, background_tasks: BackgroundTasks)
             pass
 
     font_p = FileManager.get_system_font_path()
-    font_arg = f":fontfile='{font_p}'" if font_p else ""
+    font_param = f"fontfile='{font_p}':" if font_p else ""
     created_clips = []
 
     # Probar duración del master con ffprobe
@@ -1319,8 +1319,8 @@ async def extract_project_clips(task_id: str, background_tasks: BackgroundTasks)
             # Filtro: escala al alto 1920 y recorta centrado a 1080:1920 + banner superior con el título del hook
             fc = (
                 f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,"
-                f"drawtext{font_arg}:text='🔥 {clean_hdr}':fontcolor=white:fontsize=36:x=(w-tw)/2:y=180:box=1:boxcolor=black@0.75:boxborderw=14,"
-                f"drawtext{font_arg}:text='@AetherCut':fontcolor=white@0.4:fontsize=22:x=(w-tw)/2:y=245[v]"
+                f"drawtext={font_param}text='🔥 {clean_hdr}':fontcolor=white:fontsize=36:x=(w-tw)/2:y=180:box=1:boxcolor=black@0.75:boxborderw=14,"
+                f"drawtext={font_param}text='@AetherCut':fontcolor=white@0.4:fontsize=22:x=(w-tw)/2:y=245[v]"
             )
             cmd = [
                 "ffmpeg", "-y",
