@@ -813,8 +813,8 @@ async def get_broadcast_plan(task_id: str):
     return {"scenes": scenes, "title": raw.get("title", ""), "available": True}
 
 
-def prune_old_projects(keep_max: int = 5, protect_id: Optional[str] = None) -> int:
-    """Conserva únicamente los 5 proyectos más recientes y elimina permanentemente los anteriores para liberar espacio."""
+def prune_old_projects(keep_max: int = 20, protect_id: Optional[str] = None) -> int:
+    """Conserva únicamente los 20 proyectos más recientes y elimina permanentemente los anteriores para liberar espacio."""
     projects_dir = settings.PROJECTS_DIR
     if not projects_dir.exists():
         return 0
@@ -882,8 +882,8 @@ def prune_old_projects(keep_max: int = 5, protect_id: Optional[str] = None) -> i
 
 @app.get("/api/projects")
 async def list_projects():
-    # Mantener estricto límite de 5 proyectos más recientes en disco
-    prune_old_projects(keep_max=5)
+    # Mantener estricto límite de 20 proyectos más recientes en disco
+    prune_old_projects(keep_max=20)
 
     projects = []
     for manifest in settings.PROJECTS_DIR.glob("*/project.json"):
@@ -925,7 +925,7 @@ async def list_projects():
         except (OSError, json.JSONDecodeError):
             continue
     projects.sort(key=lambda project: project.get("updated_at") or "", reverse=True)
-    return {"projects": projects[:5]}
+    return {"projects": projects[:20]}
 
 
 @app.delete("/api/projects/{task_id}")

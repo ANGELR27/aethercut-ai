@@ -844,17 +844,17 @@ function AITab() {
 function MediaTab() {
   const { seek, clips, projects, activeProjectId, selectProject, deleteProject } = useEditor();
   const realScenes = clips.filter((c) => c.kind === "scene");
-  const recentProjects = (projects || []).slice(0, 5);
+  const recentProjects = (projects || []).slice(0, 20);
 
   return (
     <div className="space-y-4">
-      {/* 1. PROYECTOS RECIENTES EN DISCO (MÁXIMO 5) */}
+      {/* 1. PROYECTOS RECIENTES EN DISCO (MÁXIMO 20) */}
       <div className="space-y-2">
         <div className="flex items-center justify-between px-0.5">
           <SectionLabel
             right={
               <span className="rounded-full bg-beam-500/10 border border-beam-400/20 px-1.5 py-0.2 text-[9px] font-semibold text-beam-300 font-mono">
-                {recentProjects.length}/5 en disco
+                {recentProjects.length}/20 en disco
               </span>
             }
           >
