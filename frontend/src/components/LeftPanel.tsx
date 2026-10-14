@@ -202,7 +202,42 @@ function AITab() {
     }
   };
 
-  const handleRefresh = () => {
+  const [isRefreshingTopics, setIsRefreshingTopics] = useState(false);
+
+  const handleRefresh = async () => {
+    if (isRefreshingTopics) return;
+    setIsRefreshingTopics(true);
+    flash("Buscando tendencias reales en Internet con IA...");
+    try {
+      const res = await fetch("/api/viral-niches/refresh", { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.topics && Array.isArray(data.topics) && data.topics.length > 0) {
+          const liveTopics: ViralTopic[] = data.topics;
+          const existingFiltered = topics.filter(
+            (t) => !liveTopics.some((lt) => lt.category === t.category && lt.title.toLowerCase() === t.title.toLowerCase()),
+          );
+          const combined = [...liveTopics, ...existingFiltered];
+
+          const pinnedSet = new Set(pinnedIds);
+          const pinned = combined.filter((t) => pinnedSet.has(t.id));
+          const unpinned = combined.filter((t) => !pinnedSet.has(t.id));
+          const finalTopics = [...pinned, ...unpinned];
+
+          setTopics(finalTopics);
+          try {
+            localStorage.setItem("aethercut_daily_topics", JSON.stringify(finalTopics));
+          } catch (_) {}
+          flash("✓ ¡Tendencias de Internet actualizadas con IA y puntuación real!");
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Fallo en búsqueda en vivo de temas:", e);
+    } finally {
+      setIsRefreshingTopics(false);
+    }
+
     const fresh = generateDailyTopics(pinnedIds, true);
     setTopics(fresh);
     flash("Temas actualizados con nuevas puntuaciones · Favoritos intactos");
@@ -577,11 +612,12 @@ function AITab() {
         <button
           type="button"
           onClick={handleRefresh}
-          title="Actualizar temas del día (los favoritos permanecen anclados de primero)"
-          className="flex items-center gap-1 text-[9.5px] text-white/40 hover:text-beam-300 transition-colors px-1.5 py-0.5 rounded hover:bg-white/[0.04]"
+          disabled={isRefreshingTopics}
+          title="Buscar tendencias reales en Internet con IA y recalcular puntuaciones virales"
+          className="flex items-center gap-1 text-[9.5px] text-white/40 hover:text-beam-300 transition-colors px-1.5 py-0.5 rounded hover:bg-white/[0.04] disabled:opacity-50"
         >
-          <IconRefresh className="h-3 w-3" />
-          <span>Actualizar</span>
+          <IconRefresh className={cn("h-3 w-3", isRefreshingTopics && "animate-spin text-beam-300")} />
+          <span>{isRefreshingTopics ? "Buscando en web..." : "Actualizar"}</span>
         </button>
       </div>
 

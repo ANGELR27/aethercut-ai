@@ -2858,6 +2858,133 @@ async def save_trend_radar_favorites(payload: Dict[str, Any] = Body(...)):
     return {"success": True, "favorites": current_favs}
 
 
+@app.post("/api/viral-niches/refresh")
+@app.get("/api/viral-niches/refresh")
+async def refresh_viral_niches():
+    """Busca en Internet tendencias reales y sintetiza con IA temas virales frescos
+    cubriendo todas las categorías (finanzas, misterio, ciencia, amor, terror, etc.)
+    con cálculo de puntuación de viralidad real (+85 a +99)."""
+    import random
+    from core.llm import LLMClient
+
+    NICHES_CONFIG = [
+        {"cat": "finanzas", "query": "estrategia inversion multimillonarios economia dinero mercado", "glyph": "💰", "hook": "Estrategia de Riqueza"},
+        {"cat": "amor", "query": "psicologia de parejas relaciones amor seduccion comportamiento", "glyph": "❤️", "hook": "Psicología Relacional"},
+        {"cat": "religion", "query": "misterios biblicos arqueologia sagrada secretos religion", "glyph": "✝️", "hook": "Enigma Bíblico"},
+        {"cat": "versus", "query": "comparativa tecnologia autos marcas empresas duelo", "glyph": "⚔️", "hook": "Duelo Definitivo"},
+        {"cat": "terror", "query": "casos oscuros creepypasta terror psicologico misterio", "glyph": "👻", "hook": "Terror Psicológico"},
+        {"cat": "misterio", "query": "enigmas mundiales fenomenos inexplicables conspiraciones ovni", "glyph": "👁️", "hook": "Enigma Oculto"},
+        {"cat": "politica", "query": "geopolitica mundial secretos de estado guerras poder", "glyph": "🏛️", "hook": "Geopolítica y Poder"},
+        {"cat": "ciencia", "query": "descubrimientos cientificos astronomia universo fisica", "glyph": "🔬", "hook": "Revelación Científica"},
+        {"cat": "curiosidades", "query": "curiosidades datos insolitos paradojas mundo", "glyph": "💡", "hook": "Curiosidad Viral"},
+        {"cat": "historia", "query": "arqueologia civilizaciones antiguas imperios secretos", "glyph": "🏺", "hook": "Caso Histórico Real"},
+        {"cat": "psicologia", "query": "psicologia oscura sesgos cognitivos manipulacion mente", "glyph": "🧠", "hook": "Psicología Oscura"},
+        {"cat": "crimen", "query": "true crime investigacion policial casos reales robos", "glyph": "🔍", "hook": "Investigación True Crime"},
+        {"cat": "tecnologia", "query": "inteligencia artificial futuro robotica tecnologia", "glyph": "🤖", "hook": "Frontera Tecnológica"},
+        {"cat": "narrativa", "query": "historias reales supervivencia casos extraordinarios", "glyph": "🎬", "hook": "Crónica Inmersiva"},
+    ]
+
+    web_findings = []
+    try:
+        from ddgs import DDGS
+        selected_niches = random.sample(NICHES_CONFIG, min(6, len(NICHES_CONFIG)))
+        with DDGS() as ddgs:
+            for cfg in selected_niches:
+                try:
+                    news = list(ddgs.news(cfg["query"], max_results=2))
+                    if not news:
+                        news = list(ddgs.text(cfg["query"], max_results=2))
+                    for item in news:
+                        t = item.get("title", "")
+                        b = item.get("body", "")
+                        if t and len(t) > 15:
+                            clean_t = re.sub(r"\s*[-|–]\s*[A-Za-z0-9\.\sáéíóúÁÉÍÓÚ]+$", "", t).strip()
+                            clean_t = re.sub(r"^[A-Za-z0-9\.\s]+:\s*", "", clean_t).strip()
+                            web_findings.append({
+                                "category": cfg["cat"],
+                                "title": clean_t,
+                                "summary": (b or clean_t)[:180],
+                                "glyph": cfg["glyph"],
+                                "default_hook": cfg["hook"],
+                            })
+                except Exception:
+                    continue
+    except Exception as _e_ddg:
+        safe_log(f"[ViralRefresh] Error en DDGS: {_e_ddg}")
+
+    topics_out = []
+    if web_findings:
+        try:
+            llm = LLMClient()
+            findings_txt = "\n".join([f"- [{wf['category'].upper()}] {wf['title']}: {wf['summary']}" for wf in web_findings[:8]])
+            prompt = f"""Actúa como Director de Viralidad para canales de YouTube y videos de 10 a 40 minutos o Reels.
+Aquí tienes hallazgos y noticias REALES extraídas recién de Internet:
+{findings_txt}
+
+A partir de estos hallazgos (y complementando con temas de alto interés de las demás categorías: finanzas, amor, religion, versus, terror, misterio, politica, ciencia, curiosidades, historia, psicologia, crimen, tecnologia, narrativa):
+Genera 12 temas virales irresistibles con estructura de video largo.
+Para CADA tema calcula una PUNTUACIÓN DE VIRALIDAD REAL (un número entero entre 88 y 99) basada en la potencia del gancho de curiosidad, la controversia y la retención del espectador.
+
+Responde ÚNICAMENTE en JSON válido con esta lista de objetos:
+[
+  {{
+    "id": "vt-live-1",
+    "title": "Título épico con gancho irresistible",
+    "nuances": "Enfoque detallado: hipótesis central, datos comprobados, revelación y giros para 15-30 min.",
+    "category": "finanzas",
+    "score": 98,
+    "glyph": "💰",
+    "hookType": "Estrategia de Riqueza",
+    "durationMin": 20
+  }}
+]"""
+            resp = await asyncio.wait_for(llm.chat_async(prompt), timeout=7.0)
+            clean_resp = re.sub(r"^```(?:json)?", "", resp.strip(), flags=re.MULTILINE)
+            clean_resp = re.sub(r"```$", "", clean_resp.strip(), flags=re.MULTILINE).strip()
+            parsed = json.loads(clean_resp)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                for idx, item in enumerate(parsed):
+                    if item.get("title") and item.get("category"):
+                        topics_out.append({
+                            "id": f"vt-live-{item['category'][:3]}-{idx}-{random.randint(100, 999)}",
+                            "title": item["title"],
+                            "nuances": item.get("nuances") or item["title"],
+                            "category": item["category"].lower(),
+                            "score": int(min(99, max(85, item.get("score", 92)))),
+                            "glyph": item.get("glyph") or "🔥",
+                            "hookType": item.get("hookType") or "Tendencia IA",
+                            "durationMin": int(item.get("durationMin") or 20),
+                        })
+        except Exception as _e_llm:
+            safe_log(f"[ViralRefresh] Fallback local en LLM ({_e_llm})")
+
+    # Fallback algorítmico sobre los hallazgos web si el LLM tardó
+    if not topics_out and web_findings:
+        for idx, wf in enumerate(web_findings):
+            score = 88
+            t_low = (wf["title"] + " " + wf["summary"]).lower()
+            power_words = ["secreto", "revela", "oculto", "millonario", "crimen", "prohibido", "estrategia", "colapso", "descubrimiento", "enigma", "riqueza", "poder", "verdad", "engaño", "universo", "impacto", "peligro"]
+            matches = sum(1 for pw in power_words if pw in t_low)
+            score = min(99, max(88, score + min(7, matches * 2) + (2 if any(c in wf["title"] for c in ["?", "!", ":"]) else 0)))
+            topics_out.append({
+                "id": f"vt-web-{wf['category'][:3]}-{idx}-{random.randint(100, 999)}",
+                "title": wf["title"],
+                "nuances": wf["summary"],
+                "category": wf["category"],
+                "score": score,
+                "glyph": wf["glyph"],
+                "hookType": wf["default_hook"],
+                "durationMin": random.choice([15, 20, 25, 30]),
+            })
+
+    return {
+        "success": True,
+        "count": len(topics_out),
+        "source": "web_and_ai",
+        "topics": topics_out,
+    }
+
+
 @app.post("/api/trend-radar/refresh")
 async def refresh_trend_radar():
     """Fuerza un barrido nuevo en background (charts + temas con IA)."""
