@@ -10,7 +10,11 @@ pinned: false
 
 # AetherCut AI
 
-AetherCut AI es una aplicación local para preparar videos hablados. Analiza el video con Gemini, detecta pausas largas en el audio y genera una versión editada con cortes, material de apoyo, tarjetas informativas verificadas, subtítulos y Shorts verticales.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ANGELR27/aethercut-ai/blob/master/AetherCut_AI_Colab.ipynb)
+
+> 🚀 **Ejecutar 100% Gratis en la Nube con GPU**: Haz clic en el botón **Open in Colab** arriba para abrir el estudio en Google Cloud con GPU Nvidia T4 gratuita, sin consumir la memoria RAM de tu computadora ni gastar batería.
+
+AetherCut AI es un estudio completo para preparar videos hablados y streams con Inteligencia Artificial. Analiza el video con Gemini, detecta pausas largas en el audio y genera una versión editada con cortes, material de apoyo, tarjetas informativas verificadas, subtítulos dinámicos de 2-4 palabras y Shorts verticales.
 
 ## Funciones
 
