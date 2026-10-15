@@ -677,7 +677,32 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       };
 
       es.onerror = () => {
-        // Desconexión transitoria
+        // Desconexión transitoria: consultar endpoint de progreso directamente como respaldo
+        fetch(`/api/progress/${encodeURIComponent(taskId)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((p) => {
+            if (!p) return;
+            if (typeof p.progress === "number") {
+              setCreateProgress(Math.max(10, Math.min(100, p.progress)));
+            }
+            if (p.message) {
+              setCreateStatusMessage(p.message);
+            }
+            if (p.completed) {
+              try { es.close(); } catch (_) {}
+              activeEsRef.current = null;
+              setCreateProgress(100);
+              setCreateStatusMessage("¡Video creado con éxito!");
+              setIsCreating(false);
+              if (typeof window !== "undefined") {
+                try { localStorage.removeItem("lumen_active_creation_task"); } catch (_) {}
+              }
+              flash("¡Video creado y masterizado!");
+              loadProjects();
+              loadProject(taskId);
+            }
+          })
+          .catch(() => {});
       };
     },
     [pushLog, flash, loadProjects, loadProject],

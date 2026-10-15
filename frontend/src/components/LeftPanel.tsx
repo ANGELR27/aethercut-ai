@@ -210,8 +210,14 @@ function AITab() {
     if (isRefreshingTopics) return;
     setIsRefreshingTopics(true);
     flash("Buscando tendencias reales en Internet con IA...");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7500);
     try {
-      const res = await fetch("/api/viral-niches/refresh", { method: "POST" });
+      const res = await fetch("/api/viral-niches/refresh", {
+        method: "POST",
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
         if (data.topics && Array.isArray(data.topics) && data.topics.length > 0) {
@@ -237,6 +243,7 @@ function AITab() {
     } catch (e) {
       console.warn("Fallo en búsqueda en vivo de temas:", e);
     } finally {
+      clearTimeout(timeoutId);
       setIsRefreshingTopics(false);
     }
 

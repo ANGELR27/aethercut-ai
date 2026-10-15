@@ -349,7 +349,21 @@ class StreamerPipeline:
         def scene_progress(pct: float, msg: str):
             self._state("render", pct, msg, live_scenes=scenes_preview_data)
 
+        if self.render_lock.locked():
+            self._state(
+                "queued",
+                60.0,
+                "En cola de render: esperando turno de codificación para no sobrecargar GPU/CPU...",
+                live_scenes=scenes_preview_data,
+            )
+
         async with self.render_lock:
+            self._state(
+                "render",
+                60.0,
+                f"Scene Engine dirigiendo y grabando {len(plan.scenes)} escenas...",
+                live_scenes=scenes_preview_data,
+            )
             await scene_engine.assemble_broadcast(
                 plan=plan,
                 avatar_clip=avatar_clip,
