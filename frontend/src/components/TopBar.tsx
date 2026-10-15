@@ -10,8 +10,12 @@ import {
   IconCpu,
   IconCheck,
   IconSparkle,
+  IconMenu,
+  IconClose,
+  IconShare,
 } from "./Icons";
 import { ExportModal } from "./ExportModal";
+import { ProjectDetailsModal } from "./ProjectDetailsModal";
 import { cn } from "@/utils/cn";
 
 function Mark() {
@@ -46,9 +50,12 @@ export function TopBar() {
     ratio,
     subtitleStyle,
     overlays,
+    mobileMenuOpen,
+    setMobileMenuOpen,
   } = useEditor();
   const [projectOpen, setProjectOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -96,7 +103,17 @@ export function TopBar() {
 
   return (
     <header className="relative z-30 shrink-0">
-      <div className="glass-deep flex h-14 items-center gap-4 border-x-0 border-t-0 px-3 sm:px-4">
+      <div className="glass-deep flex h-14 items-center gap-3 sm:gap-4 border-x-0 border-t-0 px-3 sm:px-4">
+        {/* Mobile Hamburger menu toggle */}
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="grid h-8 w-8 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 hover:text-white hover:bg-white/[0.08] md:hidden shrink-0"
+          title={mobileMenuOpen ? "Cerrar menú" : "Abrir menú de herramientas y proyectos"}
+        >
+          {mobileMenuOpen ? <IconClose className="h-4 w-4" /> : <IconMenu className="h-4 w-4" />}
+        </button>
+
         {/* brand */}
         <div className="flex items-center gap-3">
           <Mark />
@@ -133,6 +150,19 @@ export function TopBar() {
               )}
             />
           </button>
+
+          {/* info & redes button */}
+          {activeProjectId && (
+            <button
+              type="button"
+              onClick={() => setDetailsOpen(true)}
+              className="hidden items-center gap-1.5 rounded-xl border border-beam-400/20 bg-beam-500/[0.07] px-2.5 py-1.5 text-[11px] text-beam-200 hover:bg-beam-500/15 hover:border-beam-400/40 transition-all md:flex shrink-0"
+              title="Ver y copiar título, descripción y hashtags para redes"
+            >
+              <IconShare className="h-3.5 w-3.5 text-beam-300" />
+              <span>Info & Redes</span>
+            </button>
+          )}
 
           {projectOpen && (
             <div className="glass-deep absolute left-0 top-full mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.8)] z-50 backdrop-blur-2xl">
@@ -287,6 +317,15 @@ export function TopBar() {
         ratio={ratio}
         subtitleStyle={subtitleStyle}
         subtitlesActive={overlays.captions}
+      />
+
+      {/* Project Publication Details Modal */}
+      <ProjectDetailsModal
+        isOpen={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        projectId={activeProjectId}
+        projectTitle={activeProjectTitle || "Video KAI"}
+        durationSec={duration}
       />
     </header>
   );

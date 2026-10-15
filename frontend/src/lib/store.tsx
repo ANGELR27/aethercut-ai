@@ -111,6 +111,8 @@ type Ctx = {
   loadProject: (id: string) => Promise<void>;
   exportProgress: number | null;
   exportStatusText: string;
+  mobileMenuOpen: boolean;
+  setMobileMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   exportMaster: (opts?: { burnSubtitles?: boolean; style?: string; title?: string }) => Promise<void>;
   importVideo: (file: File) => Promise<void>;
   createVideo: (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => Promise<string | null>;
@@ -193,6 +195,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [createStatusMessage, setCreateStatusMessage] = useState("");
   const [exportProgress, setExportProgress] = useState<number | null>(null);
   const [exportStatusText, setExportStatusText] = useState<string>("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const activeEsRef = useRef<EventSource | null>(null);
 
@@ -842,7 +845,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const burnSubs = typeof opts?.burnSubtitles === "boolean" ? opts.burnSubtitles : overlays.captions;
       const subStyle = opts?.style || subtitleStyle;
       const downloadTitle = (opts?.title || activeProjectTitle || "video_master").trim();
-      const safeBase = downloadTitle.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") || `master_${targetId}`;
+      const safeBase = downloadTitle.replace(/[\\/:*?"<>|]+/g, "").trim().replace(/\s+/g, "_").slice(0, 120) || `master_${targetId}`;
       const finalMp4Name = safeBase.toLowerCase().endsWith(".mp4") ? safeBase : `${safeBase}.mp4`;
 
       try {
@@ -1153,6 +1156,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     loadProject,
     exportProgress,
     exportStatusText,
+    mobileMenuOpen,
+    setMobileMenuOpen,
     exportMaster,
     importVideo,
     createVideo,

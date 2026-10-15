@@ -70,6 +70,8 @@ function CompactAI() {
 }
 
 function Shell() {
+  const { mobileMenuOpen, setMobileMenuOpen } = useEditor();
+
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-ink-1000 text-white">
       {/* ambient background */}
@@ -98,6 +100,37 @@ function Shell() {
 
         <MetricsPanel />
       </main>
+
+      {/* Mobile Drawer (LeftPanel con Proyectos, Generador IA, Nichos Virales, Subtítulos) */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden animate-in fade-in duration-200">
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-md"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div className="relative z-10 flex h-full w-[90vw] max-w-[340px] flex-col bg-ink-950/98 border-r border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.9)] backdrop-blur-2xl animate-in slide-in-from-left duration-250">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-beam-400 anim-ping" />
+                <span className="text-[12px] font-semibold uppercase tracking-wider text-white">
+                  Menú del Estudio
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"
+                title="Cerrar menú"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <LeftPanel />
+            </div>
+          </div>
+        </div>
+      )}
 
       <ActivityBar />
     </div>

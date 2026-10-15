@@ -799,6 +799,84 @@ async def get_project(task_id: str):
     return {"project": public, "editor": editor}
 
 
+@app.get("/api/projects/{task_id}/publish-info")
+async def get_project_publish_info(task_id: str):
+    """Devuelve título, descripción estructurada y hashtags listos para copiar y publicar."""
+    store = ProjectStore(task_id)
+    try:
+        doc = store.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    result = doc.get("result") or {}
+    options = doc.get("options") or {}
+    topic = result.get("topic") or options.get("topic") or ""
+    raw_title = doc.get("original_name") or result.get("title") or topic or f"Video {task_id}"
+
+    # Si ya tiene metadata generada por el publish studio:
+    if "auto_publish_prepared" in result and "metadata" in result["auto_publish_prepared"]:
+        meta = result["auto_publish_prepared"]["metadata"]
+        tags = meta.get("tags") or []
+        hashtags = ["#" + re.sub(r"[\W_]+", "", t) for t in tags if t.strip()]
+        return {
+            "title": meta.get("title") or raw_title,
+            "description": meta.get("description") or "",
+            "tags": tags,
+            "hashtags": hashtags,
+            "hashtags_str": " ".join(hashtags[:12]),
+        }
+
+    # Si hay broadcast_plan.json con escenas y speech:
+    plan_path = settings.PROJECTS_DIR / task_id / "work" / "broadcast_plan.json"
+    speech_summary = ""
+    if plan_path.exists():
+        try:
+            bplan = json.loads(plan_path.read_text(encoding="utf-8"))
+            scenes = bplan.get("scenes", [])
+            speech_snippets = [sc.get("speech", "") for sc in scenes if sc.get("speech")]
+            if speech_snippets:
+                speech_summary = " ".join(speech_snippets[:3])
+        except Exception:
+            pass
+
+    if not speech_summary:
+        speech_summary = topic or raw_title
+
+    clean_hook = speech_summary.strip()
+    if len(clean_hook) > 280:
+        clean_hook = clean_hook[:277] + "..."
+
+    description = (
+        f"{clean_hook}\n\n"
+        f"🎬 Video producido con Inteligencia Artificial documental.\n"
+        f"🔔 ¡Suscríbete y activa la campana para más análisis y revelaciones diarias!\n"
+        f"💬 ¿Cuál es tu opinión sobre este caso? Déjamela en los comentarios."
+    )
+
+    # Generar hashtags inteligentes
+    text_corpus = f"{raw_title} {topic}"
+    words = re.findall(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]{4,}", text_corpus)
+    stopwords = {"este", "esta", "estos", "estas", "para", "como", "pero", "sobre", "entre", "hacia", "hasta", "desde", "porque", "cuando", "donde", "quien", "video", "stream", "produccion"}
+    keywords = []
+    for w in words:
+        wl = w.lower()
+        if wl not in stopwords and wl not in [k.lower() for k in keywords]:
+            keywords.append(w.capitalize())
+
+    base_tags = ["Viral", "Tendencias", "AetherCut", "IA", "Documental"]
+    all_tags = (keywords[:8] + base_tags)[:10]
+    hashtags = ["#" + re.sub(r"[\W_]+", "", t) for t in all_tags]
+    hashtags_str = " ".join(hashtags)
+
+    return {
+        "title": raw_title,
+        "description": description,
+        "tags": all_tags,
+        "hashtags": hashtags,
+        "hashtags_str": hashtags_str,
+    }
+
+
 @app.get("/api/projects/{task_id}/broadcast-plan")
 async def get_broadcast_plan(task_id: str):
     """Escenas dirigidas por la IA (guion, emoción, tipo) para la Mesa & Timeline."""
@@ -1150,18 +1228,15 @@ async def download_project_master(
     if burn_subtitles:
         file_to_send = _prepare_subtitled_master(task_id, master_file, style)
 
-    import unicodedata
     if not filename:
         title = document.get("original_name") or (document.get("result") or {}).get("title") or "KAI_Broadcast"
-        ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii")
-        safe_title = re.sub(r"[^\w\s-]", "", ascii_title).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
+        safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip().replace(" ", "_")[:120] or f"KAI_{task_id}"
         out_filename = f"{safe_title}.mp4"
     else:
-        ascii_name = unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode("ascii")
-        clean_name = re.sub(r"[^\w\s.-]", "", ascii_name).strip().replace(" ", "_")
+        clean_name = re.sub(r'[\\/*?:"<>|]', "", filename).strip().replace(" ", "_")
         if not clean_name.lower().endswith(".mp4"):
             clean_name = f"{clean_name}.mp4"
-        out_filename = clean_name or f"KAI_{task_id}.mp4"
+        out_filename = clean_name[:120] or f"KAI_{task_id}.mp4"
 
     return FileResponse(
         path=file_to_send,

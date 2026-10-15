@@ -27,7 +27,9 @@ import {
   IconFolder,
   IconTrash,
   IconPlay,
+  IconShare,
 } from "./Icons";
+import { ProjectDetailsModal } from "./ProjectDetailsModal";
 
 const TABS = [
   { id: "media", label: "Proyectos", icon: IconFolder },
@@ -879,6 +881,7 @@ function AITab() {
 
 function MediaTab() {
   const { seek, clips, projects, activeProjectId, selectProject, deleteProject } = useEditor();
+  const [detailsProject, setDetailsProject] = useState<any | null>(null);
   const realScenes = clips.filter((c) => c.kind === "scene");
   const recentProjects = (projects || []).slice(0, 20);
 
@@ -987,26 +990,49 @@ function MediaTab() {
                     </div>
                   </div>
 
-                  {/* Acciones: botón eliminar */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (confirm(`¿Eliminar «${title.slice(0, 30)}...» de disco?`)) {
-                        deleteProject(p.id);
-                      }
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0"
-                    title="Eliminar proyecto de disco y liberar espacio"
-                  >
-                    <IconTrash className="h-3 w-3" />
-                  </button>
+                  {/* Acciones: botón info/copiar y botón eliminar */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDetailsProject(p);
+                      }}
+                      className="p-1.5 rounded-lg text-white/40 hover:text-beam-300 hover:bg-beam-500/15 transition-all"
+                      title="Ver y copiar título, descripción y hashtags para redes"
+                    >
+                      <IconShare className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`¿Eliminar «${title.slice(0, 30)}...» de disco?`)) {
+                          deleteProject(p.id);
+                        }
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                      title="Eliminar proyecto de disco y liberar espacio"
+                    >
+                      <IconTrash className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Modal de detalles de publicación */}
+      <ProjectDetailsModal
+        isOpen={Boolean(detailsProject)}
+        onClose={() => setDetailsProject(null)}
+        projectId={detailsProject?.id || null}
+        projectTitle={detailsProject?.name || detailsProject?.topic || "Video KAI"}
+        thumbnailUrl={detailsProject?.thumbnail_url}
+        durationSec={detailsProject?.duration}
+      />
 
       {/* 2. ESCENAS DEL PROYECTO ACTIVO */}
       {realScenes.length > 0 && (
