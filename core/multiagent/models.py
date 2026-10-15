@@ -198,12 +198,13 @@ def get_implementer_model() -> AgentModelConnector:
 
 
 def get_auditor_model() -> AgentModelConnector:
-    """Kimi-k3: Auditor riguroso, revisión de consistencia y búsqueda de fallos."""
+    """Auditor riguroso, revisión de consistencia y búsqueda de fallos (Nemotron / Kimi)."""
     key = getattr(settings, "KIMI_API_KEY", "") or getattr(settings, "NVIDIA_API_KEY", "")
+    model_name = getattr(settings, "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
     return AgentModelConnector(
-        model_name="moonshotai/kimi-k3",
+        model_name=model_name,
         api_key=key,
-        role_title="Auditor QA (Kimi-k3)",
+        role_title="Auditor QA (Nemotron)",
     )
 
 

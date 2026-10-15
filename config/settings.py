@@ -18,7 +18,7 @@ class Settings:
     PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
     PIXABAY_API_KEY: str = os.getenv("PIXABAY_API_KEY", "")
     NVIDIA_API_KEY: str = os.getenv("NVIDIA_API_KEY", "")
-    NVIDIA_MODEL: str = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3")
+    NVIDIA_MODEL: str = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 
     # Estudio de Publicación: miniaturas IA (Gemini image) y subida directa a YouTube
     GEMINI_IMAGE_API_KEY: str = os.getenv("GEMINI_IMAGE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")

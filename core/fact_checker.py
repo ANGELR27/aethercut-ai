@@ -211,8 +211,8 @@ class FactChecker:
                     api_key=settings.NVIDIA_API_KEY,
                     timeout=30.0,
                 )
-                active_model = getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
-                model_name = "Kimi-k3" if "kimi" in active_model.lower() else "Nemotron"
+                active_model = getattr(settings, "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
+                model_name = "Nemotron" if "nemotron" in active_model.lower() else ("Kimi" if "kimi" in active_model.lower() else active_model)
                 safe_log(f"[FactChecker] Auditando «{card.headline}» con {model_name} ({active_model})...")
                 call_kwargs = {
                     "model": active_model,
@@ -227,7 +227,8 @@ class FactChecker:
                     call_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
                 response = nv_client.chat.completions.create(**call_kwargs)
-                raw_text = response.choices[0].message.content or ""
+                msg = response.choices[0].message
+                raw_text = (msg.content or getattr(msg, "reasoning_content", "") or "").strip()
                 parsed = JSONValidator.extract_and_parse(raw_text)
                 if parsed and isinstance(parsed, dict) and "verdict" in parsed:
                     safe_log(f"[FactChecker] Veredicto exitoso de {model_name}: {parsed.get('verdict')}")

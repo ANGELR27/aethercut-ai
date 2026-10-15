@@ -13,7 +13,7 @@ from cancellation import CancellationRequested
 # modelo que respondió y conservamos los demás para recuperarnos de una caída.
 # 3.8 agotó el tiempo incluso con una consulta mínima durante la comprobación
 # del 2026-10-05. Se excluye del camino crítico para no atascar cada proyecto.
-FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.1-flash-lite"]
+FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-3.1-flash-lite"]
 
 
 def safe_log(msg: str) -> None:
@@ -228,8 +228,7 @@ class LLMClient:
             raise ValueError("NVIDIA_API_KEY no configurada")
 
         candidate_models = [
-            getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3"),
-            "moonshotai/kimi-k3",
+            getattr(settings, "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"),
             "nvidia/nemotron-3.5-lightning-30b-a3b",
             "meta/llama-3.2-11b-vision-instruct",
         ]
@@ -253,7 +252,7 @@ class LLMClient:
         for m in models:
             try:
                 if report:
-                    model_display = "Kimi-k3" if "kimi" in m.lower() else ("Nemotron" if "nemotron" in m.lower() else m)
+                    model_display = "Nemotron" if "nemotron" in m.lower() else ("Llama" if "llama" in m.lower() else m)
                     report(f"Razonando con {model_display} ({m})...")
                 safe_log(f"[LLM] Enviando petición a NVIDIA model={m}...")
                 create_kwargs = {
@@ -268,15 +267,15 @@ class LLMClient:
                 if "nemotron" in m.lower():
                     create_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
                 elif "kimi" in m.lower():
-                    # Parámetros optimizados para Moonshot Kimi-k3
                     create_kwargs["temperature"] = 0.7
 
                 response = client.chat.completions.create(**create_kwargs)
-                text = response.choices[0].message.content or ""
-                if text.strip():
+                msg = response.choices[0].message
+                text = (msg.content or getattr(msg, "reasoning_content", "") or "").strip()
+                if text:
                     self.last_model_used = f"nvidia:{m}"
                     safe_log(f"[LLM] Respuesta exitosa obtenida desde NVIDIA ({m}).")
-                    return text.strip()
+                    return text
             except Exception as exc:
                 last_error = exc
                 safe_log(f"[LLM] NVIDIA model={m} falló: {exc}")

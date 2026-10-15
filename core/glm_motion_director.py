@@ -17,8 +17,8 @@ logger = logging.getLogger("aethercut.glm_motion")
 class GLMMotionDirector:
     def __init__(self):
         self.api_key = getattr(settings, "NVIDIA_API_KEY", "")
-        self.model = getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
-        self.fallback_model = "moonshotai/kimi-k3"
+        self.model = getattr(settings, "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
+        self.fallback_model = "nvidia/nemotron-3.5-lightning-30b-a3b"
         self._client: Optional[OpenAI] = None
 
     @property
@@ -108,7 +108,8 @@ RESPONDE EXCLUSIVAMENTE CON ESTE OBJETO JSON VÁLIDO:
                     max_tokens=1400,
                     temperature=0.2,
                 )
-                raw = resp.choices[0].message.content or ""
+                msg = resp.choices[0].message
+                raw = (msg.content or getattr(msg, "reasoning_content", "") or "").strip()
                 m_json = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
                 if m_json:
                     return json.loads(m_json.group(1))
