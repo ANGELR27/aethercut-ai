@@ -9,8 +9,8 @@ echo ====================================================================
 echo.
 
 python run_studio.py --tunnel
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo.
-    echo ⚠️ Hubo un detalle al iniciar el servidor.
+    echo [ERROR] Hubo un problema al iniciar el servidor.
     pause
 )
