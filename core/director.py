@@ -30,7 +30,7 @@ class SceneCard:
     style: str = "auto"       # auto, verdict_badge, tech_card, quote, bento, map
     icon: str = "✓"
     subtitle: str = ""
-    template: str = "auto"   # verdict_badge, tech_card, stat_counter, versus_split, quote_evidence, step_badge, alert_banner, source_chip, newspaper_clipping, social_post, timeline_milestone
+    template: str = "auto"   # verdict_badge, tech_card, stat_counter, versus_split, quote_evidence, step_badge, alert_banner, source_chip, newspaper_clipping, social_post, timeline_milestone, workflow_diagram, terminal_hud, document_evidence_split
     variant: str = "orange_noir"  # orange_noir, frosted_white, emerald_matrix, crimson_hazard, cyber_cyan, royal_gold
     params: Dict[str, Any] = field(default_factory=dict)
 
@@ -61,6 +61,11 @@ class DirectorScene:
     # Modo análisis de caso: índice del fotograma REAL del video fuente que
     # respalda esta escena (cuando la transmisión analiza un video/caso concreto).
     case_frame: Optional[int] = None
+    # Soundbite estratégico: corte de declaración real con audio y video
+    soundbite_clip: Optional[str] = None
+    soundbite_quote: Optional[str] = None
+    soundbite_offset: Optional[float] = None
+    soundbite_dur: Optional[float] = None
 
 
 @dataclass
@@ -127,6 +132,10 @@ class DirectorBroadcastPlan:
                     popups=_clean_popups(s.get("popups")),
                     free_title=s.get("free_title"),
                     case_frame=s.get("case_frame") if isinstance(s.get("case_frame"), int) else None,
+                    soundbite_clip=s.get("soundbite_clip"),
+                    soundbite_quote=s.get("soundbite_quote"),
+                    soundbite_offset=float(s["soundbite_offset"]) if s.get("soundbite_offset") is not None else None,
+                    soundbite_dur=float(s["soundbite_dur"]) if s.get("soundbite_dur") is not None else None,
                 )
             )
         scenes = _deduplicate_cards_in_scenes(scenes)
@@ -328,18 +337,42 @@ ARQUITECTURA NARRATIVA ADAPTADA EN {num_scenes} ESCENAS:
 8. CIERRE SATISFACTORIO: Conclusión memorable y recompensa intelectual o de entretenimiento lograda.
 
 ==============================================================================
-REQUISITO CRÍTICO E INNEGOCIABLE DE DURACIÓN:
+REQUISITO CRÍTICO DE DURACIÓN Y CADENCIA NATURAL (EL AVATAR NO DEBE CORRER):
 ==============================================================================
 - Duración total objetivo: {duration_target} segundos ({duration_label}).
 - Número de escenas: {num_scenes}.
 - Cada escena debe durar aproximadamente {seconds_per_scene} segundos de narración hablada.
-- CADA campo "speech" DEBE contener MÍNIMO {words_per_scene} PALABRAS de texto hablado.
+- RANGO DE PALABRAS POR ESCENA: Entre {min_words_per_scene} y {max_words_per_scene} palabras habladas (objetivo central: ~{words_per_scene} palabras).
 - El total de TODAS las escenas sumadas debe dar aproximadamente {total_words} PALABRAS.
-- Ritmo de locución y lectura: locución fluida y natural de televisión a 120 palabras por minuto (~2.0 palabras por segundo). Cada idea debe tener tiempo de expresarse sin correr.
-- Si la duración es de 3 minutos o más, es OBLIGATORIO desarrollar cada escena con argumentos completos,
-  contexto histórico, datos precisos, ejemplos concretos, comparaciones y reflexiones. NO RESUMAS.
+- CADENCIA ORAL HUMANA Y RESPIRABLE: Locución fluida, conversacional y bien articulada a ~105 palabras por minuto (~1.75 palabras por segundo).
+  * ESTRICTAMENTE PROHIBIDO redactar textos densos o acelerados que obliguen a la voz a "correr" o hablar sin respirar.
+  * CADA ORACIÓN debe tener entre 8 y 15 palabras, con abundantes pausas de respiración: comas (,), dos puntos (:) y puntos seguidos (.).
+  * NUNCA escribas una oración de más de 18 palabras sin una coma o punto intermedio.
 - RITMO AUDIOVISUAL DINÁMICO: Ningún plano ni fondo debe permanecer estático por mucho tiempo. Cada escena debe cambiar de perspectiva: alternar entre el gancho directo del avatar, tomas de B-Roll documental reactivo en pantalla completa, tarjetas Bento con cifras duras y momentos de debate.
-- NUNCA escribas frases cortas de 1-2 líneas como speech. Cada speech debe ser un PÁRRAFO COMPLETO Y NUTRIDO.
+
+==============================================================================
+PROHIBICIÓN TOTAL DE RELLENO PSEUDO-INTELECTUAL Y FRASES "CULTAS" VACÍAS:
+==============================================================================
+¡ALERTA MÁXIMA!: El espectador de internet DETESTA el lenguaje pomposo, acartonado y superficial disfrazado de culto.
+- ESTRICTAMENTE PROHIBIDO usar clichés grandilocuentes que suenen complejos pero no digan nada profundo. Por ejemplo:
+  * PROHIBIDO: "los datos son demoledores y cambian todo lo que dábamos por sentado"
+  * PROHIBIDO: "la evidencia empírica desmantela el marco paradigmático"
+  * PROHIBIDO: "en una intrincada confluencia de factores estructurales"
+  * PROHIBIDO: "la realidad tiene otros planes y la confluencia histórica converge..."
+  * PROHIBIDO: "la discrepancia matemática resulta indiscutible ante el método experimental"
+- Si una oración contiene palabras rebuscadas ("paradigma", "axioma", "intrínseco", "confluencia") pero no cuenta una ACCIÓN REAL, un NOMBRE, una FECHA o una CURIOSIDAD CONCRETA, es RELLENO BASURA. ¡ELIMÍNALA!
+
+==============================================================================
+MOTOR DE CURIOSIDAD CONSTANTE Y DATOS SORPRENDENTES ("COSITAS QUE ASOMBREN"):
+==============================================================================
+Tu objetivo número 1 es mantener al oyente con la mente enganchada y sorprendida en CADA escena:
+1. FACTOR "¡GUAU, NO SABÍA ESO!": Cada escena DEBE incluir al menos un dato insólito, una curiosidad poco conocida, un detalle oculto o una revelación sorprendente ("Muchos creen que ocurrió por X, pero en realidad los registros demuestran que fue por Y").
+2. COMPARACIONES VISUALES Y TANGIBLES: Haz que las cifras se puedan visualizar fácilmente (ej: "un consumo tan alto que equivale a dejar prendidas diez mil pantallas de cine al mismo tiempo").
+3. DETALLES ESPECÍFICOS Y SUSTANCIALES: Cita nombres propios completos, años exactos, lugares específicos, decretos, presupuestos, medidas o anécdotas verificadas de primera mano.
+4. BUCLES DE CURIOSIDAD (CURIOSITY LOOPS): Abre cada escena con una intriga o pregunta atractiva y revela la sorpresa a la mitad. Conecta el final con la siguiente pregunta para que sea imposible dejar de escuchar.
+5. ESTILO CONVERSACIONAL DE ÉLITE (TIPO YOUTUBE VIDEO-ESSAY / PODCAST: VOX, JORDI WILD, NATE GENTILE, TAMAYO):
+   - Habla con cercanía, inteligencia y fascinación, como un divulgador brillante contándole a un amigo una historia alucinante en un café.
+   - Alterna afirmaciones directas con preguntas que despierten intriga: "¿Por qué nadie lo detuvo a tiempo? Porque la ley lo permitía."
 
 REGLAS DE FIDELIDAD TEMÁTICA, LISTAS Y RANKINGS (TOP 10, TOP 5, COMPARATIVAS):
 - FIDELIDAD TOTAL AL TEMA: Si el tema solicita un TOP N (ej: "TOP 10 DE LOS PEORES PRESIDENTES EN LOS ÚLTIMOS 6 AÑOS EN AMÉRICA"):
@@ -353,7 +386,7 @@ REGLAS DE REDACCIÓN Y GUION NARRATIVO (LOCUCIÓN DE RADIO Y TELEVISIÓN):
 - DESPEDIDA EXCLUSIVA EN LA ÚLTIMA ESCENA: ESTRICTAMENTE PROHIBIDO despedirse, agradecer o pedir suscripción ("gracias por acompañarme", "suscríbanse", "nos vemos en el próximo video", "hasta aquí llegamos") en escenas intermedias. La despedida y llamado a la acción ocurre ÚNICA Y EXCLUSIVAMENTE en la última escena (Escena {num_scenes}).
 - PROHIBIDO EL RELLENO: NUNCA titules escenas como "Relleno" o "Relleno Estructural". Cada escena debe tener un contenido temático real, sustantivo y relevante.
 - Redacta cada escena como un guion audiovisual para locutor profesional: con cadencia rítmica, pausas de respiración y excelente ortografía en español.
-- CADA ORACIÓN debe tener longitud moderada (de 10 a 16 palabras) separada por comas y puntos. ESTRICTAMENTE PROHIBIDO redactar párrafos de 30 o 40 palabras seguidas sin comas intermedias.
+- CADA ORACIÓN debe tener longitud moderada (de 8 a 15 palabras) separada por comas y puntos. ESTRICTAMENTE PROHIBIDO redactar párrafos de 30 o 40 palabras seguidas sin comas intermedias.
 - Usa comas antes de conjunciones y conectores naturales (ej: ", porque...", ", mientras...", ", donde...", ", pero...", ", y con ello...").
 - Habla de forma directa, cautivadora e inteligente, como un narrador o divulgador de primer nivel dirigiéndose a su público.
 - Evita muletillas o saludos vacíos (como "Hola a todos" o "Bienvenidos a mi canal"); entra directo al tema con energía y datos interesantes.
@@ -376,9 +409,22 @@ REGLAS DE RETENCIÓN Y VARIEDAD VISUAL (EDICIÓN PROFESIONAL):
   * En escenas puramente explicativas (gráficos, mapas, comparativas, citas documentales), el avatar debe reducir su presencia o intervenir en voz en off ('voice_over' / 'pip_corner').
   * Solo en la escena final de despedida o cierre puede usar 'hero_center' si el guion lo requiere expresamente.
 - PRIMEROS 15 SEGUNDOS DENSOS: el mayor abandono del espectador ocurre aquí. La escena 1 debe entregar el gancho visual + el dato más impactante del tema, sin contexto previo ni preámbulos.
-- BEAT DE RE-ENGANCHE al 60-70% del guion: en esa zona incluye OBLIGATORIAMENTE una escena que reformule la tensión con una pregunta directa al espectador, un dato que invierta lo dicho, o un anticipo del desenlace ("y aquí es donde todo cambia...").
+- REGLA DE LOS 2 A 4 SEGUNDOS (MICRO-PACING ESTILO VOX / MAGNATES MEDIA / MRBEAST):
+  * La retención de YouTube se desploma si un plano permanece fijo más de 4 segundos.
+  * EN EL GANCHO (ESCENAS 1 Y 2): El ritmo de corte es hiper-dinámico. Diseña obligatoriamente de 2 a 3 'visual_beats' con 'trigger' exacto para que el motor corte de plano cada 2.0 a 2.5 segundos.
+  * EN EL RESTO DEL VIDEO: NINGUNA escena debe depender de una sola toma estática. Aporta SIEMPRE 'visual_query2' y 'visual_beats' específicos para alternar ángulos y metraje cada 3.0 a 3.5 segundos.
+  * ONDAS DE PACING: Alterna momentos de cortes rápidos e impacto (revelaciones, clímax) con tomas de respiro (mapas geopolíticos o citas documentales).
+- PSICOLOGÍA DE RETENCIÓN (técnicas de Vox, Johnny Harris, Magnates Media, Veritasium, MrBeast):
+  * PROMESA Y PAGO (Promise & Payoff): en las 2 primeras escenas plantea una paradoja, misterio o pregunta de alto riesgo (bucle abierto) y NO la resuelvas hasta el clímax; recuérdala brevemente a mitad del video ("y todavía falta lo más extraño...").
+  * MICRO-GANCHOS CADA 60-90 SEGUNDOS: cuando el contenido pase de contexto a desarrollo, o de desarrollo a consecuencias, abre la escena con una afirmación inesperada, un dato que contradiga lo dicho o un adelanto del giro (pattern interrupt). Nunca encadenes más de 3 escenas seguidas sin un giro, pregunta directa al espectador o dato sorpresivo.
+  * CONTRASTE DE SILENCIO: antes de la revelación principal, la escena previa debe cerrar con una frase corta y contundente (6-8 palabras) y la revelación entra con una escena de tono 'serious' o 'dramatic' y sin card ni pop-ups, para que el espectador se incline hacia la pantalla.
+  * UNA SOLA CIFRA A LA VEZ: cada escena muestra como máximo UN dato numérico en pantalla (card, o pop-up, o chip; nunca dos). Si hay varias cifras en el speech, elige la más impactante para el elemento visual y deja el resto solo en la voz.
+  * PALABRAS PODER EN PANTALLA: el texto en pantalla se limita a 1-4 palabras de máximo impacto (nombre propio, cifra o concepto clave); jamás frases largas que compitan con la locución.
+  * CIERRE CON BUCLE: la última escena debe resolver la promesa inicial y dejar una pregunta final que invite a comentar o a ver el siguiente video, sin despedidas largas.
+
 - RITMO DE ORACIONES VARIADO: alterna frases cortas contundentes (6-9 palabras) con frases de desarrollo (14-18 palabras). La variación de cadencia retiene más que el vocabulario.
-- CARDS CONCISAS: el "body" de cada card se sostiene en pantalla solo lo que toma leerlo (~un tercio de segundo por palabra). Máximo 130 caracteres: si no cabe el dato esencial en esa cifra, simplifica el texto en vez de alargarlo.
+- CARDS Y ELEMENTOS VISUALES IMPORTANTES: cuando se muestren mapas, comparativas versus, registros forenses, recortes de prensa o estadísticas clave, el motor los sostiene en pantalla el tiempo necesario (5.5s a 8.5s) para que el espectador pueda leer y asimilar cómodamente sin que se pasen volando. Redacta el headline y body de forma sustantiva y limpia (máximo 140 caracteres).
+- PAUSAS ESTRATÉGICAS EN CLIPS Y CITAS: cuando des paso a una declaración o clip del protagonista ("escuchen sus palabras:", "miren lo que declaró:"), usa dos puntos (:) al final de la frase introductoria. El motor aplica automáticamente una pausa de suspense (0.40s) antes de que empiece a hablar la persona y una pausa de reflexión (0.55s) tras su última palabra antes de cambiar de escena, logrando un corte cinematográfico limpio.
 - CITA FUENTES REALES POR NOMBRE: cuando la evidencia web mencione un medio, estudio o institución (Reuters, Ember, Nature, ONU, NASA), cítalo POR SU NOMBRE en la narración al menos 2 veces a lo largo del video ("según el informe de Ember...", "como publicó Reuters...") y en los popups ("Fuente: Ember"). La atribución real construye credibilidad y retiene al espectador escéptico.
 - GANCHO VISUAL CONCRETO: el gancho inicial debe señalar algo visible y verificable ("miren estas marcas en la montaña") que la escena siguiente MUESTRE de verdad — nunca prometas visualmente algo que el montaje no entrega.
 
@@ -395,41 +441,56 @@ REGLAS PARA DATOS, MAPAS, ESTADÍSTICAS Y TARJETAS BENTO HUD (AL MENOS 60% DE LA
     - "social_post": Publicación verificada de alta resolución estilo X / Twitter / Threads con avatar, nombre, insignia de verificado, @handle, fecha y texto citado con términos clave resaltados en ámbar o azul. SFX "pop".
     - "timeline_milestone": Cronología documental de hitos conectados por un rayo de luz con nodo activo pulsante y fechas clave (ej: 2008 -> 2015 -> 2026). SFX "impact".
     - "verdict_badge": Distintivo viral estilo sticker/sello inclinado con rebote elástico (ej: headline "ganó Opus", "100% Real", "Confirmado", icon "✓"). Entra con spring bounce y SFX "pop".
-    - "tech_card": Tarjeta tecnológica superior dark slate con micro-matriz de puntos (ej: headline "find-skills", body "por Vercel · vercel-labs/skills"). Flota arriba con SFX "whoosh" o "pop".
-    - "stat_counter": Cifra récord con número gigante en gradiente, medidor de barra y tendencia (ej: stat "+340%", headline "Récord Histórico"). SFX "chime".
     - "versus_split": Comparativa dual lado A vs lado B con divisor central circular VS en naranja (ej: headline "Humano", body "IA Autónoma", stat "4h vs 12s"). SFX "impact".
     - "quote_evidence": Cita editorial Vox con comillas grandes, fuente y frase resaltada en fluorescente. SFX "whoosh".
     - "step_badge": Píldora de hito/fase con cápsula numérica (ej: headline "Detección Acústica", stat "01"). SFX "pop".
     - "alert_banner": Alerta táctica con ícono de peligro y borde brillante (ej: headline "CONTRADICCIÓN DETECTADA", body "Señal no biológica"). SFX "alert".
     - "source_chip": Micro-pastilla de atribución oficial verificada (ej: headline "NOAA Research 2026"). SFX "pop".
-    - "map": Mapa geopolítico táctico satelital.
-    - "bento": Tarjeta Bento Obsidian con gráfico e indicador de estado.
+    - "document_evidence_split": Pantalla dividida editorial estilo Platzi + Agustín Laje (panel de evidencia documental con cabecera de institución u organismo [ONU, UNODC, Ideas para la Paz, Ministerios, Gobiernos, Centros de Pensamiento], titular periodístico, fecha del informe, imagen o gráfica técnica incrustada, cita textual literal y rotulador fluorescente neón animado sobre las cifras y conclusiones clave). SFX "whoosh". ¡OBLIGATORIA SIEMPRE que se cite un informe oficial, estudio formal, balance de seguridad o documento de investigación! Se acompaña obligatoriamente de "camera": "split_screen".
+    - "map": Mapa geopolítico táctico satelital 3D orbital con telemetría de coordenadas y HUD militar.
+    - REGLA DE ORO: ¡PROHIBIDO USAR CAJAS O TARJETAS FLOTANTES PARA CIFRAS O PORCENTAJES! Las cifras numéricas ("80%", "$4 Billones") se animan directamente sobre el metraje de video como tipografía cinética flotante sin caja.
   * "variant" (paleta de diseño):
     - "orange_noir": Negro mate Obsidian + Naranja Eléctrico firma + Blanco perla (Firma AetherCut).
     - "frosted_white": Cristal esmerilado translúcido + Borde blanco + Tipografía serif editorial.
     - "emerald_matrix": Negro carbón + Verde Esmeralda neón para hechos verificados y éxito.
     - "crimson_hazard": Negro carbón + Rojo Carmesí para alertas críticas, mitos y controversias.
-    - "cyber_cyan": Negro profundo + Cian Neón para tecnología, software y código.
+    - "cyber_cyan": Negro obsidiana + Oro Ámbar de lujo para tecnología, ciencia y futuro.
     - "royal_gold": Negro + Oro Solar para récords mundiales y tops #1.
   * "badge":
     - "NOTICIA", "PRENSA", "PERIODICO", "TITULAR": Activa newspaper_clipping.
     - "TWEET", "TWITTER", "POST", "DECLARACION": Activa social_post.
     - "CRONOLOGIA", "TIMELINE", "HITOS", "EVOLUCION": Activa timeline_milestone.
-    - "VEREDICTO", "GANADOR" o "SELLO": Activa verdict_badge.
-    - "TECH", "HERRAMIENTA", "DEV" o "SKILL": Activa tech_card.
-    - "ESTADÍSTICA", "RÉCORD", "CIFRA": Activa stat_counter.
+    - "MAPA", "GEO", "ESTRECHO", "CANAL", "FRONTERA", "PAIS": Activa map.
     - "COMPARATIVA" o "VERSUS": Activa versus_split.
-    - "EVIDENCIA DOCUMENTAL" o "INFORME OFICIAL": Activa quote_evidence.
+    - "INFORME OFICIAL", "EVIDENCIA DOCUMENTAL", "ONU", "UNODC", "CITACIÓN FORMAL", "DOCUMENTO": Activa document_evidence_split.
+    - "EVIDENCIA", "CITA" o "DECLARACION": Activa quote_evidence.
     - "PASO", "FASE" o "HITO": Activa step_badge.
     - "ALERTA" o "PELIGRO": Activa alert_banner.
     - "FUENTE" o "ATRIBUCIÓN": Activa source_chip.
 
+==============================================================================
+SISTEMA DE ASIGNACIÓN INTELIGENTE DE RECURSOS POR FRASE (ESTILO AGUSTÍN LAJE / PLATZI):
+==============================================================================
+El Director de IA debe ser lo suficientemente inteligente para detectar la naturaleza exacta de cada oración y asignarle el recurso audiovisual que mejor respalda su veracidad:
+1. REGLA DE INFORMES Y CITAS FORMALES (ESTILO PLATZI / LAJE):
+   * Si en la frase se menciona un informe, estudio, organismo multilateral o documento oficial (ej: "según el informe de la ONU", "de acuerdo con la UNODC", "el balance de Ideas para la Paz revela", "según el informe de auditoría"):
+     -> ASIGNA OBLIGATORIAMENTE: "type": "card_focus", "camera": "split_screen", "card": {{"template": "document_evidence_split", "headline": "...", "body": "...", "stat": "...", "badge": "INFORME OFICIAL", "params": {{"institution": "...", "date_str": "...", "highlight_phrase": "..."}}}}.
+2. REGLA DE CIFRAS PORCENTUALES COMPARATIVAS Y BALANCES:
+   * Si la frase compara porcentajes, aumentos o caídas (ej: "los combatientes ilegales crecieron un 90%, pasando de 15.000 a 29.000", "el Clan del Golfo subió 152% mientras el ELN subió 22%"):
+     -> ASIGNA: "template": "versus_split" o tipografía cinética flotante con "camera": "voice_over". ¡Prohibido colocar cajas opacas centradas!
+3. REGLA DE CITAS TEXTUALES Y DECLARACIONES DE PROTAGONISTAS (SOUNDBITES CON AUDIO REAL):
+   * Si en la narración se introduce una cita directa de un personaje clave (ej: "Petro declaró textualmente que en tres meses acababa con el ELN", "Miren lo que dijo Abelardo de la Espriella en su intervención:"):
+     -> ASIGNA: "type": "video_reaction", introduciendo dos puntos (:) antes del corte, y especificando en "visual_query" y "visual_beats" la búsqueda en español de la rueda de prensa o discurso real del personaje. Si existen cortes reales ("case_soundbites"), enlaza "soundbite_clip" y "soundbite_quote".
+4. REGLA DE CONTEXTO NARRATIVO Y OPERATIVOS DE CAMPO:
+   * Cuando se relaten hechos de campo, operativos militares, capturas o contexto histórico:
+     -> ASIGNA B-Roll documental reactivo a pantalla completa con cortes dinámicos cada 2.5 a 3.5 segundos mediante "visual_beats", y KAI en "camera": "pip_corner".
+
 FILOSOFÍA DE MONTAJE Y ALTERNANCIA VISUAL (ESTILO ADRIA SOLÀ PASTOR / VIDEO-ENSAYO DE ALTA RETENCIÓN):
 - MÁXIMA VARIEDAD DE RECURSOS (CERO MONOTONÍA): Un video documental de calidad no repite el mismo formato visual dos veces seguidas. Debes alternar activamente los recursos de escena a escena:
   1. Si una escena usó un clip de B-Roll cinematográfico puro -> La siguiente DEBE mostrar evidencia tangible: un recorte de periódico con fluorescente ("newspaper_clipping") o una publicación verificada ("social_post").
-  2. Si una escena mostró un titular de prensa -> La siguiente DEBE mostrar una animación de cifra contundente ("stat_counter" o Remotion React) o una comparativa directa ("versus_split").
+  2. Si una escena mostró un titular de prensa -> La siguiente DEBE mostrar una animación cinética de impacto ("free_title" o Remotion React) o una comparativa directa ("versus_split").
   3. Si una escena mostró datos numéricos -> La siguiente DEBE aterrizar en una fotografía real de archivo histórico o de satélite con ficha técnica ("tech_card") o mapa geopolítico ("map").
-  4. Avatar / KAI: Usa "avatar_cam" en el Hook inicial (3-4 segundos con energía máxima) y en la conclusión reflexiva. En las escenas intermedias de datos y análisis profundo, KAI debe estar en PiP ("pip_corner") para que el protagonismo absoluto lo tenga el material de apoyo real y la evidencia visual.
+  4. En documentales / video-ensayos serios, el protagonismo absoluto lo tiene el metraje 4K y la evidencia visual a pantalla completa (100% video cinemático sin avatares en la esquina).
 - De esta manera el espectador se sumerge en una experiencia audiovisual rica, profesional y con la densidad informativa y el dinamismo de los mejores creadores de video-ensayos del mundo.
 
 REGLAS PARA TEXTO LIBRE ANIMADO CINEMÁTICO ("free_title") (SIN CAJAS, FLOTANTE EN PANTALLA):
@@ -441,26 +502,53 @@ REGLAS PARA TEXTO LIBRE ANIMADO CINEMÁTICO ("free_title") (SIN CAJAS, FLOTANTE 
   * "highlight": La palabra exacta del título que debe brillar con halo de luz de color.
   * "blur_bg": true (desenfoca momentáneamente el fondo del video durante 2 segundos mientras aparece el título flotante).
 
+REGLAS PARA EL TÍTULO DEL VIDEO ("title") (YOUTUBE VIRAL & CTR):
+- El campo "title" NO debe ser el tema crudo del usuario si este tiene errores ortográficos, faltas de acentuación o es aburrido.
+- Transfórmalo en un título magnético de YouTube con ortografía y sintaxis 100% impecables.
+- Debe despertar curiosidad y ganas irresistibles de verlo (ganchos de revelación, paradoja, verdad oculta o pregunta directa).
+- Longitud recomendada para YouTube: entre 45 y 75 caracteres (MÁXIMO ABSOLUTO 95 caracteres para evitar cortes en teléfonos móviles).
+- Sin comillas y sin prefijos como "Título:" o "KAI:".
+
 REGLAS PARA EDICIÓN AVANZADA Y REFERENCIAS VISUALES ("chips"):
 - SIEMPRE que en la narración se enumeren, comparen o mencionen países (ej: Estados Unidos, China, Argentina, España), marcas o entidades, agrega en la escena el array "chips" con los nombres limpios oficiales (ej: ["Estados Unidos", "China", "Argentina"]).
 - NO agregues emojis rotos ni códigos de dos letras como texto crudo; escribe el nombre completo del país o institución ("Estados Unidos", "China", "Argentina", "NASA", "MIT"). El motor gráfico descargará e integrará automáticamente la bandera oficial de alta resolución y aplicará la animación secuencial en el momento en que se mencionen.
 
 REGLAS DE SELECCIÓN VISUAL (MÁXIMA RELEVANCIA Y MULTI-VIDEO POR ESCENA):
+- REGLA EDITORIAL ESTRICTA (CERO IMÁGENES O CLIPS DE STOCK Y CERO ELEMENTOS DESCONECTADOS):
+  * ESTRICTAMENTE PROHIBIDO usar imágenes o clips de stock genéricos (oficinas con modelos sonriendo, apretones de manos corporativos, bombillas 3D, maquetas, billetes flotando, carreteras o ciudades vacías aleatorias) y clips no relacionados directamente con el tema tratado.
+  * PARA CADA TEMA HAY ABUNDANTE MATERIAL REAL, PUBLICACIONES Y DOCUMENTOS:
+    1. Documentos y balances oficiales (decretos, resoluciones, informes de la ONU, ministerios, balances de seguridad, centros de pensamiento): usa "document_evidence_split" con highlight fluorescente animado sobre las conclusiones clave.
+    2. Titulares y portadas reales de periódicos y prensa de prestigio (Financial Times, Bloomberg, Reuters, El Confidencial, El Tiempo, Semana, etc.): usa "newspaper_clipping".
+    3. Publicaciones y comunicados oficiales en redes sociales (tuits y comunicados de los propios involucrados): usa "social_post".
+    4. Citas textuales verificadas con autor y cargo: usa "quote_evidence" o soundbites con audio real.
+    5. Fotografías y metraje de prensa auténtico: conferencias de prensa, audiencias, operativos y coberturas periodísticas reales.
+- REGLA DE ORO DEL GANCHO INICIAL (PRIMEROS 5-10 SEGUNDOS ESTILO VIRAL Y YOUTUBE FAMOSO):
+  * La Escena 1 (el Hook) NUNCA puede quedarse en una sola imagen estática ni en un solo clip sin cambios. En los videos más virales y vistos del mundo (YouTube, TikTok, Reels), los primeros 8 segundos son un carrusel dinámico de estímulos intrigantes en ráfaga rápida.
+  * La Escena 1 DEBE incluir obligatoriamente:
+    1. "visual_query": Clip inicial de impacto, acción o enigma de apertura.
+    2. "visual_query2": Segundo clip contrastante para alternar a mitad del gancho.
+    3. "visual_beats" (3 A 4 BEATS DE CORTE RÁPIDO OBLIGATORIOS): Cortes cada 1.8 a 2.5 segundos que muestren facetas distintas de la historia (el hecho concreto, el protagonista real, el documento o titular periodístico clave, y la consecuencia en vivo).
+    4. "free_title" o titular flotante con highlight fluorescente para capturar la vista al instante.
 - EXACTA COINCIDENCIA TEMÁTICA: Lo que se muestre en pantalla DEBE coincidir al 100% con lo que KAI está narrando en ese instante exacto. Si el guión habla de velocirraptores con plumas, el video DEBE ser de velocirraptores con plumas; si habla de la mordida del T-Rex, el video DEBE mostrar el tiranosaurio rex o biomecánica fósil; si habla de escamas de cocodrilo, debe mostrar piel fósil o reptiles reales.
 - CAPACIDAD DE 2 VIDEOS POR ESCENA: Para enriquecer el montaje y evitar fondos repetidos, cada escena puede y debe aportar:
-  * "visual_query": El clip de video protagonista para la primera mitad de la escena (en inglés, hiper-específico, 4k/hd, ej: 'velociraptor feathered paleoart documentary animation 4k video').
-  * "visual_query2": Un segundo clip de video o ángulo complementario para alternar a mitad de la escena (ej: 'fossil amber feather paleontology laboratory close up video').
+  * "visual_query": El clip de video protagonista para la primera mitad de la escena (hiper-específico, 4k/hd). SI EL TEMA O PERSONA ES EN ESPAÑOL, USA EL NOMBRE Y TÉRMINOS EN ESPAÑOL para que YouTube encuentre la rueda de prensa y noticias reales (ej: 'Javier Milei discurso conferencia de prensa', 'Pedro Sanchez declaraciones en vivo', 'manifestacion policia disturbios'); si es un concepto de stock natural o anglosajón, usa inglés (ej: 'velociraptor paleoart animation 4k').
+  * "visual_query2": Un segundo clip de video o ángulo complementario para alternar a mitad de la escena.
 - PREDOMINIO ABSOLUTO DE VIDEO: Más del 70% de las escenas deben usar clips de video dinámicos en movimiento.
 - BEATS VISUALES ("visual_beats") OBLIGATORIOS: cada escena debe traer de 2 a 4 beats. Cada beat es un clip de referencia EXACTA de lo que se dice en esa frase:
   * "trigger": copia LITERAL de 3 a 6 palabras consecutivas del "speech" donde debe entrar ese clip (en el orden en que aparecen en el speech).
-  * "query": búsqueda en inglés hiper-específica de lo que se nombra en esa frase (persona real, lugar, institución, evento, objeto). Ej: si dice "el Banco Central recortó la tasa", query = "argentina central bank building buenos aires news footage".
+  * "query": búsqueda hiper-específica de lo que se nombra en esa frase (persona real, lugar, institución, evento, objeto). Si la persona o hecho es del mundo hispanohablante, escribe la búsqueda en español para que YouTube traiga metraje periodístico real en español (ej: "banco central buenos aires anuncio medidas", "discurso presidente congreso").
   * "recent": true si es actualidad (se buscará material del año en curso primero), false solo si es contexto histórico.
   * Prohibido usar queries genéricos ("cinematic", "abstract", "documentary 4k" solos). Nombra la entidad concreta.
 - POP-UPS ("popups"): de 0 a 2 por escena. Texto corto (máx. 40 caracteres) que aparece en el instante exacto en que se pronuncia el "trigger" (copia LITERAL de 2 a 5 palabras del speech). "kind": "stat" (cifra), "fact" (dato), "alert" (advertencia/polémica) o "quote" (cita). No repitas lo que ya está en la "card".
 - PROHIBIDO repetir el mismo visual_query entre escenas. Cada toma debe ser fresca y diferente.
 - EXCLUSIÓN TOTAL DE MARCAS DE AGUA Y SELLOS: NUNCA busques marcas de stock comercial con sellos (Shutterstock, Alamy, iStock, Adobe Stock).
 - ANCLAJE A LA ENTIDAD REAL DEL CASO: cuando la transmisión trate un caso, lugar, persona, objeto o evento ESPECÍFICO, el "visual_query" y los "query" de los beats DEBEN nombrar esa entidad exacta (ej: 'Dyatlov Pass tent 1959 expedition photograph', 'Nazca lines hummingbird geoglyph aerial', 'Monte Ararat Durupinar formation satellite') y NUNCA su equivalente genérico ('snowy mountain', 'ancient lines', 'rocky mountain'). Una montaña cualquiera cuando se habla de UNA montaña concreta es una mentira visual que rompe la credibilidad.
-{case_frames_block}==============================================================================
+- PRIORIZACIÓN ABSOLUTA DE LA PERSONA Y DECLARACIÓN REAL: Si la escena habla de una persona o mandatario (ej: un presidente, ministro, líder, CEO, científico, deportista o celebridad), el "visual_query" y "visual_beats" DEBEN buscar OBLIGATORIAMENTE a esa persona real hablando o en acción (ej: 'Pedro Sanchez rueda de prensa declaraciones', 'Javier Milei discurso asamblea ONU', 'Claudia Sheinbaum conferencia', 'Elon Musk interview announcement'). ESTRICTAMENTE PROHIBIDO sustituir a la persona por metáforas abstractas de stock (como billetes de dinero, maquetas, martillos de juez, carreteras o edificios genéricos vacíos). La audiencia quiere ver a la persona concreta de la que se habla.
+- ESCENAS DE REACCIÓN CON SOUNDBITE Y AUDIO REAL (CORTES DE DECLARACIÓN): En escenas de tipo "video_reaction" o cuando se introduzca una frase clave o declaración de un protagonista (ej: presidentes, líderes, científicos, figuras públicas):
+  * Redacta una locución de KAI concisa y dinámica (de 10 a 18 palabras) que dé paso directo al corte de video (ej: "Miren lo que afirmó textualmente ante los micrófonos:", "Sus declaraciones ante la prensa fueron tajantes:", "Atención a sus propias palabras:").
+  * El motor audiovisual le da prioridad al corte de video: silencia el audio mientras KAI habla para que no haya murmullos compitiendo detrás, y luego activa automáticamente la voz REAL del protagonista a volumen completo en primer plano para que se escuche clara y nítida.
+  * Si hay soundbites reales del caso disponibles, asigna "soundbite_clip" con el nombre del clip y "soundbite_quote" con la cita exacta.
+{case_frames_block}{case_soundbites_block}==============================================================================
 
 TIPOS DE ESCENA DISPONIBLES:
 1. "avatar_cam": KAI diciendo la primera frase de gancho (Hook de impacto de 3 a 4 segundos MÁXIMO) y luego entra inmediatamente el contenido visual y B-Roll para que la audiencia no se aburra. Ideal para abrir con intriga o para la conclusión final reflexiva.
@@ -487,46 +575,80 @@ RESPONDE EXCLUSIVAMENTE EN FORMATO JSON VÁLIDO:
   "title": "Titular principal de la transmisión",
   "scenes": [
     {{
-      "name": "Gancho Inicial & Enigma Visual",
+      "name": "Gancho de Alta Tensión Geopolítica",
       "type": "video_reaction",
-      "emotion": "excited",
-      "camera": "pip_delayed",
-      "speech": "¿Alguna vez te has preguntado cómo percibe el mundo un animal frente a nosotros? Los números son demoledores, y la evidencia científica más reciente cambia por completo nuestra perspectiva habitual.",
-      "visual_query": "animal sensory perception wildlife documentary cinematic 4k footage",
-      "visual_query2": "nature wildlife macro vision footage hd",
+      "emotion": "serious",
+      "camera": "voice_over",
+      "speech": "En este preciso segundo, cien mil buques cisterna cruzan un estrecho tan angosto que dos destructores casi pueden rozarse. Si este canal se bloquea setenta y dos horas, el ochenta por ciento del petróleo de Asia desaparece.",
+      "visual_query": "oil tanker ship navigation strait of malacca aerial 4k footage",
+      "visual_query2": "satellite military radar maritime tracking footage hd",
+      "visual_beats": [
+        {{"trigger": "cien mil buques cisterna", "query": "massive container cargo ships maritime choke point", "recent": true}},
+        {{"trigger": "Si este canal se bloquea", "query": "military warship naval blockade naval defense 4k", "recent": false}},
+        {{"trigger": "el ochenta por ciento", "query": "oil refinery petroleum energy crisis tank terminal", "recent": true}}
+      ],
       "free_title": {{
-        "title": "EL ENIGMA SENSORIAL",
-        "tag": "EVIDENCIA CIENTÍFICA",
-        "highlight": "ENIGMA",
+        "title": "EL CUELLO DE BOTELLA DEL MUNDO",
+        "tag": "INTEL // MARÍTIMO",
+        "highlight": "CUELLO DE BOTELLA",
         "blur_bg": true
       }},
+      "sfx": "impact",
+      "duration_est_sec": {seconds_per_scene}
+    }},
+    {{
+      "name": "Mapa Táctico del Dilema de Malaca",
+      "type": "video_reaction",
+      "emotion": "serious",
+      "camera": "voice_over",
+      "card": {{
+        "headline": "Estrecho de Malaca: 2.8 km de Paso Crítico",
+        "stat": "ZONA DE DISPUTA NAVAL",
+        "body": "Punto de estrangulamiento que conecta el Océano Índico con el Mar de la China Meridional.",
+        "badge": "MAPA",
+        "template": "map"
+      }},
+      "speech": "No es una teoría conspirativa. Pekín lo bautizó oficialmente como el Dilema de Malaca: una sola ruta marítima donde tres superpotencias compiten en silencio por el control del interruptor del mundo.",
+      "chips": ["China", "Estados Unidos", "Japón"],
+      "visual_query": "strait of malacca satellite orbital view nautical map 4k",
+      "visual_query2": "naval submarine patrol south china sea 4k footage",
+      "visual_beats": [
+        {{"trigger": "el Dilema de Malaca", "query": "beijing military command center war room screen", "recent": true}},
+        {{"trigger": "tres superpotencias compiten", "query": "aircraft carrier strike group pacific ocean navy", "recent": true}}
+      ],
       "sfx": "whoosh",
       "duration_est_sec": {seconds_per_scene}
     }},
     {{
-      "name": "Comparativa & Estadísticas en Pantalla",
+      "name": "Evidencia Documental Oficial (Platzi/Laje Split)",
       "type": "card_focus",
       "emotion": "serious",
-      "camera": "pip_corner",
+      "camera": "split_screen",
       "card": {{
-        "headline": "Comparativa de Sentidos",
-        "stat": "300M vs 6M",
-        "body": "Receptores olfativos del perro comparados con los del ser humano según estudios biológicos.",
-        "badge": "COMPARATIVA"
+        "headline": "CULTIVOS DE COCA ALCANZAN MÁXIMO HISTÓRICO",
+        "stat": "253K ha",
+        "body": "De acuerdo con el informe oficial de la ONU (UNODC), los cultivos de coca alcanzaron récord de 253.000 hectáreas, mientras los combatientes ilegales crecieron un 90%.",
+        "badge": "INFORME OFICIAL",
+        "template": "document_evidence_split",
+        "params": {{
+          "institution": "UNODC · NACIONES UNIDAS",
+          "date_str": "JUNIO 2026",
+          "highlight_phrase": "récord de 253.000 hectáreas",
+          "stat_value": "+90%",
+          "stat_label": "Combatientes Ilegales",
+          "stat_value2": "253K ha",
+          "stat_label2": "Cultivos Totales"
+        }}
       }},
-      "speech": "Miren los datos duros que tenemos en pantalla, con trescientos millones frente a apenas seis millones de receptores. La diferencia es monumental, y explica por qué su capacidad de rastreo supera todo lo imaginable.",
-      "chips": ["Canis lupus", "Homo sapiens"],
-      "visual_query": "dog biology scientific research laboratory 4k video",
-      "visual_query2": "microscopic sensory receptors biology animation video",
+      "speech": "De acuerdo con el informe oficial de la ONU publicado en junio de 2026, los cultivos de coca alcanzaron un récord de 253.000 hectáreas en el territorio nacional. Y las cifras de Ideas para la Paz confirman que los combatientes armados ilegales crecieron un noventa por ciento en el mismo periodo.",
+      "visual_query": "United Nations UNODC official report press conference 4k footage",
+      "visual_query2": "coca crops harvest illegal armed groups documentary aerial 4k footage",
       "visual_beats": [
-        {{"trigger": "Miren los datos duros", "query": "police sniffer dog working airport footage", "recent": true}},
-        {{"trigger": "trescientos millones frente a", "query": "dog nose close up macro sniffing", "recent": false}},
-        {{"trigger": "su capacidad de rastreo", "query": "search and rescue dog tracking scent field", "recent": true}}
+        {{"trigger": "informe oficial de la ONU", "query": "United Nations press briefing podium official report", "recent": true}},
+        {{"trigger": "récord de 253.000 hectáreas", "query": "aerial view coca fields plantation forest", "recent": false}},
+        {{"trigger": "crecieron un noventa por ciento", "query": "military operational balance security forces", "recent": true}}
       ],
-      "popups": [
-        {{"trigger": "La diferencia es monumental", "text": "50 veces más receptores", "kind": "stat"}}
-      ],
-      "sfx": "chime",
+      "sfx": "whoosh",
       "duration_est_sec": {seconds_per_scene}
     }}
   ],
@@ -553,21 +675,33 @@ class AIDirector:
         duration_target: int,
         style_instructions: str,
         case_frames: Optional[List[Dict[str, Any]]] = None,
+        case_soundbites: Optional[List[Dict[str, Any]]] = None,
     ) -> DirectorBroadcastPlan:
         """Pide a Gemini dirigir la emisión completa escena por escena.
 
         case_frames: fotogramas REALES del video/caso fuente (modo análisis de
         caso). Cada item: {"index": int, "desc": str}. El director los usa como
         fondo de las escenas que hablan de lo que SE VE en esos fotogramas.
+        case_soundbites: declaraciones estratégicas reales con audio y video
+        del protagonista analizadas en el video completo.
         """
-        safe_log(f"[AIDirector] Planificando y dirigiendo transmisión para: «{topic}» ({duration_target}s)")
+        # Normalización inteligente de unidad de tiempo: si el llamador envía minutos (<= 40)
+        try:
+            dur_int = int(duration_target) if duration_target is not None else 45
+        except (ValueError, TypeError):
+            dur_int = 45
+        if 0 < dur_int <= 40:
+            dur = dur_int * 60
+        else:
+            dur = dur_int
+        dur = max(20, min(2400, dur))
+
+        safe_log(f"[AIDirector] Planificando y dirigiendo transmisión para: «{topic}» ({dur}s / {dur // 60 if dur >= 60 else dur}{'m' if dur >= 60 else 's'})")
 
         # Detección inteligente de TOPs y Rankings (ej: TOP 10, TOP 5, Ranking 7)
         ranking_match = re.search(r'\b(?:top|ranking|los mejores|los peores|puesto|puestos)\s*(\d{1,2})\b', topic, re.IGNORECASE)
         ranked_n = int(ranking_match.group(1)) if ranking_match else None
 
-        # Dinamismo profesional de YouTube/TikTok: cambio de escena visual cada 16 a 24 segundos
-        dur = max(20, duration_target)
         if ranked_n and 3 <= ranked_n <= 15:
             # Para un TOP N: 1 escena de intro/gancho + N escenas (una por cada puesto) + 1 escena de conclusión
             num_scenes = ranked_n + 2
@@ -576,18 +710,28 @@ class AIDirector:
         elif dur <= 60:
             num_scenes = max(3, dur // 18)
         elif dur <= 100:
-            num_scenes = max(3, dur // 20)
+            num_scenes = max(3, dur // 22)
         elif dur <= 180:
-            num_scenes = max(5, dur // 22)
+            num_scenes = max(4, dur // 28)
         elif dur <= 360:
-            num_scenes = max(8, dur // 25)
+            num_scenes = max(6, dur // 35)
+        elif dur <= 600:
+            num_scenes = max(8, min(10, round(dur / 65)))
+        elif dur <= 900:
+            # 15 min: 11-12 escenas de ~75s con párrafos profundos de 135-155 palabras
+            num_scenes = max(10, min(12, round(dur / 75)))
+        elif dur <= 1500:
+            # 20-25 min: 13-16 escenas de ~85s
+            num_scenes = max(13, min(16, round(dur / 85)))
         else:
-            num_scenes = min(48, max(12, dur // 28)) if dur > 1200 else min(20, max(12, dur // 28))
+            # 30-40 min: 16-22 escenas de ~95s
+            num_scenes = max(16, min(24, round(dur / 95)))
 
         seconds_per_scene = round(dur / num_scenes)
-        # Ritmo de narración natural y elocuente (~130 palabras por minuto = ~2.15 palabras por segundo)
-        # Ajustamos el objetivo de palabras por escena para que el audio Edge TTS llene exactamente la duración deseada
-        words_per_scene = max(26, round(seconds_per_scene * 2.15))
+        # Ritmo de narración broadcast natural (~110-120 palabras por minuto = ~1.85 palabras por segundo)
+        words_per_scene = max(25, round(seconds_per_scene * 1.85))
+        min_words_per_scene = max(18, round(seconds_per_scene * 1.50))
+        max_words_per_scene = max(30, round(seconds_per_scene * 2.10))
         total_words = words_per_scene * num_scenes
 
         if dur >= 600:
@@ -616,8 +760,70 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
         else:
             case_frames_block = ""
 
+        # Bloque de soundbites estratégicos reales del caso
+        if case_soundbites:
+            sb_lines = "\n".join(
+                f"  * Soundbite #{i} [clip: '{sb.get('clip_name', f'case_soundbite_{i}.mp4')}']: «{sb.get('quote', '')}» ({sb.get('duration', 3.2):.1f}s)"
+                for i, sb in enumerate(case_soundbites)
+            )
+            case_soundbites_block = f"""
+DECLARACIONES Y SOUNDBITES ESTRATÉGICOS REALES DEL VIDEO FUENTE:
+El analizador examinó el video completo y extrajo estas declaraciones reales clave donde el protagonista habla con lógica y sentido completo:
+{sb_lines}
+
+REGLAS PARA ESCENAS CON DECLARACIÓN REAL:
+- Elige al menos una de estas declaraciones reales y crea una escena de tipo "video_reaction" donde KAI introduzca con intriga y dinamismo la cita (ej: "Atención a lo que afirmó textualmente ante la prensa:", "Miren sus declaraciones exactas sobre este tema:").
+- En esa escena asigna:
+  "soundbite_clip": "<nombre del clip asignado, ej: case_soundbite_0.mp4>",
+  "soundbite_quote": "<la cita textual que dice el protagonista>"
+- KAI dirá su locución concisa (10 a 18 palabras) y el motor activará automáticamente la voz real del protagonista con la declaración completa.
+
+"""
+        else:
+            case_soundbites_block = ""
+
         import datetime as _dt
         _now = _dt.date.today()
+
+        is_anime_broadcast = (
+            (
+                any(k in topic.lower() for k in ("anime", "manga", "black clover", "shonen", "sakuga"))
+                or bool(re.search(r'\basta\b', topic, re.IGNORECASE))
+                or "anime" in style_instructions.lower()
+            )
+            and not any(k in topic.lower() for k in ("cristiano", "cristiana", "huellas sagradas", "hacksaw ridge", "desmond doss"))
+        )
+        if is_anime_broadcast:
+            ep_match = re.search(r'(?:episodios?|episodes?|ep\.?)\s*([\d\s\-]+)', topic, re.IGNORECASE)
+            part_match = re.search(r'parte\s*(\d+)', topic, re.IGNORECASE)
+            ep_tag = ""
+            if ep_match:
+                ep_tag = f"Episodios {ep_match.group(1).strip()}"
+            elif part_match:
+                p_num = int(part_match.group(1))
+                ep_tag = f"Episodios {(p_num - 1) * 3 + 1} a {p_num * 3}"
+
+            anime_rule = f"""
+REGLA EDITORIAL SUPREMA: ANIME RECAP PROFESIONAL ({ep_tag or 'Arco Actual'}):
+1. NARRATIVA INMERSIVA EN TERCERA PERSONA PRESENTE (ESTILO THRILLER DE ACCIÓN):
+   - Narra en presente continuo inmersivo ("Asta da un paso al frente ensangrentado...", "Revchi desata sus cadenas...", "El grimorio negro flota en el aire...").
+   - ESTRUCTURA DE CAUSA Y EFECTO: Cada frase debe conectarse con consecuencias claras ("Por lo tanto...", "Pero en ese instante..."). Cero resúmenes escolares aburridos ("en este capítulo el autor nos muestra").
+   - ECONOMÍA DE NOMBRES: Identifica primero el rol del personaje ("el ladrón de grimorios", "su rival prodigio", "el capitán de los toros negros") para que el oyente jamás se pierda ni se sature.
+2. ALINEACIÓN VISUAL ESTRICTA 1:1 ("SHOW WHAT YOU TELL"):
+   - Lo que el narrador nombra en un segundo exacto DEBE ser lo que se ve en pantalla.
+   - En CADA ESCENA incluye obligatoriamente entre 2 y 4 "visual_beats":
+     * "trigger": Copia LITERAL de 3 a 5 palabras del speech donde ocurre la acción clave (ej: "desenvaina la espada negra", "corta las cadenas mágicas", "el trébol de cuatro hojas brilla").
+     * "query": Término de búsqueda EXACTO de esa acción en ese episodio (ej: "Asta five leaf black sword summon Episode 1", "Asta breaks Revchi magic chains Episode 1").
+3. CERO ANACRONISMOS:
+   - ESTRICTAMENTE PROHIBIDO usar o buscar transformaciones, villanos o escenas de sagas futuras que no han ocurrido todavía ({ep_tag}).
+   - En cada escena asigna:
+     * "visual_query": El atacante o protagonista en acción (ej: "Asta vs Revchi fight combat").
+     * "visual_query2": La reacción del oponente o los testigos (ej: "Revchi shocked face reaction" o "Yuno amazed expression").
+4. VOZ CONTINUA Y CERO PERSONAS REALES:
+   - Alejandro mantiene narración continua. CERO personas reales, cero entrevistas, cero podcasts, cero avatares en cámara.
+"""
+            style_instructions = f"{style_instructions}\n\n{anime_rule}"
+
         prompt = DIRECTOR_SYSTEM_PROMPT.format(
             today=_now.isoformat(),
             year=_now.year,
@@ -630,8 +836,11 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
             num_scenes=num_scenes,
             seconds_per_scene=seconds_per_scene,
             words_per_scene=words_per_scene,
+            min_words_per_scene=min_words_per_scene,
+            max_words_per_scene=max_words_per_scene,
             total_words=total_words,
             case_frames_block=case_frames_block,
+            case_soundbites_block=case_soundbites_block,
         )
 
         try:
@@ -656,7 +865,7 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
                     fix_prompt = (
                         "El siguiente texto contiene un JSON de un plan de video con errores menores de sintaxis (comas o comillas). "
                         "Corrige la sintaxis y responde EXCLUSIVAMENTE con el objeto JSON válido:\n\n"
-                        f"{raw[:8000]}"
+                        f"{raw[:40000]}"
                     )
                     repaired_raw = self.llm.generate(fix_prompt, json_mode=True, deadline_sec=18)
                     data = _parse_director_json(repaired_raw)
@@ -684,9 +893,11 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
                 is_final_scene = (idx == len(raw_scenes) - 1)
                 polished_speech = normalize_speech_for_tts(raw_speech, is_final_scene=is_final_scene)
 
-                sc_type = s.get("type") or ("video_reaction" if idx == 0 else "card_focus")
-                if idx == 0 and sc_type == "avatar_cam":
-                    sc_type = "video_reaction"
+                sc_type = s.get("type") or ("broll_narration" if is_anime_broadcast else ("video_reaction" if idx == 0 else "card_focus"))
+                if is_anime_broadcast and sc_type == "video_reaction":
+                    sc_type = "broll_narration"
+                elif idx == 0 and sc_type == "avatar_cam":
+                    sc_type = "broll_narration" if is_anime_broadcast else "video_reaction"
 
                 sc_cam = s.get("camera")
                 if not sc_cam:
@@ -699,6 +910,48 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
                 elif idx == 0 and sc_cam == "hero_center":
                     sc_cam = "pip_delayed"
 
+                vq = s.get("visual_query", topic)
+                vq2 = s.get("visual_query2", "")
+                v_beats = _clean_beats(s.get("visual_beats"))
+
+                if is_anime_broadcast:
+                    anime_name = "Black Clover"
+                    known_series = [
+                        "Black Clover", "Naruto", "Jujutsu Kaisen", "One Piece", "Bleach",
+                        "Dragon Ball", "Demon Slayer", "My Hero Academia", "Attack on Titan",
+                        "Hunter x Hunter", "Solo Leveling", "Chainsaw Man"
+                    ]
+                    for s_name in known_series:
+                        if s_name.lower() in topic.lower():
+                            anime_name = s_name
+                            break
+
+                    ep_anchor = ""
+                    ep_m = re.search(r'(?:episodios?|episodes?|ep\.?)\s*([\d\s\-]+)', topic, re.IGNORECASE)
+                    p_m = re.search(r'parte\s*(\d+)', topic, re.IGNORECASE)
+                    if ep_m:
+                        ep_anchor = f"Episode {ep_m.group(1).strip()}"
+                    elif p_m:
+                        p_val = int(p_m.group(1))
+                        ep_anchor = f"Episode {(p_val-1)*3 + 1}"
+
+                    def _sanitize_anime_term(raw_term: str) -> str:
+                        noise = {"4k", "1080p", "hd", "video", "anime", "documentary", "footage", "clip", "scene"}
+                        words = [w for w in re.findall(r'[a-zA-ZáéíóúÁÉÍÓÚñÑ0-9]+', raw_term or "") if w.lower() not in noise and w.lower() not in anime_name.lower()]
+                        content = " ".join(words[:4])
+                        if ep_anchor and not any(k in content.lower() for k in ("ep", "episode", "episodio")):
+                            return f"{anime_name} {ep_anchor} {content}".strip()
+                        return f"{anime_name} {content}".strip()
+
+                    vq = _sanitize_anime_term(vq)
+                    if vq2:
+                        vq2 = _sanitize_anime_term(vq2)
+                    for b in v_beats:
+                        if isinstance(b, dict) and b.get("query"):
+                            b["query"] = _sanitize_anime_term(b["query"])
+
+                v_queries = [q for q in [vq, vq2] if q]
+
                 scenes.append(
                     DirectorScene(
                         scene_id=idx + 1,
@@ -707,16 +960,16 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
                         emotion=s.get("emotion", "excited"),
                         camera=sc_cam,
                         speech=polished_speech or raw_speech,
-                        visual_query=s.get("visual_query", topic),
-                        visual_queries=[q for q in [s.get("visual_query"), s.get("visual_query2")] if q],
-                        visual_query2=s.get("visual_query2", ""),
+                        visual_query=vq,
+                        visual_queries=v_queries,
+                        visual_query2=vq2,
                         card=card_obj,
                         chips=s.get("chips", []),
                         # 'or "whoosh"': un "sfx": null del LLM (la clave existe) no
                         # debe dejar None — crasheaba el render de la escena.
                         sfx=(s.get("sfx") or "whoosh") if s.get("sfx") != "none" else "none",
                         duration_est=float(s.get("duration_est_sec", seconds_per_scene)),
-                        visual_beats=_clean_beats(s.get("visual_beats")),
+                        visual_beats=v_beats,
                         popups=_clean_popups(s.get("popups")),
                         # free_title: el prompt exige producirlo y from_dict lo
                         # conservaba, pero esta ruta directa lo descartaba — los
@@ -731,175 +984,564 @@ Estos fotogramas REALES del caso ya están descargados y listos como fondos de p
 
             scenes = _deduplicate_cards_in_scenes(scenes)
 
+            # Garantizar que las palabras y duración cubran la duración objetivo solicitada
+            scenes = await self._ensure_duration_coverage(scenes, dur, topic, style)
+
+            total_calc_dur = sum(s.duration_est for s in scenes)
+
+            from core.youtube_title_optimizer import optimize_youtube_title
+            plan_title = optimize_youtube_title(
+                raw_topic=topic,
+                style=style,
+                duration_sec=dur,
+                existing_plan_title=data.get("title"),
+            )
+
             return DirectorBroadcastPlan(
-                title=data.get("title", f"Transmisión KAI: {topic}"),
+                title=plan_title,
                 topic=topic,
                 style=style,
                 scenes=scenes,
                 chat_comments=data.get("chat_comments", []),
-                total_est_duration=float(duration_target),
+                total_est_duration=float(max(dur, total_calc_dur)),
             )
 
         except Exception as exc:
             safe_log(f"[AIDirector] Fallback a dirección base por error en Gemini: {exc}")
-            return self._build_fallback_plan(topic, style, duration_target)
+            return self._build_fallback_plan(topic, style, dur, case_soundbites=case_soundbites)
 
-    def _build_fallback_plan(self, topic: str, style: str, duration_target: int) -> DirectorBroadcastPlan:
-        """Plan de dirección de respaldo con progresión narrativa real sin repeticiones y tarjetas informativas ricas."""
-        dur = max(30, duration_target)
-        num_scenes = 5
+    async def _ensure_duration_coverage(
+        self,
+        scenes: List[DirectorScene],
+        duration_target: int,
+        topic: str,
+        style: str
+    ) -> List[DirectorScene]:
+        """Garantiza que la narración generada tenga palabras y tiempo suficientes para cubrir la duración asignada."""
+        if not scenes or duration_target < 40:
+            return scenes
+
+        total_words = sum(len(s.speech.split()) for s in scenes)
+        target_words = round(duration_target * 1.85)
+        min_acceptable_words = round(duration_target * 1.35)
+
+        # Si ya cumple con las palabras mínimas requeridas, solo sincronizar duración estimada
+        if total_words >= min_acceptable_words:
+            for s in scenes:
+                word_cnt = len(s.speech.split())
+                s.duration_est = max(8.0, round(word_cnt / 1.85, 1))
+            return scenes
+
+        safe_log(
+            f"[AIDirector] ⚠️ Duración insuficiente detectada: plan tiene {total_words} palabras "
+            f"(~{total_words / 1.85:.0f}s), pero el objetivo configurado es {duration_target}s "
+            f"({duration_target // 60}m). Expandiendo guión para respetar el tiempo asignado..."
+        )
+
+        words_needed_per_scene = max(35, round(target_words / len(scenes)))
+
+        # 1. Intentar expansión profunda con IA (Gemini / NVIDIA)
+        try:
+            brief_scenes = [
+                {"scene_id": s.scene_id, "name": s.name, "speech": s.speech}
+                for s in scenes
+            ]
+            expand_prompt = (
+                f"Eres un guionista y director audiovisual de élite. El plan para el video sobre '{topic}' "
+                f"tiene una duración objetivo de {duration_target // 60} minutos ({duration_target} segundos), pero las locuciones "
+                f"actuales son demasiado breves ({total_words} palabras en total) y deben alcanzar aproximadamente {target_words} palabras "
+                f"(alrededor de {words_needed_per_scene} palabras por escena) para cubrir el tiempo con ritmo pausado y natural.\n\n"
+                f"EXPANDE y profundiza sustancialmente la narración ('speech') de cada una de las {len(scenes)} escenas:\n"
+                f"- Cada escena DEBE tener un párrafo de entre {round(words_needed_per_scene * 0.85)} y {round(words_needed_per_scene * 1.15)} palabras.\n"
+                f"- Añade explicaciones causales paso a paso, curiosidades insólitas ('factor ¡guau!'), datos numéricos, fechas, comparaciones visuales y antecedentes reales.\n"
+                f"- CERO relleno pomposo, CERO clichés de 'marco paradigmático'. Todo con lenguaje directo, apasionante y entretenido.\n"
+                f"- Responde EXCLUSIVAMENTE con un JSON válido con este formato:\n"
+                f"{{\n  \"expanded_scenes\": [\n    {{\"scene_id\": 1, \"speech\": \"...\"}}\n  ]\n}}\n\n"
+                f"ESCENAS ACTUALES A EXPANDIR:\n{json.dumps(brief_scenes, ensure_ascii=False, indent=2)}"
+            )
+
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.llm.generate,
+                    expand_prompt,
+                    json_mode=True,
+                    deadline_sec=min(60.0, max(25.0, len(scenes) * 3.5)),
+                ),
+                timeout=min(65.0, max(28.0, len(scenes) * 4.0)),
+            )
+
+            from utils.json_validator import JSONValidator
+            parsed = JSONValidator.extract_and_parse(raw)
+            exp_list = parsed.get("expanded_scenes", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+
+            if exp_list and len(exp_list) == len(scenes):
+                from utils.speech_normalizer import normalize_speech_for_tts
+                for idx, exp in enumerate(exp_list):
+                    new_sp = (exp.get("speech") or "").strip()
+                    if len(new_sp.split()) > len(scenes[idx].speech.split()):
+                        is_last = (idx == len(scenes) - 1)
+                        scenes[idx].speech = normalize_speech_for_tts(new_sp, is_final_scene=is_last)
+
+                new_total_words = sum(len(s.speech.split()) for s in scenes)
+                safe_log(f"[AIDirector] ✓ Guión expandido con éxito mediante IA: {new_total_words} palabras (~{new_total_words / 1.85:.0f}s).")
+        except Exception as exp_err:
+            safe_log(f"[AIDirector] Fallback a enriquecedor narrativo determinista por error en IA: {exp_err}")
+
+        # 2. Si la IA no expandió lo suficiente, enriquecedor determinista de respaldo
+        scenes = self._enrich_speech_deterministically(scenes, topic, words_needed_per_scene)
+
+        # Actualizar duración estimada por escena
+        for s in scenes:
+            w = len(s.speech.split())
+            s.duration_est = max(8.0, round(w / 1.85, 1))
+
+        return scenes
+
+    def _enrich_speech_deterministically(
+        self,
+        scenes: List[DirectorScene],
+        topic: str,
+        target_words_per_scene: int
+    ) -> List[DirectorScene]:
+        """Añade párrafos analíticos y datos de contexto para garantizar que cada escena cubra el tiempo asignado."""
+        from utils.speech_normalizer import normalize_speech_for_tts
+
+        thematic_enrichments = [
+            (
+                f"Para comprender la verdadera dimensión de {topic}, es fundamental detenerse en los hechos documentados que casi nadie analiza a fondo. "
+                f"A menudo se repiten titulares superficiales que omiten las causas originales, pero cuando examinamos los registros históricos y técnicos paso a paso, "
+                f"emerge un panorama mucho más revelador y lleno de sorpresas que desafían lo que la mayoría daba por sentado. "
+            ),
+            (
+                f"Al rastrear el origen de este acontecimiento, los investigadores encontraron un antecedente clave que cambió todo el curso de los hechos. "
+                f"No fue una simple casualidad ni un evento aislado: existieron decisiones previas y factores estructurales que prepararon el terreno de forma silenciosa, "
+                f"demostrando que detrás de cada gran suceso hay detalles que pasan desapercibidos a primera vista pero resultan determinantes. "
+            ),
+            (
+                f"Las pruebas materiales y los datos recopilados aportan una claridad contundente: al cruzar los testimonios directos con los informes periciales, "
+                f"quedan al descubierto diferencias evidentes frente al relato común. Cada cifra contrastada y cada testimonio verificado permite reconstruir "
+                f"la cronología exacta, desarmando hipótesis apresuradas con evidencia concreta y tangible. "
+            ),
+            (
+                f"Aquí es donde la historia da un giro inesperado y plantea el mayor enigma para los expertos: cuando parecía haber una explicación sencilla, "
+                f"surgió una contradicción flagrante que obligó a reabrir las preguntas fundamentales. ¿Por qué ocurrió de esta forma precisa y qué intereses influyeron en el desenlace? "
+                f"La respuesta involucra nombres, decisiones bajo presión y registros que tardaron años en salir a la luz pública. "
+            ),
+            (
+                f"Al desglosar el funcionamiento técnico y las consecuencias directas sobre el terreno, los números hablan por sí solos. "
+                f"Estamos ante un impacto medible que transformó la forma de entender este campo, sentando precedentes que hasta hoy en día continúan estudiándose "
+                f"por su relevancia directa en nuestro presente y su capacidad de anticipar situaciones similares en el futuro. "
+            ),
+            (
+                f"Existen dos posturas claramente enfrentadas respecto a este punto crucial: por un lado, quienes defienden la interpretación tradicional, y por el otro, "
+                f"quienes demuestran con documentos en mano que la realidad fue sustancialmente distinta. Este contraste de perspectivas es el que hace que el tema siga fascinando "
+                f"y generando un debate tan apasionado entre especialistas y aficionados de todo el mundo. "
+            ),
+            (
+                f"Los archivos desclasificados y las auditorías independientes terminaron por confirmar lo que muchos sospechaban: "
+                f"hubo advertencias previas que fueron desestimadas y testimonios que no recibieron la atención debida en su momento. "
+                f"Analizar estos documentos con mirada crítica nos permite entender la cadena de acontecimientos sin mitos ni distorsiones. "
+            ),
+            (
+                f"Al poner todas las piezas sobre la mesa, la lección principal que nos deja este caso trasciende la anécdota y nos invita a reflexionar profundamente. "
+                f"Comprender {topic} con datos rigurosos y sin simplificaciones nos demuestra una vez más que la realidad siempre es mucho más intrigante que la ficción. "
+                f"Cuéntenme en los comentarios qué opinan sobre estas revelaciones y no olviden suscribirse para seguir descubriendo historias con evidencia real. "
+            ),
+        ]
+
+        for idx, sc in enumerate(scenes):
+            words = sc.speech.split()
+            if len(words) < target_words_per_scene:
+                pool_idx = idx % len(thematic_enrichments)
+                enrichment = thematic_enrichments[pool_idx]
+                combined = sc.speech.strip() + " " + enrichment.strip()
+
+                while len(combined.split()) < target_words_per_scene - 10:
+                    pool_idx = (pool_idx + 1) % len(thematic_enrichments)
+                    combined += " " + thematic_enrichments[pool_idx].strip()
+
+                is_last = (idx == len(scenes) - 1)
+                sc.speech = normalize_speech_for_tts(combined, is_final_scene=is_last)
+
+        return scenes
+
+    def _build_fallback_plan(
+        self,
+        topic: str,
+        style: str,
+        duration_target: int,
+        case_soundbites: Optional[List[Dict[str, Any]]] = None,
+    ) -> DirectorBroadcastPlan:
+        """Plan de dirección de respaldo inteligente que escala dinámicamente en escenas y palabras según la duración solicitada."""
+        from utils.speech_normalizer import normalize_speech_for_tts
+
+        try:
+            dur_int = int(duration_target) if duration_target is not None else 45
+        except (ValueError, TypeError):
+            dur_int = 45
+        if 0 < dur_int <= 40:
+            dur = dur_int * 60
+        else:
+            dur = dur_int
+        dur = max(20, min(2400, dur))
+
+        if dur <= 35:
+            num_scenes = 2
+        elif dur <= 60:
+            num_scenes = 3
+        elif dur <= 100:
+            num_scenes = 4
+        elif dur <= 180:
+            num_scenes = 5
+        elif dur <= 360:
+            num_scenes = 7
+        elif dur <= 600:
+            num_scenes = 9
+        elif dur <= 900:
+            num_scenes = 12
+        elif dur <= 1500:
+            num_scenes = 15
+        else:
+            num_scenes = 18
+
         sec_per_scene = round(dur / num_scenes)
-        words_per_scene = max(26, round(sec_per_scene * 2.15))
+        words_per_scene = max(25, round(sec_per_scene * 1.85))
 
-        # Banco de frases temáticas progresivas e independientes por cada escena (CERO repeticiones)
-        scene1_phrases = [
-            f"Presten mucha atención, porque los datos duros en torno a {topic} rompen por completo los mitos más extendidos. ",
-            "Lo que parecía una teoría marginal acaba de recibir confirmación tangible en los últimos registros analizados. ",
-            "Acompáñenme a desglosar paso a paso por qué esto cambia todo lo que dábamos por sentado en la materia. ",
-            "Vamos a revisar las pruebas reales, lejos de la especulación y con rigor documental absoluto. ",
-        ]
-        scene2_phrases = [
-            "La brecha entre lo que se especula habitualmente y la evidencia comprobada es sencillamente descomunal. ",
-            "Los equipos de investigación en el terreno contrastaron los patrones iniciales con modelos predictivos avanzados. ",
-            "Cada capa analizada aporta un nivel de precisión que descarta anomalías estadísticas fortuitas o coincidencias. ",
-            "Los antecedentes históricos demuestran que este fenómeno no surgió de la noche a la mañana. ",
-        ]
-        scene3_phrases = [
-            "Las cifras hablan por sí solas y confirman una transformación estructural de escala global sin precedentes. ",
-            "Al contrastar la serie histórica con los indicadores presentes, la discrepancia matemática resulta indiscutible. ",
-            "Dato mata relato: las mediciones estandarizadas confirman un salto cuantitativo que ningún experto esperaba. ",
-            "Los registros oficiales avalan que los puntos de quiebre están ocurriendo a un ritmo mucho más acelerado. ",
-        ]
-        scene4_phrases = [
-            "¿Hasta qué punto debemos acelerar sin control, y quién asume los riesgos reales que este cambio conlleva? ",
-            "Mientras un sector defiende explicaciones convencionales, la nueva evidencia obliga a replantear el marco teórico. ",
-            "No se trata de opiniones ni creencias, sino de comprobar qué modelo resiste el escrutinio del método experimental. ",
-            "El dilema ético y operativo está sobre la mesa y los principales referentes mundiales ya están tomando postura. ",
-        ]
-        scene5_phrases = [
-            "Este es un tema crucial que nos involucra a todos, y la discusión apenas está comenzando en los círculos de vanguardia. ",
-            "El panorama que se abre a partir de aquí marcará la agenda de los próximos debates y publicaciones especializadas. ",
-            "Quiero leer su perspectiva honesta en el chat y en los comentarios: ¿estamos ante el inicio de una nueva era? ",
-            "Nos vemos en la próxima emisión en vivo con más análisis, más datos verificados y más verdad sin filtros. ",
+        stage_templates = [
+            {
+                "name": "Gancho & Enigma Inicial",
+                "type": "avatar_cam",
+                "emotion": "excited",
+                "camera": "hero_center",
+                "sfx": "whoosh",
+                "card": None,
+                "vq": f"{topic} mysterious documentary intro 4k",
+                "vq2": f"{topic} investigation 4k",
+                "base_intro": f"¿Qué ocurrió realmente con {topic} y cuál es el detalle insólito que casi todos pasaron por alto? ",
+                "pool": [
+                    "Durante mucho tiempo la versión más difundida en redes y medios dio por sentadas explicaciones que no se sostienen ante un análisis riguroso. ",
+                    "Sin embargo, al revisar los registros oficiales y las pruebas documentadas paso a paso, emerge una sorpresa mayúscula. ",
+                    "Hoy vamos a desentrañar cada una de las piezas con nombres, fechas y números claros, sin tecnicismos vacíos ni rodeos. ",
+                    "Lo que van a descubrir en los próximos minutos cambia por completo el relato que nos contaron desde el principio. ",
+                ]
+            },
+            {
+                "name": "Antecedentes & Primeras Señales",
+                "type": "video_reaction",
+                "emotion": "curious",
+                "camera": "pip_corner",
+                "sfx": "impact",
+                "card": SceneCard(
+                    headline=f"Registro: {topic[:32]}",
+                    body="Primeros registros documentados y antecedentes verificados.",
+                    badge="ORIGEN HISTÓRICO",
+                    stat="Fase 1",
+                ),
+                "vq": f"{topic} historical archival footage 4k",
+                "vq2": f"{topic} origins documentary 4k",
+                "base_intro": "Para entender cómo comenzó todo, debemos retroceder al momento exacto en que saltaron las primeras alarmas: ",
+                "pool": [
+                    "No fue un acontecimiento repentino ni producto del azar; hubo advertencias tempranas que muchos pasaron por alto. ",
+                    "Quienes estuvieron allí recuerdan que las señales eran inequívocas, pero nadie quiso detener la marcha de los acontecimientos. ",
+                    "Los testimonios de la época describen un clima de incertidumbre total mientras las piezas comenzaban a alinearse de forma irreversible. ",
+                    "Fue la primera grieta en un sistema que parecía completamente bajo control. ",
+                ]
+            },
+            {
+                "name": "Evidencias & Primer Gran Hallazgo",
+                "type": "card_focus",
+                "emotion": "surprised",
+                "camera": "pip_corner",
+                "sfx": "chime",
+                "card": SceneCard(
+                    headline="Evidencia Material Verificada",
+                    body="Auditoría pericial independiente y registros contrastados.",
+                    badge="PRUEBA CLAVE",
+                    stat="+340%",
+                ),
+                "vq": f"{topic} scientific analysis investigation 4k",
+                "vq2": f"{topic} empirical evidence data 4k",
+                "base_intro": "Miren con atención esta primera prueba material documentada que desmiente el relato simplista: ",
+                "pool": [
+                    "Al cruzar los informes técnicos con las mediciones empíricas en el terreno, las cifras no dejaron lugar a dudas. ",
+                    "Estamos hablando de una diferencia contundente entre lo que se prometió y lo que realmente ocurrió. ",
+                    "Cada documento auditado aporta una pieza indispensable que permite reconstruir la cronología con absoluta precisión forense. ",
+                    "Un hallazgo contundente que dejó perplejos a los propios especialistas que investigaban el caso. ",
+                ]
+            },
+            {
+                "name": "La Declaración del Protagonista",
+                "type": "video_reaction",
+                "emotion": "serious",
+                "camera": "pip_corner",
+                "sfx": "impact",
+                "card": SceneCard(
+                    headline="Testimonio Directo",
+                    body="Declaraciones clave del protagonista bajo escrutinio.",
+                    badge="TESTIMONIO REAL",
+                    stat="Registro Directo",
+                ),
+                "vq": f"{topic} interview statement press conference 4k",
+                "vq2": f"{topic} speech reaction 4k",
+                "base_intro": "Atención a la declaración pública del protagonista en ese instante crítico: ",
+                "pool": [
+                    "Sus palabras fueron escuchadas con suma cautela por analistas y observadores internacionales. ",
+                    "Detrás de cada frase pronunciada había un intento evidente por matizar la magnitud de lo que estaba sucediendo tras bambalinas. ",
+                    "Sin embargo, el contraste entre su discurso y los hechos materiales no tardó en hacerse evidente ante los ojos de la opinión pública. ",
+                    "Fue el punto exacto donde la narrativa oficial comenzó a desmoronarse irremediablemente. ",
+                ]
+            },
+            {
+                "name": "El Gran Giro Inesperado",
+                "type": "chat_debate",
+                "emotion": "skeptical",
+                "camera": "pip_corner",
+                "sfx": "whoosh",
+                "card": SceneCard(
+                    headline="Contradicción Inexplicable",
+                    body="Discrepancia entre la versión aceptada y las pruebas materiales.",
+                    badge="EL GRAN GIRO",
+                    stat="Punto de Quiebre",
+                ),
+                "vq": f"{topic} unexpected dilemma investigation 4k",
+                "vq2": f"{topic} critical discovery turning point 4k",
+                "base_intro": "Y es justo aquí donde la investigación toma un giro que nadie vio venir: ",
+                "pool": [
+                    "Cuando todos creían tener una explicación definitiva, un nuevo dato confidencial salió a la luz pública. ",
+                    "La pregunta que nadie se había atrevido a formular hasta ese momento cambió radicalmente el eje de la discusión. ",
+                    "¿Quién tomó la decisión final en secreto y por qué se mantuvieron ocultos estos informes durante tanto tiempo? ",
+                    "La evidencia recopilada apunta a un factor humano determinante que muchos intentaron minimizar. ",
+                ]
+            },
+            {
+                "name": "Cifras & Datos que Desconciertan",
+                "type": "card_focus",
+                "emotion": "serious",
+                "camera": "pip_corner",
+                "sfx": "chime",
+                "card": SceneCard(
+                    headline="Métricas de Impacto Global",
+                    body="Evaluación cuantitativa rigurosa y registros consolidados.",
+                    badge="DATOS DUROS",
+                    stat="Oficial 2026",
+                ),
+                "vq": f"{topic} global data metrics analysis 4k",
+                "vq2": f"{topic} statistics charts comparison 4k",
+                "base_intro": "Fíjense en estas cifras oficiales que dimensionan el verdadero alcance del fenómeno: ",
+                "pool": [
+                    "Para ponerlo en perspectiva tangible: el impacto registrado equivale a transformar por completo la dinámica de todo un sector. ",
+                    "No se trata de estimaciones aproximadas, sino de datos consolidados a través de auditorías independientes y registros directos. ",
+                    "Cada porcentaje y cada gráfico confirma que las consecuencias fueron mucho más profundas de lo que se admitió inicialmente. ",
+                    "Un volumen de información que obliga a replantear cualquier conclusión previa sobre el tema. ",
+                ]
+            },
+            {
+                "name": "El Mecanismo Causal Detallado",
+                "type": "avatar_cam",
+                "emotion": "confident",
+                "camera": "hero_center",
+                "sfx": "whoosh",
+                "card": None,
+                "vq": f"{topic} technical causal mechanism explained 4k",
+                "vq2": f"{topic} in depth documentary 4k",
+                "base_intro": "Ahora bien, ¿cómo se explica científicamente y paso a paso este proceso? ",
+                "pool": [
+                    "Para entender la causa de raíz, imaginemos una cadena de dominó donde el primer movimiento desencadena una cascada inevitable. ",
+                    "Cuando el parámetro inicial se desvió de su rango seguro, los mecanismos de compensación fallaron en cascada uno tras otro. ",
+                    "Esto explica por qué incluso medidas de contención extraordinarias resultaron insuficientes para frenar el desenlace. ",
+                    "Es una lección magistral de cómo interactúan la tecnología, la física y las decisiones humanas bajo presión. ",
+                ]
+            },
+            {
+                "name": "Archivos Desclasificados & Revelaciones",
+                "type": "video_reaction",
+                "emotion": "surprised",
+                "camera": "pip_corner",
+                "sfx": "impact",
+                "card": SceneCard(
+                    headline="Documentos Desclasificados",
+                    body="Archivos históricos e informes técnicos desclasificados.",
+                    badge="REVELACIÓN",
+                    stat="Desclasificado",
+                ),
+                "vq": f"{topic} declassified archival records documents 4k",
+                "vq2": f"{topic} secret investigation records 4k",
+                "base_intro": "El verdadero enigma comenzó a resolverse cuando se publicaron estos expedientes desclasificados: ",
+                "pool": [
+                    "Página tras página, los informes internos demuestran que el desenlace era conocido con semanas de anticipación por los equipos técnicos. ",
+                    "Existieron advertencias formales por escrito que advertían con exactitud meridiana lo que terminaría ocurriendo en el campo. ",
+                    "Sin embargo, intereses corporativos y consideraciones de reputación hicieron que esas alarmas quedaran archivadas en un cajón. ",
+                    "Una verdad incómoda que tardó décadas en salir a la superficie pero que hoy resulta innegable. ",
+                ]
+            },
+            {
+                "name": "Debate Abierto & Posturas Enfrentadas",
+                "type": "chat_debate",
+                "emotion": "skeptical",
+                "camera": "pip_corner",
+                "sfx": "whoosh",
+                "card": SceneCard(
+                    headline="Modelos en Conflicto",
+                    body="Contraste de hipótesis científicas y posturas forenses.",
+                    badge="DEBATE CIENTÍFICO",
+                    stat="Evidencia vs Hipótesis",
+                ),
+                "vq": f"{topic} expert debate controversy analysis 4k",
+                "vq2": f"{topic} scientific consensus divergence 4k",
+                "base_intro": "Incluso hoy en día, las dos posturas más respetadas de la comunidad continúan en abierto debate: ",
+                "pool": [
+                    "Por una parte, la hipótesis tradicional defiende que se trató de una combinación extraordinaria de factores imprevisibles. ",
+                    "Por la otra, la corriente revisionista demuestra con modelos computacionales modernos que el desenlace era predecible y evitable. ",
+                    "Ambos bandos aportan argumentos de peso respaldados por análisis empíricos y fórmulas contrastadas. ",
+                    "Es este diálogo riguroso el que mantiene vivo el interés y la pasión por resolver cada cabo suelto. ",
+                ]
+            },
+            {
+                "name": "Impacto en el Presente & Paralelismos",
+                "type": "card_focus",
+                "emotion": "serious",
+                "camera": "pip_corner",
+                "sfx": "chime",
+                "card": SceneCard(
+                    headline="Repercusiones en la Actualidad",
+                    body="Cómo este caso sigue moldeando nuestro presente tecnológico y social.",
+                    badge="ACTUALIDAD 2026",
+                    stat="Impacto Vigente",
+                ),
+                "vq": f"{topic} modern world implications today 4k",
+                "vq2": f"{topic} technological legacy 4k",
+                "base_intro": "¿Y cómo nos afecta directamente todo esto en nuestra vida cotidiana hoy en día? ",
+                "pool": [
+                    "Mucho más de lo que imaginamos: los protocolos de seguridad y las normativas que hoy rigen nacieron directamente de este caso. ",
+                    "Cada vez que utilizamos esta tecnología o nos enfrentamos a situaciones análogas, estamos aplicando las lecciones aprendidas a alto costo. ",
+                    "Quienes ignoran la historia de este evento están condenados a repetir exactamente los mismos errores que llevaron al colapso. ",
+                    "Una demostración palpable de que el pasado no está muerto, ni siquiera es pasado. ",
+                ]
+            },
+            {
+                "name": "La Pregunta que Permanece Abierta",
+                "type": "video_reaction",
+                "emotion": "curious",
+                "camera": "pip_corner",
+                "sfx": "whoosh",
+                "card": SceneCard(
+                    headline="El Misterio Pendiente",
+                    body="La última interrogante que los expertos aún no logran responder.",
+                    badge="PREGUNTA ABIERTA",
+                    stat="Sin Resolver",
+                ),
+                "vq": f"{topic} unresolved questions future perspective 4k",
+                "vq2": f"{topic} unanswered enigma 4k",
+                "base_intro": "A pesar de todo lo descubierto, todavía existe una incógnita fascinante sin respuesta definitiva: ",
+                "pool": [
+                    "Hay un elemento del rompecabezas que sigue desafiando las explicaciones más sofisticadas de la ciencia contemporánea. ",
+                    "Nuevas misiones y expediciones continúan buscando esa última pieza que permita cerrar definitivamente el caso. ",
+                    "Es el recordatorio más elocuente de que nuestro conocimiento del mundo siempre tiene fronteras por expandir. ",
+                    "Y que la curiosidad humana nunca se detiene ante lo que parece imposible de resolver. ",
+                ]
+            },
+            {
+                "name": "Conclusiones & Reflexión Final",
+                "type": "avatar_cam",
+                "emotion": "confident",
+                "camera": "hero_center",
+                "sfx": "chime",
+                "card": None,
+                "vq": "cinematic studio lighting outro documentary 4k",
+                "vq2": "broadcast stream conclusion 4k",
+                "base_intro": "Como hemos podido constatar a lo largo de este análisis, la realidad detrás de este tema supera cualquier ficción: ",
+                "pool": [
+                    "Analizar los hechos con rigor y sin prejuicios nos permite ver con claridad lo que otros pasan por alto. ",
+                    "Quiero leer su perspectiva honesta en los comentarios: ¿conocían todos estos detalles o alguno los tomó por sorpresa? ",
+                    "Dejen su punto de vista en el chat, compartan este video y suscríbanse para seguir descubriendo los misterios reales con evidencia verificada. ",
+                    "Nos vemos en la próxima transmisión para seguir explorando juntos los límites del conocimiento. ",
+                ]
+            },
         ]
 
-        def _build_speech(intro: str, pool: list, target_w: int) -> str:
+        def _build_speech_for_stage(intro: str, pool: list, target_w: int, is_final: bool) -> str:
             res = intro
             for phrase in pool:
                 if len(res.split()) >= target_w:
                     break
                 res += phrase
-            return res
+            while len(res.split()) < target_w:
+                for phrase in pool:
+                    if len(res.split()) >= target_w:
+                        break
+                    res += " " + phrase
+            return normalize_speech_for_tts(res, is_final_scene=is_final)
 
-        scenes = [
-            DirectorScene(
-                scene_id=1,
-                name="Gancho & Apertura Directa",
-                type="avatar_cam",
-                emotion="excited",
-                camera="hero_center",
-                speech=_build_speech(
-                    f"¿Qué está ocurriendo realmente con {topic} y por qué las cifras más recientes están desconcertando a los expertos? ",
-                    scene1_phrases,
-                    words_per_scene
-                ),
-                visual_query=f"{topic} documentary evidence 4k",
-                visual_queries=[f"{topic} documentary evidence 4k", f"{topic} investigation 4k"],
-                sfx="whoosh",
-                duration_est=float(sec_per_scene),
-            ),
-            DirectorScene(
-                scene_id=2,
-                name="Hechos & Hallazgos de Campo",
-                type="video_reaction",
-                emotion="surprised",
-                camera="pip_corner",
-                speech=_build_speech(
-                    "Miren con atención lo que demuestran los registros más recientes en este ámbito: ",
-                    scene2_phrases,
-                    words_per_scene
-                ),
-                visual_query=f"{topic} historical scientific records 4k",
-                visual_queries=[f"{topic} scientific analysis 4k"],
-                card=SceneCard(
-                    headline=f"Registro: {topic[:32]}",
-                    body="Documentación y evidencia empírica contrastada en campo.",
-                    badge="DATO CLAVE",
-                    stat="+340%",
-                ),
-                sfx="impact",
-                duration_est=float(sec_per_scene),
-            ),
-            DirectorScene(
-                scene_id=3,
-                name="Datos Verificados & Métricas",
-                type="card_focus",
-                emotion="serious",
-                camera="pip_corner",
-                speech=_build_speech(
-                    "Y fíjense en los números oficiales que desmienten cualquier especulación apresurada. ",
-                    scene3_phrases,
-                    words_per_scene
-                ),
-                visual_query=f"{topic} data analysis charts 4k",
-                visual_queries=[f"{topic} official metrics 4k"],
-                card=SceneCard(
-                    headline="Evidencia Verificada 2026",
-                    body="Auditoría técnica independiente y registros oficiales consolidados.",
-                    badge="EVIDENCIA DOCUMENTAL",
-                    stat="2026",
-                ),
-                sfx="chime",
-                duration_est=float(sec_per_scene),
-            ),
-            DirectorScene(
-                scene_id=4,
-                name="Debate y Contraste de Hipótesis",
-                type="chat_debate",
-                emotion="skeptical",
-                camera="pip_corner",
-                speech=_build_speech(
-                    "Pero también debemos plantearnos las preguntas incómodas y los dilemas de fondo: ",
-                    scene4_phrases,
-                    words_per_scene
-                ),
-                visual_query=f"{topic} critical debate controversy 4k",
-                visual_queries=[f"{topic} dilemma 4k"],
-                card=SceneCard(
-                    headline="Realidad vs Hipótesis",
-                    body="Contraste de modelos explicativos frente a las pruebas empíricas.",
-                    badge="COMPARATIVA",
-                    stat="Demostrado vs Especulación",
-                ),
-                sfx="whoosh",
-                duration_est=float(sec_per_scene),
-            ),
-            DirectorScene(
-                scene_id=5,
-                name="Conclusiones y Cierre",
-                type="avatar_cam",
-                emotion="confident",
-                camera="hero_center",
-                speech=_build_speech(
-                    "Dejen su postura en el chat. Los leo a todos porque este es un tema que nos involucra a cada uno de nosotros. ",
-                    scene5_phrases,
-                    words_per_scene
-                ),
-                visual_query="studio stream lighting 4k",
-                visual_queries=["broadcast stream outro 4k"],
-                sfx="chime",
-                duration_est=float(sec_per_scene),
-            ),
-        ]
+        scenes: List[DirectorScene] = []
+        soundbite_idx = 0
+
+        for i in range(num_scenes):
+            sc_id = i + 1
+            is_first = (i == 0)
+            is_final = (i == num_scenes - 1)
+
+            if is_first:
+                template = stage_templates[0]
+            elif is_final:
+                template = stage_templates[-1]
+            else:
+                inter_idx = 1 + ((i - 1) % (len(stage_templates) - 2))
+                template = stage_templates[inter_idx]
+
+            speech_text = _build_speech_for_stage(
+                template["base_intro"],
+                template["pool"],
+                words_per_scene,
+                is_final
+            )
+
+            # Si hay soundbites disponibles y esta escena es de tipo video_reaction, asignarle el soundbite
+            assigned_sb_clip = None
+            assigned_sb_quote = None
+            assigned_sb_offset = None
+            assigned_sb_dur = None
+            if case_soundbites and template["type"] == "video_reaction" and soundbite_idx < len(case_soundbites):
+                sb = case_soundbites[soundbite_idx]
+                assigned_sb_clip = sb.get("clip_name")
+                assigned_sb_quote = sb.get("quote")
+                assigned_sb_offset = sb.get("offset")
+                assigned_sb_dur = sb.get("duration")
+                soundbite_idx += 1
+
+            scenes.append(
+                DirectorScene(
+                    scene_id=sc_id,
+                    name=template["name"],
+                    type=template["type"],
+                    emotion=template["emotion"],
+                    camera=template["camera"],
+                    speech=speech_text,
+                    visual_query=template["vq"],
+                    visual_queries=[template["vq"], template["vq2"]],
+                    visual_query2=template["vq2"],
+                    card=template["card"],
+                    chips=[],
+                    sfx=template["sfx"],
+                    duration_est=float(sec_per_scene),
+                    soundbite_clip=assigned_sb_clip,
+                    soundbite_quote=assigned_sb_quote,
+                    soundbite_offset=assigned_sb_offset,
+                    soundbite_dur=assigned_sb_dur,
+                )
+            )
+
+        total_est = sum(s.duration_est for s in scenes)
+        from core.youtube_title_optimizer import optimize_youtube_title
+        plan_title = optimize_youtube_title(raw_topic=topic, style=style, duration_sec=dur)
         return DirectorBroadcastPlan(
-            title=f"KAI Broadcast: {topic}",
+            title=plan_title,
             topic=topic,
             style=style,
             scenes=scenes,
             chat_comments=[
-                {"user": "AstroTech", "badge": "VIP", "text": "¡Impresionante dato KAI!"},
-                {"user": "CodeMaster", "badge": "SUB", "text": "Totalmente de acuerdo con el análisis."},
-                {"user": "NexusViewer", "badge": "VERIFIED", "text": "Las fuentes no dejan dudas."},
+                {"user": "AstroTech", "badge": "VIP", "text": "¡Impresionante análisis KAI!"},
+                {"user": "CodeMaster", "badge": "SUB", "text": "Totalmente de acuerdo con los datos presentados."},
+                {"user": "NexusViewer", "badge": "VERIFIED", "text": "Las fuentes y pruebas no dejan dudas."},
             ],
-            total_est_duration=float(duration_target),
+            total_est_duration=float(max(dur, total_est)),
         )

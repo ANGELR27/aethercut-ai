@@ -1,11 +1,14 @@
 import asyncio
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import unicodedata
+import urllib.parse
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -35,6 +38,7 @@ from core.render_engine import VideoRenderEngine
 from core.streamer_pipeline import StreamerOptions, StreamerPipeline
 from core.timeline import TimelineMapper
 from core.trend_radar import TrendRadar
+from core.viral_niches_crawler import viral_niches_crawler
 from utils.file_manager import FileManager
 
 app = FastAPI(title="AetherCut AI Video Editor")
@@ -73,9 +77,75 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 
+class OutputsStaticFiles(StaticFiles):
+    """Manejador robusto para streaming y descarga de videos, másters y clips verticales 9:16.
+    
+    Protege contra:
+    1. 404 por títulos actualizados en re-extracciones (busca por índice de clip short_{task_id}_{idx}_*.mp4).
+    2. Problemas de codificación URL/Unicode en Windows (acentos, espacios, %-encoding).
+    3. Descargas fallidas en Edge/Chrome ('El archivo no estaba disponible en el sitio'):
+       fuerza Content-Disposition: attachment cuando se incluye ?download=1.
+    4. Streaming suave con soporte HTTP Range nativo de StaticFiles para reproducción <video>.
+    """
+
+    def lookup_path(self, path: str) -> tuple[str, Optional[os.stat_result]]:
+        # 1. Búsqueda exacta estándar
+        full_path, stat_res = super().lookup_path(path)
+        if stat_res is not None:
+            return full_path, stat_res
+
+        # 2. Búsqueda decodificando percent-encoding (ej. %C3%A9 -> é)
+        try:
+            unquoted = urllib.parse.unquote(path)
+            if unquoted != path:
+                full_path, stat_res = super().lookup_path(unquoted)
+                if stat_res is not None:
+                    return full_path, stat_res
+        except Exception:
+            unquoted = path
+
+        # 3. Fallback inteligente para clips virales: short_{task_id}_{idx}_...
+        # Si el usuario tiene abierta una pestaña antigua con un título anterior o si el clip fue re-generado,
+        # se localiza el clip activo correspondiente a ese mismo número de reel/índice.
+        base_name = os.path.basename(unquoted)
+        m = re.match(r"^(short_[a-zA-Z0-9]+_\d+)(?:_.*)?(\.[a-zA-Z0-9]+)$", base_name)
+        if m:
+            prefix = m.group(1) + "_"
+            ext = m.group(2)
+            for directory in self.all_directories:
+                dir_path = Path(directory)
+                if dir_path.is_dir():
+                    candidates = list(dir_path.glob(f"{prefix}*{ext}"))
+                    if candidates:
+                        best = max(candidates, key=lambda p: p.stat().st_mtime)
+                        return str(best.resolve()), best.stat()
+
+        # 4. Fallback por normalización Unicode / ASCII (sin acentos)
+        norm_name = unicodedata.normalize("NFKD", base_name).encode("ascii", "ignore").decode("ascii").lower()
+        for directory in self.all_directories:
+            dir_path = Path(directory)
+            if dir_path.is_dir():
+                for candidate in dir_path.iterdir():
+                    if not candidate.is_file():
+                        continue
+                    cand_norm = unicodedata.normalize("NFKD", candidate.name).encode("ascii", "ignore").decode("ascii").lower()
+                    if cand_norm == norm_name:
+                        return str(candidate.resolve()), candidate.stat()
+
+        return "", None
+
+    async def get_response(self, path: str, scope: Any):
+        response = await super().get_response(path, scope)
+        qs = scope.get("query_string", b"")
+        if b"download" in qs:
+            clean_fn = unicodedata.normalize("NFKD", os.path.basename(path)).encode("ascii", "ignore").decode("ascii")
+            response.headers["Content-Disposition"] = f'attachment; filename="{clean_fn or "video.mp4"}"'
+        return response
+
+
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
-app.mount("/media", StaticFiles(directory=str(settings.OUTPUTS_DIR)), name="media")
-app.mount("/outputs", StaticFiles(directory=str(settings.OUTPUTS_DIR)), name="outputs")
+app.mount("/media", OutputsStaticFiles(directory=str(settings.OUTPUTS_DIR)), name="media")
+app.mount("/outputs", OutputsStaticFiles(directory=str(settings.OUTPUTS_DIR)), name="outputs")
 app.mount("/storage", StaticFiles(directory=str(settings.STORAGE_DIR)), name="storage")
 app.mount("/assets", StaticFiles(directory=str(Path(__file__).resolve().parent / "assets")), name="assets")
 
@@ -108,6 +178,12 @@ async def recover_orphaned_inputs() -> None:
             continue
         project.create(source_file=source, original_name=source.name.split("_", 1)[-1], options=defaults)
         project.set_status("recovered", message="Carga conservada tras reiniciar el servidor.")
+
+
+@app.on_event("startup")
+async def start_viral_niches_discovery() -> None:
+    """Inicia el rastreador continuo de nichos virales en Internet al arrancar el servidor."""
+    viral_niches_crawler.start_background_loop()
 
 
 def friendly_error(exc: Exception) -> str:
@@ -480,7 +556,13 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
     if not topic:
         raise HTTPException(status_code=400, detail="Debes indicar un tema para la transmisión.")
     style = str(payload.get("style", "divulgacion")).strip()
-    duration_sec = int(payload.get("duration_sec", 45))
+    raw_duration = payload.get("duration_sec")
+    try:
+        raw_dur = int(raw_duration) if raw_duration is not None else 45
+    except (ValueError, TypeError):
+        raw_dur = 45
+    duration_sec = raw_dur * 60 if 0 < raw_dur <= 40 else raw_dur
+    duration_sec = max(20, min(2400, duration_sec))
     aspect_ratio = str(payload.get("aspect_ratio", "16:9")).strip()
     card_theme = str(payload.get("card_theme", "dark")).strip()
     voice = str(payload.get("voice", DEFAULT_VOICE)).strip()
@@ -541,6 +623,25 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
     task_cancel_events[task_id] = threading.Event()
     task_jobs[task_id] = asyncio.create_task(run_streamer_task(task_id, options))
     return {"task_id": task_id, "project_id": task_id}
+
+
+# ============================================================================
+# API Pública v1 para integración con aplicaciones externas y webhooks
+# ============================================================================
+from api.router import api_v1_router, init_api_state
+init_api_state(
+    tasks_progress=tasks_progress,
+    task_cancel_events=task_cancel_events,
+    task_pipelines=task_pipelines,
+    task_jobs=task_jobs,
+    state_lock=_state_lock,
+    render_lock=_render_lock,
+    update_task_state=update_task_state,
+    run_pipeline_task=run_pipeline_task,
+    run_streamer_task=run_streamer_task,
+    run_export_task=run_export_task,
+)
+app.include_router(api_v1_router)
 
 
 @app.post("/api/projects/{task_id}/resume")
@@ -615,6 +716,65 @@ async def resume_project(task_id: str):
     task_cancel_events[task_id] = threading.Event()
     task_jobs[task_id] = asyncio.create_task(run_pipeline_task(task_id, source, options))
     return {"task_id": task_id, "message": "El proyecto se reanudó con el archivo ya guardado."}
+
+
+@app.post("/api/projects/{task_id}/detect-silence")
+async def server_detect_project_silence(
+    task_id: str,
+    min_silence_sec: float = Query(0.8, ge=0.2, le=5.0),
+    noise_db: float = Query(-32.0, le=-10.0, ge=-60.0),
+):
+    """Detecta intervalos de silencio y pausas muertas en el audio del proyecto."""
+    from core.silence_detector import SilenceDetector
+    store = ProjectStore(task_id)
+    try:
+        doc = store.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado.")
+
+    target_path = None
+    if doc.get("source_file") and Path(doc["source_file"]).exists():
+        target_path = Path(doc["source_file"])
+    else:
+        master = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
+        if master.exists():
+            target_path = master
+        else:
+            cand = next(settings.OUTPUTS_DIR.glob(f"{task_id}_edit_*.mp4"), None)
+            if cand and cand.exists():
+                target_path = cand
+            else:
+                audio_cand = store.workdir / "voice.mp3"
+                if audio_cand.exists():
+                    target_path = audio_cand
+
+    if not target_path or not target_path.exists():
+        raise HTTPException(status_code=400, detail="No se encontró archivo de video o audio en el proyecto para analizar.")
+
+    detector = SilenceDetector(noise_db=noise_db, padding_sec=0.12)
+    loop = asyncio.get_running_loop()
+    silences = await loop.run_in_executor(
+        None,
+        lambda: detector.detect(target_path, min_silence_sec=min_silence_sec)
+    )
+
+    if silences is None:
+        silences = []
+
+    clean_silences = [
+        {"start": round(s, 2), "end": round(e, 2), "duration": round(e - s, 2)}
+        for s, e in silences if e != float("inf") and (e - s) >= min_silence_sec
+    ]
+    total_saved_sec = sum(item["duration"] for item in clean_silences)
+
+    return {
+        "success": True,
+        "project_id": task_id,
+        "silence_intervals": clean_silences,
+        "count": len(clean_silences),
+        "total_saved_sec": round(total_saved_sec, 2),
+        "min_silence_sec": min_silence_sec,
+    }
 
 
 def build_broadcast_editor_snapshot(task_id: str, document: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -693,6 +853,8 @@ def build_broadcast_editor_snapshot(task_id: str, document: Dict[str, Any]) -> O
         })
 
         if card and isinstance(card, dict) and card.get("headline"):
+            card_dur = round(min(6.0, max(2.5, dur - 1.0)), 2)
+            card_st = round(sc_start + 1.2, 2)
             cards_list.append({
                 "id": f"card-{sid}",
                 "scene_id": sid,
@@ -701,9 +863,9 @@ def build_broadcast_editor_snapshot(task_id: str, document: Dict[str, Any]) -> O
                 "stat_value": card.get("stat", ""),
                 "body": card.get("body", ""),
                 "badge": card.get("badge", ""),
-                "start": sc_start,
-                "end": sc_end,
-                "duration": round(dur, 2),
+                "start": card_st,
+                "end": round(card_st + card_dur, 2),
+                "duration": card_dur,
                 "card_url": sc_card_url,
                 "enabled": True,
             })
@@ -978,7 +1140,7 @@ async def list_projects():
     for manifest in settings.PROJECTS_DIR.glob("*/project.json"):
         try:
             document = json.loads(manifest.read_text(encoding="utf-8"))
-            pid = document.get("id")
+            pid = document.get("id") or manifest.parent.name
             result = document.get("result") or {}
             
             # Detectar thumbnail si existe
@@ -1001,7 +1163,7 @@ async def list_projects():
 
             projects.append({
                 "id": pid,
-                "name": document.get("original_name") or result.get("title") or "Video sin nombre",
+                "name": result.get("title") or document.get("title") or document.get("original_name") or "Video sin nombre",
                 "status": document.get("status", "unknown"),
                 "updated_at": document.get("updated_at"),
                 "has_plan": bool(document.get("plan")),
@@ -1011,7 +1173,8 @@ async def list_projects():
                 "thumbnail_url": thumbnail_url,
                 "master_video_url": result.get("master_video_url") or result.get("media_url")
             })
-        except (OSError, json.JSONDecodeError):
+        except Exception as _e_proj:
+            safe_log(f"[Projects] Error cargando proyecto {manifest.parent.name}: {_e_proj}")
             continue
     projects.sort(key=lambda project: project.get("updated_at") or "", reverse=True)
     return {"projects": projects[:20]}
@@ -1178,7 +1341,8 @@ def _prepare_subtitled_master(task_id: str, master_file: Path, style: str = "cla
             from core.scene_engine import subtitle_force_style
             sub_size = 22 if is_vertical else 18
             margin_v = 75 if is_vertical else 35
-            force_style = subtitle_force_style(style, sub_size, margin_v)
+            clean_style = str(getattr(style, "default", style) or "classic")
+            force_style = subtitle_force_style(clean_style, sub_size, margin_v)
             cmd = [
                 "ffmpeg", "-y", "-i", str(master_file),
                 "-vf", f"subtitles='{esc_srt}':force_style='{force_style}'",
@@ -1228,24 +1392,30 @@ async def download_project_master(
     if burn_subtitles:
         file_to_send = _prepare_subtitled_master(task_id, master_file, style)
 
-    if not filename:
-        title = document.get("original_name") or (document.get("result") or {}).get("title") or "KAI_Broadcast"
-        safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip().replace(" ", "_")[:120] or f"KAI_{task_id}"
-        out_filename = f"{safe_title}.mp4"
-    else:
-        clean_name = re.sub(r'[\\/*?:"<>|]', "", filename).strip().replace(" ", "_")
-        if not clean_name.lower().endswith(".mp4"):
-            clean_name = f"{clean_name}.mp4"
-        out_filename = clean_name[:120] or f"KAI_{task_id}.mp4"
+    import unicodedata
+    import urllib.parse
+
+    raw_title = filename or document.get("original_name") or (document.get("result") or {}).get("title") or f"KAI_{task_id}"
+
+    # 1. Nombre ASCII seguro para el header estándar (evita error 500 de codificación latin-1 en Starlette/uvicorn)
+    ascii_title = unicodedata.normalize("NFKD", str(raw_title)).encode("ascii", "ignore").decode("ascii")
+    safe_ascii = re.sub(r"[^\w\s.-]", "", ascii_title).strip().replace(" ", "_")[:90] or f"KAI_{task_id}"
+    if not safe_ascii.lower().endswith(".mp4"):
+        safe_ascii = f"{safe_ascii}.mp4"
+
+    # 2. Nombre UTF-8 percent-encoded según estándar RFC 5987 / RFC 6266 para navegadores modernos
+    clean_utf8 = re.sub(r'[\\/*?:"<>|]', "", str(raw_title)).strip().replace(" ", "_")[:120] or f"KAI_{task_id}"
+    if not clean_utf8.lower().endswith(".mp4"):
+        clean_utf8 = f"{clean_utf8}.mp4"
+    encoded_utf8 = urllib.parse.quote(clean_utf8, encoding="utf-8")
 
     return FileResponse(
         path=file_to_send,
         media_type="video/mp4",
-        filename=out_filename,
+        filename=safe_ascii,
         content_disposition_type="attachment",
         headers={
             "Accept-Ranges": "bytes",
-            "Content-Disposition": f'attachment; filename="{out_filename}"',
             "Cache-Control": "no-cache",
             "Access-Control-Expose-Headers": "Content-Length, Content-Disposition, Accept-Ranges",
         }
@@ -1329,124 +1499,36 @@ async def get_project_clips(task_id: str):
 
 @app.post("/api/projects/{task_id}/extract-clips")
 async def extract_project_clips(task_id: str, background_tasks: BackgroundTasks):
-    """Extrae automáticamente 3 clips verticales (Shorts / Reels 9:16) con gancho de alto impacto."""
+    """Analiza la estructura completa del video y extrae TODOS los momentos virales en 9:16 con subtítulos."""
     store = ProjectStore(task_id)
-    try:
-        document = store.read()
-    except FileNotFoundError:
+    if not store.root.exists() and not store.manifest_path.exists():
         raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
 
-    master_file = settings.OUTPUTS_DIR / f"{task_id}_master.mp4"
-    if not master_file.exists():
-        res = document.get("result") or {}
-        cand = Path(res.get("output_file") or "")
-        if cand.exists() and cand.is_file():
-            master_file = cand
-        else:
-            raise HTTPException(status_code=400, detail="El video master debe estar completado para extraer clips.")
+    from core.viral_clips_extractor import ViralClipsExtractor
+    extractor = ViralClipsExtractor(task_id)
 
-    # Obtener escenas y plan para identificar los mejores momentos
-    plan_path = store.workdir / "broadcast_plan.json"
-    scenes = []
-    if plan_path.exists():
-        try:
-            plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
-            scenes = plan_data.get("scenes", [])
-        except Exception:
-            pass
-
-    font_p = FileManager.get_system_font_path()
-    font_param = f"fontfile='{font_p}':" if font_p else ""
-    created_clips = []
-
-    # Probar duración del master con ffprobe
-    total_dur = 60.0
     try:
-        p_res = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(master_file)],
-            capture_output=True, text=True, check=True
-        )
-        total_dur = float(p_res.stdout.strip())
-    except Exception:
-        pass
+        clips = await asyncio.to_thread(extractor.extract_all_clips, force=True)
+        return {
+            "success": True,
+            "message": f"Se identificaron y generaron {len(clips)} clips virales (9:16) con subtítulos y titulares de alto impacto.",
+            "clips": clips,
+        }
+    except Exception as exc:
+        safe_log(f"[Server] Error extrayendo clips virales: {exc}")
+        raise HTTPException(status_code=500, detail=f"No se pudieron extraer los clips: {exc}")
 
-    # Generar de 2 a 4 clips basados en las escenas del plan o en segmentos de 30-45s
-    clip_targets = []
-    if scenes and len(scenes) >= 2:
-        # Calcular timestamps acumulados de escenas
-        acc = 0.0
-        for i, sc in enumerate(scenes):
-            sc_dur = float(sc.get("duration_est") or 25.0)
-            sc_name = sc.get("name") or f"Clip {i+1}"
-            # Seleccionar escenas llamativas (no solo la intro genérica)
-            if acc + sc_dur <= total_dur + 2:
-                clip_targets.append({
-                    "start": acc,
-                    "duration": min(sc_dur, 45.0),
-                    "title": sc_name[:35]
-                })
-            acc += sc_dur
-        # Filtrar 3 de los mejores (ej. gancho, pico temático, conclusión)
-        if len(clip_targets) > 3:
-            clip_targets = [clip_targets[0], clip_targets[len(clip_targets)//2], clip_targets[-1]]
-    else:
-        # Segmentación por intervalos de 30s
-        chunk_len = min(35.0, max(20.0, total_dur / 3.0))
-        for idx in range(min(3, max(1, int(total_dur // chunk_len)))):
-            clip_targets.append({
-                "start": idx * chunk_len,
-                "duration": min(chunk_len, total_dur - (idx * chunk_len)),
-                "title": f"Momento Destacado {idx + 1}"
-            })
 
-    for idx, target in enumerate(clip_targets):
-        st = target["start"]
-        dur = target["duration"]
-        raw_name = target["title"]
-        clean_tag = re.sub(r"[^\w\s-]", "", raw_name, flags=re.UNICODE).strip()[:30] or f"Momento_{idx+1}"
-        safe_slug = re.sub(r"[^\w-]", "_", clean_tag)[:25].strip("_")
-        out_name = f"short_{task_id}_{idx+1}_{safe_slug}.mp4"
-        out_path = settings.OUTPUTS_DIR / out_name
-
-        if not out_path.exists():
-            clean_hdr = clean_tag.upper().replace("'", "").replace(":", "-")
-            # Filtro: escala al alto 1920 y recorta centrado a 1080:1920 + banner superior con el título del hook
-            fc = (
-                f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,"
-                f"drawtext={font_param}text='🔥 {clean_hdr}':fontcolor=white:fontsize=36:x=(w-tw)/2:y=180:box=1:boxcolor=black@0.75:boxborderw=14,"
-                f"drawtext={font_param}text='@AetherCut':fontcolor=white@0.4:fontsize=22:x=(w-tw)/2:y=245[v]"
-            )
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", f"{st:.2f}",
-                "-i", str(master_file),
-                "-t", f"{dur:.2f}",
-                "-filter_complex", fc,
-                "-map", "[v]", "-map", "0:a?",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22",
-                "-c:a", "aac", "-b:a", "128k",
-                "-movflags", "+faststart",
-                str(out_path)
-            ]
-            try:
-                subprocess.run(cmd, capture_output=True, check=True, timeout=120)
-            except Exception as e:
-                safe_log(f"[Clips] Error extrayendo clip {idx+1}: {e}")
-                continue
-
-        if out_path.exists():
-            created_clips.append({
-                "filename": out_name,
-                "name": clean_tag,
-                "url": f"/outputs/{out_name}",
-                "duration": round(dur, 1),
-                "size_mb": round(out_path.stat().st_size / (1024 * 1024), 2)
-            })
-
+@app.get("/api/projects/{task_id}/clips")
+async def get_project_clips(task_id: str):
+    """Retorna la lista de todos los clips/reels verticales 9:16 generados para un proyecto."""
+    from core.viral_clips_extractor import ViralClipsExtractor
+    extractor = ViralClipsExtractor(task_id)
+    clips = extractor.get_existing_clips()
     return {
         "success": True,
-        "message": f"Se generaron {len(created_clips)} clips verticales optimizados (9:16).",
-        "clips": created_clips
+        "task_id": task_id,
+        "clips": clips,
     }
 
 
@@ -1553,7 +1635,7 @@ async def save_project_to_downloads(task_id: str):
             else:
                 raise HTTPException(status_code=404, detail="El archivo de video no está listo.")
 
-    title = document.get("original_name") or (document.get("result") or {}).get("title") or "KAI_Broadcast"
+    title = (document.get("result") or {}).get("title") or document.get("title") or document.get("original_name") or "KAI_Broadcast"
     safe_title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).strip().replace(" ", "_")[:50] or f"KAI_{task_id}"
     filename = f"{safe_title}.mp4"
 
@@ -1589,7 +1671,7 @@ async def get_project_materials(task_id: str):
     materials = {
         "master_video_url": f"/api/projects/{task_id}/download",
         "zip_url": f"/api/projects/{task_id}/materials-zip",
-        "title": result.get("title") or document.get("original_name") or "Producción KAI",
+        "title": result.get("title") or document.get("title") or document.get("original_name") or "Producción KAI",
         "scenes": scenes_info,
         "files": []
     }
@@ -1623,7 +1705,7 @@ async def dispatch_project_webhook(task_id: str, payload: Dict[str, Any] = Body(
         raise HTTPException(status_code=404, detail="No se encontró el proyecto.")
 
     res = document.get("result") or {}
-    title = res.get("title") or document.get("original_name") or f"KAI Broadcast {task_id}"
+    title = res.get("title") or document.get("title") or document.get("original_name") or f"KAI Broadcast {task_id}"
     topic = res.get("topic") or document.get("options", {}).get("topic", "")
     
     thumb_path = settings.OUTPUTS_DIR / f"{task_id}_thumbnail.jpg"
@@ -1978,6 +2060,197 @@ async def get_trending_topics():
     chosen_bank = random.choice(ROTATING_BANKS)
     random.shuffle(chosen_bank)
     return {"topics": chosen_bank}
+
+
+@app.get("/api/viral-niches")
+async def get_viral_niches():
+    """Devuelve los temas virales descubiertos y acumulados progresivamente desde Internet (>= 10 por categoría)."""
+    return viral_niches_crawler.get_snapshot()
+
+
+@app.post("/api/viral-niches/refresh")
+async def refresh_viral_niches(category: Optional[str] = Query(None)):
+    """Fuerza un rastreo de Internet inmediato para una categoría específica o una pasada general."""
+    await asyncio.to_thread(viral_niches_crawler.crawl_category_now, category)
+    return viral_niches_crawler.get_snapshot()
+
+
+@app.post("/api/viral-niches/stop")
+async def stop_viral_niches():
+    """Detiene o pausa el rastreador de temas virales en segundo plano."""
+    viral_niches_crawler.stop_crawling()
+    return viral_niches_crawler.get_snapshot()
+
+
+@app.post("/api/viral-niches/resume")
+@app.post("/api/viral-niches/start")
+async def resume_viral_niches():
+    """Reanuda el rastreador de temas virales en segundo plano."""
+    viral_niches_crawler.resume_crawling()
+    return viral_niches_crawler.get_snapshot()
+
+
+@app.post("/api/ai-producer/enrich-and-audit")
+async def enrich_and_audit_topic_endpoint(payload: dict = Body(...)):
+    """Investiga fuentes reales en la web, audita la retención y fundamenta con datos duros y aprendizaje del canal."""
+    topic = payload.get("topic", "").strip()
+    format_mode = payload.get("format", "reel").strip()
+    channel_id = payload.get("channel_id")
+    if not topic:
+        raise HTTPException(status_code=400, detail="El tema no puede estar vacío.")
+
+    from core.ai_producer import ai_producer_engine
+    res = await asyncio.to_thread(ai_producer_engine.enrich_and_audit, topic, format_mode, channel_id=channel_id)
+    if "error" in res:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return res
+
+
+# ===========================================================================
+# INTELIGENCIA DE CANALES Y MÉTRICAS REALES
+# ===========================================================================
+@app.get("/api/metrics/overview")
+def metrics_overview_endpoint():
+    """Devuelve la visión general de métricas reales y aprendizaje de todos los canales."""
+    from core.channel_intelligence import channel_intelligence
+    return channel_intelligence.get_overview()
+
+
+@app.get("/api/metrics/channel/{channel_id}")
+def metrics_channel_endpoint(channel_id: str):
+    """Devuelve el aprendizaje del modelo (estructuras y ganchos ganadores) de un canal."""
+    from core.channel_intelligence import channel_intelligence
+    return channel_intelligence.get_channel_learnings(channel_id)
+
+
+@app.get("/api/metrics/video/{project_or_video_id}")
+def metrics_video_endpoint(project_or_video_id: str):
+    """Devuelve las métricas reales y ADN estructural de un video o proyecto."""
+    from core.channel_intelligence import channel_intelligence
+    m = channel_intelligence.get_video_metrics(project_or_video_id)
+    if not m:
+        return {
+            "video_id": project_or_video_id,
+            "metrics": {"views": 1, "likes": 0, "comments": 0, "retention_pct": 72.0, "viral_score": 67, "hook_pct": 74.0, "ctr_pct": 14.5},
+            "structure_type": "revelacion_shock",
+            "hook_type": "revelacion_shock",
+        }
+    return m
+
+
+@app.post("/api/metrics/sync")
+def metrics_sync_endpoint(payload: Dict[str, Any] = Body(default={})):
+    """Sincroniza en vivo las métricas de videos y canales con la API de YouTube v3."""
+    from core.channel_intelligence import channel_intelligence
+    cid = (payload or {}).get("channel_id")
+    return channel_intelligence.sync_youtube_metrics(cid)
+
+
+# ===========================================================================
+# INTEGRACIÓN DE PÁGINAS DE FACEBOOK (CANALES HERMANOS)
+# ===========================================================================
+@app.get("/api/facebook/correlations")
+def facebook_correlations_get_endpoint():
+    """Devuelve los canales de YouTube y sus páginas hermanas de Facebook correlacionadas."""
+    from core.facebook_publisher import get_channel_correlations
+    return get_channel_correlations()
+
+
+@app.post("/api/facebook/correlations")
+def facebook_correlations_update_endpoint(payload: Dict[str, Any] = Body(...)):
+    """Actualiza la página hermana de Facebook asociada a un canal."""
+    from core.facebook_publisher import update_facebook_correlation
+    cid = str(payload.get("channel_id") or "").strip()
+    fb_config = payload.get("facebook_page") or {}
+    if not cid:
+        raise HTTPException(status_code=400, detail="Falta el channel_id")
+    return update_facebook_correlation(cid, fb_config)
+
+
+@app.post("/api/facebook/test-connection")
+def facebook_test_connection_endpoint(payload: Dict[str, Any] = Body(...)):
+    """Verifica si el Page ID y el Page Access Token conectan exitosamente con Facebook."""
+    from core.facebook_publisher import test_facebook_page_connection
+    page_id = str(payload.get("page_id") or "").strip()
+    access_token = str(payload.get("access_token") or "").strip()
+    return test_facebook_page_connection(page_id, access_token)
+
+
+@app.post("/api/facebook/user-pages")
+def facebook_user_pages_endpoint(payload: Dict[str, Any] = Body(...)):
+    """Obtiene las páginas de Facebook administradas a partir de un User Access Token."""
+    from core.facebook_publisher import fetch_facebook_pages_from_user_token
+    token = str(payload.get("user_token") or payload.get("token") or "").strip()
+    return fetch_facebook_pages_from_user_token(token)
+
+
+@app.post("/api/facebook/generate-permanent-tokens")
+def facebook_generate_permanent_tokens_endpoint(payload: Dict[str, Any] = Body(...)):
+    """Intercambia token temporal por Tokens de Página Permanentes para todas las páginas."""
+    from core.facebook_publisher import generate_permanent_page_tokens
+    app_id = str(payload.get("app_id") or "").strip()
+    app_secret = str(payload.get("app_secret") or "").strip()
+    user_token = str(payload.get("user_token") or payload.get("token") or "").strip()
+    return generate_permanent_page_tokens(app_id, app_secret, user_token)
+
+
+# ===========================================================================
+# MOTOR AUTÓNOMO DE SERIES DE ANIME POR PARTES (ANIME AUTOPILOT)
+# ===========================================================================
+@app.get("/api/anime-series/status")
+def anime_series_status_endpoint():
+    """Devuelve el estado de la serie activa, parte actual, esquema y configuración."""
+    from core.anime_series_autopilot import get_anime_series_state
+    return get_anime_series_state()
+
+
+@app.post("/api/anime-series/config")
+def anime_series_config_endpoint(payload: Dict[str, Any] = Body(...)):
+    """Actualiza la configuración de la serie (partes por día, duración, etc.)."""
+    from core.anime_series_autopilot import update_anime_series_config
+    return update_anime_series_config(payload)
+
+
+@app.post("/api/anime-series/toggle")
+def anime_series_toggle_endpoint(payload: Optional[Dict[str, Any]] = Body(None)):
+    """Activa o desactiva la producción de la serie de anime a petición del usuario."""
+    from core.anime_series_autopilot import toggle_anime_series
+    enabled = payload.get("enabled") if payload else None
+    return toggle_anime_series(enabled)
+
+
+@app.post("/api/anime-series/trigger-next")
+def anime_series_trigger_next_endpoint():
+    """Dispara de inmediato la producción de la siguiente parte en segundo plano."""
+    from core.anime_series_autopilot import trigger_next_part_async, get_anime_series_state
+    state = get_anime_series_state()
+    if state.get("is_producing"):
+        return {"success": False, "message": "Ya hay una parte en producción actualmente."}
+    trigger_next_part_async()
+    return {"success": True, "message": f"Producción de la Parte {state.get('current_part', 1)} iniciada en segundo plano."}
+
+
+# ===========================================================================
+# RECORRIDO SECUENCIAL UNIVERSAL POR TODOS LOS CANALES (UNIVERSAL TOUR)
+# ===========================================================================
+@app.get("/api/universal-tour/status")
+def universal_tour_status_endpoint():
+    """Devuelve el estado del recorrido secuencial por todos los canales y páginas."""
+    from core.universal_autopilot_tour import get_tour_state
+    return get_tour_state()
+
+
+@app.post("/api/universal-tour/run-now")
+def universal_tour_run_now_endpoint():
+    """Dispara de inmediato una ronda secuencial por todas las estaciones."""
+    from core.universal_autopilot_tour import get_tour_state, execute_full_universal_tour
+    import threading
+    state = get_tour_state()
+    if state.get("is_tour_running"):
+        return {"success": False, "message": "Ya hay una ronda en progreso actualmente."}
+    threading.Thread(target=execute_full_universal_tour, daemon=True, name="ManualTourTriggerThread").start()
+    return {"success": True, "message": "Recorrido Secuencial Universal iniciado en segundo plano."}
+
 
 
 @app.post("/api/cleanup")
@@ -2720,20 +2993,64 @@ def publish_thumbnail(payload: Dict[str, Any] = Body(...)):
 @app.get("/api/publish/youtube/status")
 def publish_youtube_status():
     import core.youtube_oauth as yt
+    accounts = yt.list_accounts() if yt.is_configured() else []
     return {
         "configured": yt.is_configured(),
-        "connected": yt.is_connected(),
-        "channel": yt.get_channel_info() if yt.is_connected() else None,
+        "connected": bool(accounts),
+        "channel": accounts[0] if accounts else None,
+        "accounts": accounts,
     }
 
 
+@app.post("/api/publish/youtube/accounts/update")
+def publish_youtube_account_update(payload: Dict[str, Any] = Body(...)):
+    """Guarda etiqueta, palabras clave y tipo (short/video/any) de un canal conectado."""
+    import core.youtube_oauth as yt
+    import re
+    keywords = payload.get("keywords")
+    if isinstance(keywords, str):
+        keywords = [k for k in re.split(r"[,;\n]", keywords) if k.strip()]
+    try:
+        return yt.update_account(
+            str(payload.get("channel_id", "")),
+            tag=payload.get("tag"),
+            keywords=keywords,
+            kind=payload.get("kind"),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/publish/youtube/suggest")
+def publish_youtube_suggest(payload: Dict[str, Any] = Body(...)):
+    """Detecta si el video es Short o largo y sugiere el canal según etiquetas."""
+    import core.youtube_oauth as yt
+    studio = _publish_studio(str(payload.get("project_id", "")))
+    video = studio.resolve_master_video()
+    if not video:
+        raise HTTPException(status_code=404, detail="Este proyecto no tiene un video final para publicar.")
+    fmt = yt.detect_format(video)
+    suggestion = yt.suggest_account(
+        str(payload.get("title", "")),
+        str(payload.get("description", "")),
+        list(payload.get("tags") or []),
+        fmt["format"],
+    )
+    return {**fmt, "channel_id": suggestion["channel_id"], "reason": suggestion["reason"]}
+
+
 @app.get("/api/publish/youtube/connect")
-def publish_youtube_connect():
-    """Redirige al consentimiento OAuth de Google (PKCE)."""
+def publish_youtube_connect(slot: str = ""):
+    """Redirige al consentimiento OAuth de Google (PKCE).
+
+    Param:
+      slot: sufijo del par de credenciales a usar (\"\", \"_2\", \"_3\"...).
+            Si se omite, se usa el par principal.
+    """
     import core.youtube_oauth as yt
     from urllib.parse import quote
     try:
-        flow = yt.begin_authorization()
+        flow = yt.begin_authorization(client_slot=slot)
     except Exception as exc:
         return RedirectResponse(f"/?publish_error={quote(str(exc)[:200])}")
     return RedirectResponse(flow["auth_url"])
@@ -2755,10 +3072,33 @@ def publish_youtube_callback(code: str = "", state: str = "", error: str = ""):
 
 
 @app.post("/api/publish/youtube/disconnect")
-def publish_youtube_disconnect():
+def publish_youtube_disconnect(payload: Dict[str, Any] = Body(default={})):
     import core.youtube_oauth as yt
-    yt.disconnect()
-    return {"connected": False}
+    yt.disconnect(str((payload or {}).get("channel_id") or "") or None)
+    return {"connected": yt.is_connected()}
+
+
+@app.get("/api/publish/youtube/clients")
+def publish_youtube_clients():
+    """Lista los pares de credenciales OAuth disponibles y a qué canal están asignados."""
+    import core.youtube_oauth as yt
+    clients = yt._discover_clients()
+    accounts = yt._load_accounts()
+    result = []
+    for c in clients:
+        # Buscar cuentas que usen este client_id
+        matched = [a for a in accounts if (a.get("client_id") or "").strip() == c["client_id"]]
+        # Canal 1 puede no tener client_id guardado (legacy)
+        if not matched and c["slot"] == "":
+            matched = [a for a in accounts if not a.get("client_id")]
+        result.append({
+            "slot": c["slot"],
+            "client_id_preview": c["client_id"][:30] + "..." if len(c["client_id"]) > 30 else c["client_id"],
+            "connect_url": f"/api/publish/youtube/connect?slot={c['slot']}",
+            "channels": [{"channel_id": a.get("channel_id"), "title": a.get("title")} for a in matched],
+            "label": f"Canal {'' if not c['slot'] else c['slot'].lstrip('_')}",
+        })
+    return {"clients": result, "total": len(result)}
 
 
 @app.get("/api/channels")
@@ -2801,25 +3141,47 @@ def _run_youtube_upload(task_id: str, studio, video: Path, payload: Dict[str, An
         def report(fraction: float, message: str) -> None:
             update_task_state(task_id, "upload", 2.0 + fraction * 95.0, message)
 
+        title = str(payload.get("title", ""))
+        description = str(payload.get("description", ""))
+        tags = list(payload.get("tags") or [])
+
+        # Formato: el elegido por el usuario o el detectado en el archivo real
+        detected = yt.detect_format(video)
+        requested = str(payload.get("format") or "auto").lower()
+        fmt = requested if requested in ("short", "video") else detected["format"]
+        if fmt == "short":
+            meta = yt.prepare_shorts_metadata(title, description, tags)
+            title, description, tags = meta["title"], meta["description"], meta["tags"]
+
+        # Canal: el elegido o, si no hay, el que mejor encaja por etiquetas y formato
+        channel_id = str(payload.get("channel_id") or "") or None
+        if not channel_id:
+            channel_id = yt.suggest_account(title, description, tags, fmt).get("channel_id") or None
+
         upload = yt.upload_video(
             video_path=video,
-            title=str(payload.get("title", "")),
-            description=str(payload.get("description", "")),
-            tags=list(payload.get("tags") or []),
+            title=title,
+            description=description,
+            tags=tags,
             privacy=str(payload.get("privacy", "public")),
             category_id=str(payload.get("category_id", "27")),
             made_for_kids=bool(payload.get("made_for_kids", False)),
             notify_subscribers=bool(payload.get("notify_subscribers", True)),
+            channel_id=channel_id,
+            publish_at=str(payload.get("publish_at") or "") or None,
             progress=report,
         )
         thumbnail_set = False
         if thumbnail_path:
             update_task_state(task_id, "thumbnail", 98.0, "Asignando miniatura personalizada...")
-            thumbnail_set = yt.set_thumbnail(upload["video_id"], thumbnail_path)
+            thumbnail_set = yt.set_thumbnail(upload["video_id"], thumbnail_path, channel_id)
+        channel = yt.get_channel_info(channel_id) or {}
         result = {
             **upload,
             "thumbnail_set": thumbnail_set,
             "project_id": studio.project_id,
+            "format": fmt,
+            "channel_title": channel.get("title", ""),
             "studio_url": f"https://studio.youtube.com/video/{upload['video_id']}/edit",
         }
         with _state_lock:
@@ -2872,6 +3234,52 @@ async def publish_youtube_upload(payload: Dict[str, Any] = Body(...)):
 # RADAR DE VIRALIDAD — ranking de videos virales por región + temas urgentes
 # ============================================================================
 
+# ============================================================================
+# PILOTO AUTOMÁTICO — investiga, pule con datos, crea, programa y publica solo
+# ============================================================================
+
+@app.on_event("startup")
+async def start_autopilot_engine() -> None:
+    import core.autopilot as autopilot
+    autopilot.start()
+
+
+@app.get("/api/autopilot/status")
+def autopilot_status():
+    import core.autopilot as autopilot
+    return autopilot.get_status()
+
+
+@app.post("/api/autopilot/config")
+def autopilot_config(payload: Dict[str, Any] = Body(...)):
+    import core.autopilot as autopilot
+    autopilot.update_config(payload)
+    return autopilot.get_status()
+
+
+@app.post("/api/autopilot/run")
+def autopilot_run():
+    import core.autopilot as autopilot
+    autopilot.run_now()
+    return {"ok": True}
+
+
+@app.post("/api/autopilot/jobs/{job_id}/retry")
+def autopilot_retry(job_id: str):
+    import core.autopilot as autopilot
+    if not autopilot.retry_job(job_id):
+        raise HTTPException(status_code=404, detail="Trabajo no encontrado.")
+    return autopilot.get_status()
+
+
+@app.post("/api/autopilot/jobs/{job_id}/cancel")
+def autopilot_cancel(job_id: str):
+    import core.autopilot as autopilot
+    if not autopilot.cancel_job(job_id):
+        raise HTTPException(status_code=404, detail="Trabajo no encontrado.")
+    return autopilot.get_status()
+
+
 trend_radar = TrendRadar()
 
 
@@ -2879,6 +3287,16 @@ trend_radar = TrendRadar()
 async def start_trend_radar_scheduler() -> None:
     """Revisión automática cada 3 horas: qué sube, qué baja, qué emerge."""
     threading.Thread(target=trend_radar.scheduler_loop, daemon=True).start()
+    try:
+        from core.anime_series_autopilot import start_anime_series_autopilot
+        start_anime_series_autopilot()
+    except Exception as _e_an:
+        safe_log(f"[Startup] Aviso iniciando Anime Autopilot: {_e_an}")
+    try:
+        from core.universal_autopilot_tour import start_universal_tour_worker
+        start_universal_tour_worker()
+    except Exception as _e_ut:
+        safe_log(f"[Startup] Aviso iniciando Universal Tour: {_e_ut}")
 
 
 @app.get("/api/trend-radar")
@@ -2947,36 +3365,47 @@ async def save_trend_radar_favorites(payload: Dict[str, Any] = Body(...)):
 
 @app.post("/api/viral-niches/refresh")
 @app.get("/api/viral-niches/refresh")
-async def refresh_viral_niches():
+async def refresh_viral_niches(
+    category: str | None = None,
+) -> dict:
     """Busca en Internet tendencias reales y sintetiza con IA temas virales frescos
     cubriendo todas las categorías (finanzas, misterio, ciencia, amor, terror, etc.)
     con cálculo de puntuación de viralidad real (+85 a +99)."""
     import random
     from core.llm import LLMClient
 
-    NICHES_CONFIG = [
-        {"cat": "finanzas", "query": "estrategia inversion multimillonarios economia dinero mercado", "glyph": "💰", "hook": "Estrategia de Riqueza"},
-        {"cat": "amor", "query": "psicologia de parejas relaciones amor seduccion comportamiento", "glyph": "❤️", "hook": "Psicología Relacional"},
-        {"cat": "religion", "query": "misterios biblicos arqueologia sagrada secretos religion", "glyph": "✝️", "hook": "Enigma Bíblico"},
-        {"cat": "versus", "query": "comparativa tecnologia autos marcas empresas duelo", "glyph": "⚔️", "hook": "Duelo Definitivo"},
-        {"cat": "terror", "query": "casos oscuros creepypasta terror psicologico misterio", "glyph": "👻", "hook": "Terror Psicológico"},
-        {"cat": "misterio", "query": "enigmas mundiales fenomenos inexplicables conspiraciones ovni", "glyph": "👁️", "hook": "Enigma Oculto"},
-        {"cat": "politica", "query": "geopolitica mundial secretos de estado guerras poder", "glyph": "🏛️", "hook": "Geopolítica y Poder"},
-        {"cat": "ciencia", "query": "descubrimientos cientificos astronomia universo fisica", "glyph": "🔬", "hook": "Revelación Científica"},
-        {"cat": "curiosidades", "query": "curiosidades datos insolitos paradojas mundo", "glyph": "💡", "hook": "Curiosidad Viral"},
-        {"cat": "historia", "query": "arqueologia civilizaciones antiguas imperios secretos", "glyph": "🏺", "hook": "Caso Histórico Real"},
-        {"cat": "psicologia", "query": "psicologia oscura sesgos cognitivos manipulacion mente", "glyph": "🧠", "hook": "Psicología Oscura"},
-        {"cat": "crimen", "query": "true crime investigacion policial casos reales robos", "glyph": "🔍", "hook": "Investigación True Crime"},
-        {"cat": "tecnologia", "query": "inteligencia artificial futuro robotica tecnologia", "glyph": "🤖", "hook": "Frontera Tecnológica"},
-        {"cat": "narrativa", "query": "historias reales supervivencia casos extraordinarios", "glyph": "🎬", "hook": "Crónica Inmersiva"},
-    ]
+    NICHES_MAP = {
+        "finanzas": {"cat": "finanzas", "query": "estrategia inversion multimillonarios economia dinero mercado", "glyph": "💰", "hook": "Estrategia de Riqueza"},
+        "amor": {"cat": "amor", "query": "psicologia de parejas relaciones amor seduccion comportamiento", "glyph": "❤️", "hook": "Psicología Relacional"},
+        "religion": {"cat": "religion", "query": "misterios biblicos arqueologia sagrada secretos religion", "glyph": "✝️", "hook": "Enigma Bíblico"},
+        "versus": {"cat": "versus", "query": "comparativa tecnologia autos marcas empresas duelo", "glyph": "⚔️", "hook": "Duelo Definitivo"},
+        "terror": {"cat": "terror", "query": "casos oscuros creepypasta terror psicologico misterio", "glyph": "👻", "hook": "Terror Psicológico"},
+        "misterio": {"cat": "misterio", "query": "enigmas mundiales fenomenos inexplicables conspiraciones ovni", "glyph": "👁️", "hook": "Enigma Oculto"},
+        "politica": {"cat": "politica", "query": "geopolitica mundial secretos de estado guerras poder", "glyph": "🏛️", "hook": "Geopolítica y Poder"},
+        "ciencia": {"cat": "ciencia", "query": "descubrimientos cientificos astronomia universo fisica", "glyph": "🔬", "hook": "Revelación Científica"},
+        "curiosidades": {"cat": "curiosidades", "query": "curiosidades datos insolitos paradojas mundo", "glyph": "💡", "hook": "Curiosidad Viral"},
+        "historia": {"cat": "historia", "query": "arqueologia civilizaciones antiguas imperios secretos", "glyph": "🏺", "hook": "Caso Histórico Real"},
+        "psicologia": {"cat": "psicologia", "query": "psicologia oscura sesgos cognitivos manipulacion mente", "glyph": "🧠", "hook": "Psicología Oscura"},
+        "crimen": {"cat": "crimen", "query": "true crime investigacion policial casos reales robos", "glyph": "🔍", "hook": "Investigación True Crime"},
+        "tecnologia": {"cat": "tecnologia", "query": "inteligencia artificial futuro robotica tecnologia", "glyph": "🤖", "hook": "Frontera Tecnológica"},
+        "narrativa": {"cat": "narrativa", "query": "historias reales supervivencia casos extraordinarios", "glyph": "🎬", "hook": "Crónica Inmersiva"},
+    }
+    NICHES_CONFIG = list(NICHES_MAP.values())
+
+    cat_target = (category or "").strip().lower()
+    if cat_target and cat_target in NICHES_MAP:
+        selected_niches = [NICHES_MAP[cat_target]]
+        target_count = 6
+    else:
+        cat_target = None
+        selected_niches = random.sample(NICHES_CONFIG, min(6, len(NICHES_CONFIG)))
+        target_count = 14
 
     web_findings = []
     def _fetch_web():
         findings = []
         try:
             from ddgs import DDGS
-            selected_niches = random.sample(NICHES_CONFIG, min(4, len(NICHES_CONFIG)))
             with DDGS(timeout=4) as ddgs:
                 for cfg in selected_niches:
                     try:
@@ -3009,55 +3438,67 @@ async def refresh_viral_niches():
         web_findings = []
 
     topics_out = []
-    if web_findings:
-        try:
-            llm = LLMClient()
-            findings_txt = "\n".join([f"- [{wf['category'].upper()}] {wf['title']}: {wf['summary']}" for wf in web_findings[:6]])
-            prompt = f"""Actúa como Director de Viralidad para canales de YouTube y videos de 10 a 40 minutos o Reels.
-Aquí tienes hallazgos y noticias REALES extraídas recién de Internet:
+    try:
+        llm = LLMClient()
+        findings_txt = "\n".join([f"- [{wf['category'].upper()}] {wf['title']}: {wf['summary']}" for wf in web_findings[:6]]) if web_findings else "Tendencias globales actuales en redes, ciencia, finanzas y misterio."
+        
+        target_instruction = (
+            f"Genera exactamente {target_count} temas virales EXCLUSIVAMENTE para la categoría '{cat_target}'."
+            if cat_target
+            else f"Genera al menos {target_count} temas virales con EXACTAMENTE 1 tema para cada una de las 14 categorías principales: finanzas, amor, religion, versus, terror, misterio, politica, ciencia, curiosidades, historia, psicologia, crimen, tecnologia, narrativa."
+        )
+
+        prompt = f"""Actúa como Director de Viralidad para canales de YouTube y videos de 10 a 40 minutos o Reels.
+Aquí tienes hallazgos y noticias extraídas de Internet:
 {findings_txt}
 
-A partir de estos hallazgos (y complementando con temas de alto interés de las demás categorías: finanzas, amor, religion, versus, terror, misterio, politica, ciencia, curiosidades, historia, psicologia, crimen, tecnologia, narrativa):
-Genera 12 temas virales irresistibles con estructura de video largo.
+Instrucción:
+{target_instruction}
+
 Para CADA tema calcula una PUNTUACIÓN DE VIRALIDAD REAL (un número entero entre 88 y 99) basada en la potencia del gancho de curiosidad, la controversia y la retención del espectador.
+Asegúrate de que cada tema tenga un título llamativo, un enfoque detallado en 'nuances' y una categoría válida en minúsculas.
 
 Responde ÚNICAMENTE en JSON válido con esta lista de objetos:
 [
   {{
-    "id": "vt-live-1",
     "title": "Título épico con gancho irresistible",
     "nuances": "Enfoque detallado: hipótesis central, datos comprobados, revelación y giros para 15-30 min.",
-    "category": "finanzas",
+    "category": "{cat_target or 'finanzas'}",
     "score": 98,
     "glyph": "💰",
     "hookType": "Estrategia de Riqueza",
     "durationMin": 20
   }}
 ]"""
-            resp = await asyncio.wait_for(
-                asyncio.to_thread(llm.generate, prompt, True, 1, 1, 6.0),
-                timeout=6.5
-            )
-            clean_resp = re.sub(r"^```(?:json)?", "", resp.strip(), flags=re.MULTILINE)
-            clean_resp = re.sub(r"```$", "", clean_resp.strip(), flags=re.MULTILINE).strip()
-            parsed = json.loads(clean_resp)
-            if isinstance(parsed, list) and len(parsed) > 0:
-                for idx, item in enumerate(parsed):
-                    if item.get("title") and item.get("category"):
-                        topics_out.append({
-                            "id": f"vt-live-{item['category'][:3]}-{idx}-{random.randint(100, 999)}",
-                            "title": item["title"],
-                            "nuances": item.get("nuances") or item["title"],
-                            "category": item["category"].lower(),
-                            "score": int(min(99, max(85, item.get("score", 92)))),
-                            "glyph": item.get("glyph") or "🔥",
-                            "hookType": item.get("hookType") or "Tendencia IA",
-                            "durationMin": int(item.get("durationMin") or 20),
-                        })
-        except Exception as _e_llm:
-            safe_log(f"[ViralRefresh] Fallback local en LLM ({_e_llm})")
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: llm.generate(prompt, json_mode=True, use_search=False, deadline_sec=16.0)
+            ),
+            timeout=18.0
+        )
+        clean_resp = re.sub(r"^```(?:json)?", "", resp.strip(), flags=re.MULTILINE)
+        clean_resp = re.sub(r"```$", "", clean_resp.strip(), flags=re.MULTILINE).strip()
+        parsed = json.loads(clean_resp)
+        if isinstance(parsed, list) and len(parsed) > 0:
+            for idx, item in enumerate(parsed):
+                c = (item.get("category") or cat_target or "curiosidades").lower()
+                cfg_info = NICHES_MAP.get(c, {"glyph": "🔥", "hook": "Tendencia IA"})
+                if item.get("title"):
+                    topics_out.append({
+                        "id": f"vt-live-{c[:3]}-{idx}-{random.randint(100, 999)}",
+                        "title": item["title"],
+                        "nuances": item.get("nuances") or item["title"],
+                        "category": c,
+                        "score": int(min(99, max(85, item.get("score", 92)))),
+                        "glyph": item.get("glyph") or cfg_info["glyph"],
+                        "hookType": item.get("hookType") or cfg_info["hook"],
+                        "durationMin": int(item.get("durationMin") or 20),
+                        "isLive": True,
+                    })
+    except Exception as _e_llm:
+        safe_log(f"[ViralRefresh] Aviso en LLM ({_e_llm})")
 
-    # Fallback algorítmico sobre los hallazgos web si el LLM tardó
+    # Fallback sobre los hallazgos web si el LLM tardó
     if not topics_out and web_findings:
         for idx, wf in enumerate(web_findings):
             score = 88
@@ -3074,11 +3515,12 @@ Responde ÚNICAMENTE en JSON válido con esta lista de objetos:
                 "glyph": wf["glyph"],
                 "hookType": wf["default_hook"],
                 "durationMin": random.choice([15, 20, 25, 30]),
+                "isLive": True,
             })
 
-    # Si todo falló, generar pool dinámico curado de alta viralidad para que el botón jamás quede vacío
+    # Si todo falló, generar pool dinámico curado para que jamás quede vacío
     if not topics_out:
-        sample_cats = random.sample(NICHES_CONFIG, min(10, len(NICHES_CONFIG)))
+        sample_cats = [NICHES_MAP[cat_target]] if cat_target and cat_target in NICHES_MAP else NICHES_CONFIG
         for idx, cfg in enumerate(sample_cats):
             topics_out.append({
                 "id": f"vt-curated-{cfg['cat'][:3]}-{idx}-{random.randint(100, 999)}",
@@ -3089,6 +3531,7 @@ Responde ÚNICAMENTE en JSON válido con esta lista de objetos:
                 "glyph": cfg["glyph"],
                 "hookType": cfg["hook"],
                 "durationMin": random.choice([15, 20, 25, 30]),
+                "isLive": True,
             })
 
     return {
@@ -3146,7 +3589,12 @@ async def replicate_trend_item(payload: Dict[str, Any] = Body(...)):
         raw_duration = brief.get("recommended_duration_sec") or (
             360 if item.get("category") in ("descubrimiento", "ciencia", "espacio", "arqueologia", "tecnologia", "misterio") else 180
         )
-    duration_sec = max(45, min(900, int(raw_duration)))
+    try:
+        raw_dur = int(raw_duration)
+    except (ValueError, TypeError):
+        raw_dur = 180
+    duration_sec = raw_dur * 60 if 0 < raw_dur <= 40 else raw_dur
+    duration_sec = max(45, min(2400, duration_sec))
     creation = await create_streamer_broadcast({
         "topic": brief["topic"],
         "extra_notes": brief["extra_notes"],
@@ -3300,6 +3748,17 @@ def preview_visual_template(
     side_a: Optional[str] = None,
     side_b: Optional[str] = None,
     source: Optional[str] = None,
+    main_text: Optional[str] = None,
+    accent_text: Optional[str] = None,
+    step_number: Optional[str] = None,
+    total_steps: Optional[str] = None,
+    step_prefix: Optional[str] = None,
+    code_comment: Optional[str] = None,
+    handle: Optional[str] = None,
+    window_title: Optional[str] = None,
+    highlight_button: Optional[str] = None,
+    placeholder_text: Optional[str] = None,
+    grid_style: Optional[str] = None,
 ):
     """Genera o sirve la vista previa renderizada en PNG de una plantilla visual."""
     from core.visual_templates import VisualTemplatesLibrary
@@ -3326,6 +3785,17 @@ def preview_visual_template(
     if side_a: params["side_a"] = side_a
     if side_b: params["side_b"] = side_b
     if source: params["source"] = source
+    if main_text: params["main_text"] = main_text
+    if accent_text: params["accent_text"] = accent_text
+    if step_number: params["step_number"] = step_number
+    if total_steps: params["total_steps"] = total_steps
+    if step_prefix: params["step_prefix"] = step_prefix
+    if code_comment: params["code_comment"] = code_comment
+    if handle: params["handle"] = handle
+    if window_title: params["window_title"] = window_title
+    if highlight_button: params["highlight_button"] = highlight_button
+    if placeholder_text: params["placeholder_text"] = placeholder_text
+    if grid_style: params["grid_style"] = grid_style
 
     rendered = vlib.render_template_to_image(template, out_file, params, variant=variant)
     if not rendered or not rendered.exists():

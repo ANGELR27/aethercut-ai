@@ -46,6 +46,7 @@ function Frame() {
     setPlaying,
     loop,
     toggle,
+    fitMode,
   } = useEditor();
 
   useEffect(() => {
@@ -174,12 +175,11 @@ function Frame() {
   return (
     <div
       onClick={toggle}
-      className="relative cursor-pointer overflow-hidden rounded-[20px] border border-white/[0.09] bg-black shadow-[0_60px_120px_-50px_rgba(0,0,0,1),0_0_120px_-60px_rgba(47,92,255,0.9)]"
+      className="relative h-full w-full cursor-pointer overflow-hidden rounded-[16px] border border-white/[0.09] bg-black shadow-[0_12px_32px_-10px_rgba(0,0,0,0.8),0_0_20px_-10px_rgba(255,255,255,0.04)]"
       style={{ aspectRatio: String(RATIO_VALUE[ratio]) }}
     >
-      {/* ambient shadows & tints (detrás del video para que no lo oscurezcan) */}
-      <div className="pointer-events-none absolute inset-0 z-0" style={{ background: scene.tint }} />
-      <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(120%_80%_at_50%_10%,transparent_35%,rgba(0,0,0,0.55)_100%)]" />
+      {/* ambient sutil detrás del video */}
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(120%_80%_at_50%_10%,transparent_50%,rgba(0,0,0,0.4)_100%)]" />
 
       {/* footage (video y tomas DELANTE de las sombras para máxima visibilidad y claridad) */}
       {previewVideoUrl ? (
@@ -202,7 +202,10 @@ function Frame() {
           onError={(e) => {
             console.error("[PreviewStage] Error en video tag:", e);
           }}
-          className="no-drag absolute inset-0 z-10 h-full w-full object-cover"
+          className={cn(
+            "no-drag absolute inset-0 z-10 h-full w-full",
+            fitMode === "contain" ? "object-contain bg-black" : "object-cover"
+          )}
         />
       ) : (
         [
@@ -214,7 +217,10 @@ function Frame() {
             key={sc.f}
             src={sceneAt(sc.s + 0.1).frame}
             alt=""
-            className="no-drag absolute inset-0 z-10 h-full w-full object-cover transition-opacity duration-700"
+            className={cn(
+              "no-drag absolute inset-0 z-10 h-full w-full transition-opacity duration-700",
+              fitMode === "contain" ? "object-contain bg-black" : "object-cover"
+            )}
             style={{ opacity: idx === sc.f ? 1 : 0, transform: idx === sc.f ? kb : "scale(1.05)" }}
           />
         ))
@@ -440,14 +446,14 @@ function Scopes() {
   if (!overlays.scopes) return null;
 
   return (
-    <div className="glass-soft flex w-[132px] shrink-0 flex-col gap-4 rounded-none border-y-0 border-r-0 p-3">
+    <div className="flex w-[132px] shrink-0 flex-col gap-4 border-l border-white/[0.07] bg-black p-3">
       <div className="space-y-2">
         <SectionLabel>Scopes</SectionLabel>
-        <div className="flex h-16 items-end gap-[2px] rounded-lg border border-white/[0.06] bg-black/40 p-1.5">
+        <div className="flex h-16 items-end gap-[2px] rounded-lg border border-white/[0.08] bg-black p-1.5">
           {hist.map((h, i) => (
             <div
               key={i}
-              className="flex-1 rounded-[1px] bg-gradient-to-t from-beam-500/30 to-beam-200/80"
+              className="flex-1 rounded-[1px] bg-beam-400"
               style={{ height: `${h * 100}%` }}
             />
           ))}
@@ -464,7 +470,7 @@ function Scopes() {
             <span className="micro-sm w-2 text-white/30">{ch.k}</span>
             <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-beam-400 to-signal-400"
+                className="h-full rounded-full bg-beam-400"
                 style={{ width: `${ch.v * 100}%` }}
               />
             </div>
@@ -490,7 +496,7 @@ function Scopes() {
             </div>
             <div className="h-[2px] w-full overflow-hidden rounded-full bg-white/[0.06]">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-abyss-600 to-beam-300"
+                className="h-full rounded-full bg-beam-400"
                 style={{ width: `${d.v}%` }}
               />
             </div>
@@ -502,105 +508,123 @@ function Scopes() {
 }
 
 export function PreviewStage() {
-  const { ratio, setRatio, overlays, toggleOverlay, playing, toggle } = useEditor();
+  const { ratio, setRatio, overlays, toggleOverlay, playing, toggle, fitMode, toggleFitMode } = useEditor();
 
   return (
-    <div className="relative flex min-h-0 flex-1">
-      {/* ambient */}
-      <div className="pointer-events-none absolute inset-0 grid-lines opacity-60" />
-      <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-beam-500/12 blur-[110px] anim-breathe" />
-      <div className="pointer-events-none absolute bottom-0 right-10 h-64 w-64 rounded-full bg-abyss-600/50 blur-[110px]" />
-
+    <div className="relative flex min-h-0 flex-1 bg-black">
       {/* stage */}
-      <div
-        className="relative grid min-h-0 flex-1 place-items-center overflow-hidden p-5 sm:p-8"
-        style={{ containerType: "size" }}
-      >
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2 sm:p-3 bg-black">
         <div
-          className="relative"
-          style={{ width: `min(100cqw - 2rem, calc((100cqh - 2.5rem) * ${RATIO_VALUE[ratio]}))` }}
+          className="relative flex items-center justify-center"
+          style={{
+            aspectRatio: String(RATIO_VALUE[ratio]),
+            height: "100%",
+            width: "auto",
+            maxHeight: "100%",
+            maxWidth: "100%",
+          }}
         >
-          {/* bleed glow */}
-          <div className="pointer-events-none absolute -inset-8 -z-10 overflow-hidden rounded-[32px]">
-            <div className="absolute inset-0 bg-beam-500/10 blur-3xl" />
-          </div>
-          <Frame />
-          <div
-            className={cn(
-              "absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap transition-opacity duration-500",
-              playing ? "opacity-100" : "opacity-0",
-            )}
-          >
-            <span className="micro-sm text-white/20">Renderizado local · 24 fps · latencia 8 ms</span>
+          <div className="relative h-full w-full">
+            <Frame />
           </div>
         </div>
 
-        {/* floating tools */}
-        <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
-          <IconButton
-            size="sm"
+        {/* floating tools dock (horizontal discreto, no obstruye el video) */}
+        <div className="absolute bottom-3 left-4 flex items-center gap-1 p-1 rounded-lg bg-black/45 backdrop-blur-md border border-white/[0.06] shadow-md z-30 opacity-70 hover:opacity-100 transition-opacity">
+          <button
+            type="button"
+            className={cn(
+              "h-6 w-6 grid place-items-center rounded-md transition-all text-white/50 hover:text-white hover:bg-white/10",
+              ratio !== "9:16" && "bg-beam-500/20 text-beam-300 font-bold",
+            )}
             title="Relación de aspecto"
-            active={ratio !== "9:16"}
             onClick={() => setRatio(RATIOS[(RATIOS.indexOf(ratio) + 1) % RATIOS.length])}
           >
-            <IconCrop className="h-3.5 w-3.5" />
-          </IconButton>
-          <IconButton size="sm" title="Reencuadre automático" active>
-            <IconMagnet className="h-3.5 w-3.5" />
-          </IconButton>
-          <IconButton size="sm" title="Cortar en el cursor" onClick={() => {}}>
-            <IconScissors className="h-3.5 w-3.5" />
-          </IconButton>
-          <IconButton
-            size="sm"
+            <IconCrop className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "h-6 w-6 grid place-items-center rounded-md transition-all text-white/50 hover:text-white hover:bg-white/10",
+              fitMode === "contain" && "bg-beam-500/20 text-beam-300",
+            )}
+            title={fitMode === "cover" ? "Encuadre: Llenar marco (Click para ver completo sin recortes)" : "Encuadre: Completo (Click para llenar marco)"}
+            onClick={toggleFitMode}
+          >
+            <IconMagnet className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            className="h-6 w-6 grid place-items-center rounded-md text-white/50 hover:text-white hover:bg-white/10 transition-all"
+            title="Cortar en el cursor"
+            onClick={() => {}}
+          >
+            <IconScissors className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "h-6 w-6 grid place-items-center rounded-md transition-all text-white/50 hover:text-white hover:bg-white/10",
+              overlays.scopes && "bg-beam-500/20 text-beam-300",
+            )}
             title="Scopes y detecciones"
-            active={overlays.scopes}
             onClick={() => toggleOverlay("scopes")}
           >
-            <IconChart className="h-3.5 w-3.5" />
-          </IconButton>
+            <IconChart className="h-3 w-3" />
+          </button>
         </div>
 
-        <div className="absolute bottom-4 right-4 flex flex-col items-end gap-1.5">
-          <div className="glass-soft flex overflow-hidden rounded-xl">
+        {/* floating tools dock (derecha: ratios y overlays discretos) */}
+        <div className="absolute bottom-3 right-4 flex items-center gap-1.5 z-30 opacity-70 hover:opacity-100 transition-opacity">
+          <div className="flex overflow-hidden rounded-md border border-white/[0.06] bg-black/45 backdrop-blur-md">
             {RATIOS.map((r) => (
               <button
                 key={r}
+                type="button"
                 onClick={() => setRatio(r)}
                 className={cn(
-                  "px-2 py-1.5 text-[9.5px] font-medium tracking-wider transition-all",
-                  ratio === r ? "bg-white/[0.1] text-white" : "text-white/30 hover:text-white/70",
+                  "px-1.5 py-0.5 text-[8.5px] font-medium tracking-wider transition-all",
+                  ratio === r ? "bg-beam-500/30 text-beam-200 font-semibold" : "text-white/35 hover:text-white hover:bg-white/5",
                 )}
               >
                 {r}
               </button>
             ))}
           </div>
-          <div className="flex gap-1.5">
-            <IconButton
-              size="sm"
+          <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-black/45 backdrop-blur-md border border-white/[0.06]">
+            <button
+              type="button"
+              className={cn(
+                "h-6 w-6 grid place-items-center rounded-md transition-all",
+                overlays.captions ? "bg-beam-500/20 text-beam-300" : "text-white/40 hover:text-white hover:bg-white/10",
+              )}
               title="Subtítulos"
-              active={overlays.captions}
               onClick={() => toggleOverlay("captions")}
             >
-              <IconType className="h-3.5 w-3.5" />
-            </IconButton>
-            <IconButton
-              size="sm"
+              <IconType className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "h-6 w-6 grid place-items-center rounded-md transition-all",
+                overlays.safe ? "bg-beam-500/20 text-beam-300" : "text-white/40 hover:text-white hover:bg-white/10",
+              )}
               title="Zonas seguras"
-              active={overlays.safe}
               onClick={() => toggleOverlay("safe")}
             >
-              <IconEye className="h-3.5 w-3.5" />
-            </IconButton>
-            <IconButton
-              size="sm"
+              <IconEye className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "h-6 w-6 grid place-items-center rounded-md transition-all",
+                overlays.grid ? "bg-beam-500/20 text-beam-300" : "text-white/40 hover:text-white hover:bg-white/10",
+              )}
               title="Rejilla"
-              active={overlays.grid}
               onClick={() => toggleOverlay("grid")}
             >
-              <IconGrid className="h-3.5 w-3.5" />
-            </IconButton>
+              <IconGrid className="h-3 w-3" />
+            </button>
           </div>
         </div>
 
@@ -608,7 +632,7 @@ export function PreviewStage() {
         <button
           onClick={toggle}
           className={cn(
-            "absolute left-1/2 top-1/2 grid h-14 w-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-black/50 text-white/90 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,0,0.6)] transition-all duration-300 z-30",
+            "absolute left-1/2 top-1/2 grid h-14 w-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-beam-400 bg-beam-500 text-white shadow-[0_8px_32px_rgba(0,0,0,0.8)] transition-all duration-300 z-30",
             playing ? "pointer-events-none scale-75 opacity-0" : "opacity-100 hover:scale-105 active:scale-95",
           )}
         >
@@ -635,35 +659,53 @@ export function Transport() {
     setLoop,
     isMuted,
     toggleMute,
+    theaterMode,
+    toggleTheaterMode,
   } = useEditor();
   const safeDuration = duration || DURATION;
   const pct = (time / safeDuration) * 100;
 
   return (
-    <div className="glass-deep relative z-20 flex h-[52px] shrink-0 items-center gap-3 border-x-0 border-b-0 px-3 sm:h-[58px]">
-      <div className="flex items-center gap-1">
-        <IconButton size="sm" title="Inicio" onClick={() => seek(0)}>
-          <IconStart className="h-3.5 w-3.5" />
-        </IconButton>
-        <IconButton size="sm" title="Final" onClick={() => seek(safeDuration - 0.05)}>
-          <IconEnd className="h-3.5 w-3.5" />
-        </IconButton>
-        <IconButton title="Anterior corte" size="sm" onClick={() => seek(Math.max(0, time - 11.5))}>
-          <IconScissors className="h-3.5 w-3.5" />
+    <div className="relative z-20 flex h-11 shrink-0 items-center justify-between gap-3 border-t border-white/[0.07] bg-black px-3 select-none">
+      {/* Controles de reproducción */}
+      <div className="flex items-center gap-1 shrink-0">
+        <IconButton size="sm" title="Inicio (Home)" onClick={() => seek(0)}>
+          <IconStart className="h-3 w-3" />
         </IconButton>
         <button
-          onClick={toggle}
-          className="grid h-10 w-10 place-items-center rounded-xl border border-white/12 bg-gradient-to-b from-white/[0.14] to-white/[0.03] text-white shadow-[0_1px_0_0_rgba(255,255,255,0.2)_inset,0_10px_26px_-14px_rgba(47,92,255,1)] transition-all duration-300 hover:border-beam-300/40 hover:from-beam-500/25"
+          onClick={() => seek(Math.max(0, time - 2))}
+          className="grid h-7 w-7 place-items-center rounded-md border border-transparent text-white/50 hover:bg-white/[0.05] hover:text-white transition-all cursor-pointer text-[10px] font-mono"
+          title="Rebobinar 2s (J)"
         >
-          {playing ? <IconPause className="h-4 w-4" /> : <IconPlay className="h-4 w-4" />}
+          -2s
         </button>
+        <button
+          onClick={toggle}
+          className="grid h-8 w-8 place-items-center rounded-lg border border-white/20 bg-white/[0.12] text-white hover:bg-white/[0.22] hover:border-white/30 active:scale-95 transition-all cursor-pointer shadow-sm"
+          title={playing ? "Pausar (Espacio / K)" : "Reproducir (Espacio / K)"}
+        >
+          {playing ? <IconPause className="h-3.5 w-3.5" /> : <IconPlay className="h-3.5 w-3.5 ml-0.5" />}
+        </button>
+        <button
+          onClick={() => seek(Math.min(safeDuration, time + 2))}
+          className="grid h-7 w-7 place-items-center rounded-md border border-transparent text-white/50 hover:bg-white/[0.05] hover:text-white transition-all cursor-pointer text-[10px] font-mono"
+          title="Adelantar 2s (L)"
+        >
+          +2s
+        </button>
+        <IconButton size="sm" title="Final (End)" onClick={() => seek(safeDuration - 0.05)}>
+          <IconEnd className="h-3 w-3" />
+        </IconButton>
+
+        <div className="h-3 w-px bg-white/10 mx-1" />
+
         <IconButton
           size="sm"
-          title="Bucle"
+          title="Bucle de reproducción"
           active={loop}
           onClick={() => setLoop(!loop)}
         >
-          <IconLoop className="h-3.5 w-3.5" />
+          <IconLoop className="h-3 w-3" />
         </IconButton>
         <IconButton
           size="sm"
@@ -671,18 +713,18 @@ export function Transport() {
           active={!isMuted}
           onClick={toggleMute}
         >
-          <IconVolume className={cn("h-3.5 w-3.5", isMuted && "opacity-40")} />
+          <IconVolume className={cn("h-3 w-3", isMuted && "opacity-40")} />
         </IconButton>
       </div>
 
-      {/* scrub */}
+      {/* Mini Scrubber ultra-sutil (no compite con la regla de la línea de tiempo) */}
       <div
-        className="group relative h-8 flex-1 cursor-pointer"
+        className="group relative h-4 flex-1 cursor-pointer max-w-xl mx-2 flex items-center"
         onPointerDown={(e) => {
           const el = e.currentTarget;
           const move = (cx: number) => {
             const r = el.getBoundingClientRect();
-            seek(((cx - r.left) / r.width) * safeDuration);
+            seek(Math.max(0, Math.min(safeDuration, ((cx - r.left) / r.width) * safeDuration)));
           };
           const onMove = (ev: PointerEvent) => move(ev.clientX);
           move(e.clientX);
@@ -694,43 +736,52 @@ export function Transport() {
           window.addEventListener("pointerup", up);
         }}
       >
-        <div className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 overflow-hidden rounded-full bg-white/[0.07]">
+        <div className="relative w-full h-1 overflow-hidden rounded-full bg-white/[0.08] transition-all group-hover:h-1.5">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-abyss-600 via-beam-500 to-beam-300"
+            className="h-full rounded-full bg-beam-400 transition-all"
             style={{ width: `${pct}%` }}
           />
         </div>
-        {[11.5, 23.5].map((t) => (
-          <span
-            key={t}
-            className="absolute top-1/2 h-2.5 w-[2px] -translate-y-1/2 rounded-full bg-white/25"
-            style={{ left: `${(t / safeDuration) * 100}%` }}
-          />
-        ))}
-        <span
-          className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/60 bg-white shadow-[0_0_16px_3px_rgba(79,123,255,0.65)] transition-transform group-hover:scale-110"
-          style={{ left: `${pct}%` }}
-        />
       </div>
 
-      <div className="hidden items-baseline gap-1 sm:flex">
-        <span className="tnum text-[12px] font-light text-white">{timecode(time)}</span>
-        <span className="tnum text-[10px] text-white/25">/ {timecode(safeDuration)}</span>
-      </div>
+      {/* Reloj Digital, Velocidad y Modo Cine */}
+      <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-baseline gap-1 font-mono">
+          <span className="text-[11.5px] font-medium text-white">{timecode(time)}</span>
+          <span className="text-[10px] text-white/30">/ {timecode(safeDuration)}</span>
+        </div>
 
-      <div className="hidden items-center gap-0.5 rounded-xl border border-white/[0.06] bg-black/40 p-0.5 md:flex">
-        {[0.25, 0.5, 1, 2].map((r) => (
-          <button
-            key={r}
-            onClick={() => setRate(r)}
-            className={cn(
-              "rounded-[9px] px-2 py-1 text-[10px] font-medium transition-all",
-              rate === r ? "bg-white/[0.1] text-white" : "text-white/30 hover:text-white/65",
-            )}
-          >
-            {r}×
-          </button>
-        ))}
+        {/* Velocidad */}
+        <div className="hidden sm:flex items-center rounded-lg border border-white/[0.08] bg-white/[0.02] p-0.5">
+          {[0.5, 1, 2].map((r) => (
+            <button
+              key={r}
+              onClick={() => setRate(r)}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[9.5px] font-medium transition-all cursor-pointer",
+                rate === r ? "bg-white/20 text-white" : "text-white/35 hover:text-white/70",
+              )}
+            >
+              {r}×
+            </button>
+          ))}
+        </div>
+
+        {/* Modo Cine / Expandir Video */}
+        <button
+          type="button"
+          onClick={toggleTheaterMode}
+          className={cn(
+            "flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10.5px] font-medium transition-all cursor-pointer",
+            theaterMode
+              ? "border-beam-400/60 bg-beam-500/20 text-beam-200"
+              : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white hover:border-white/20",
+          )}
+          title={theaterMode ? "Salir de Modo Cine" : "Modo Cine: Ocultar paneles laterales para expandir el video"}
+        >
+          <span className="text-[11px] leading-none">{theaterMode ? "⤥" : "⤢"}</span>
+          <span className="hidden md:inline">{theaterMode ? "Cine" : "Modo Cine"}</span>
+        </button>
       </div>
     </div>
   );

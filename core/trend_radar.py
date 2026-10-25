@@ -433,16 +433,19 @@ class TrendRadar:
         hours = max((now - published).total_seconds() / 3600.0, 1.0)
         views = int(stats.get("viewCount") or 0)
         likes = int(stats.get("likeCount") or 0)
-        if views < 10_000:
-            return None  # el chart de "otra región" debe ser contenido que ya explota
+        # Umbral adaptable a la frescura: si el video tiene menos de 18 horas (noticia fresca o viral emergente),
+        # permitirlo desde 1.500 vistas si tiene buena tracción (velocidad).
+        min_views = 1500 if hours <= 18 else (5000 if hours <= 48 else 10_000)
+        if views < min_views:
+            return None
 
-        views_per_hour = views / max(hours, 2.0)
+        views_per_hour = views / max(hours, 1.5)
         like_ratio = (likes / views) if views else 0.0
-        recency = math.exp(-hours / 60.0)
+        recency = math.exp(-hours / 36.0)
         score = round(
-            55 * min(1.0, views_per_hour / 150_000)
-            + 25 * min(1.0, like_ratio / 0.12)
-            + 20 * recency,
+            50 * min(1.0, views_per_hour / 100_000)
+            + 20 * min(1.0, like_ratio / 0.12)
+            + 30 * recency,
             1,
         )
         thumbs = snippet.get("thumbnails", {})
@@ -571,9 +574,10 @@ Para cada uno responde en español:
 Responde SOLO con JSON válido: {{"topics": [...]}} con máximo {self.MAX_TOPICS} temas ordenados por virality."""
 
         try:
+            from utils.json_validator import JSONValidator
             client = LLMClient()
             raw = client.generate(prompt, json_mode=True, deadline_sec=75)
-            data = json.loads(raw)
+            data = JSONValidator.extract_and_parse(raw)
             topics = data.get("topics", [])
         except Exception as exc:
             safe_log(f"[TrendRadar] La IA no pudo puntuar los temas: {exc}")
@@ -678,9 +682,10 @@ Responde SOLO con JSON válido:
   - "viral_estimate": 0 a 100 de fuerza viral estimada
   - "recommended": true SOLO en el mejor enfoque"""
 
+        from utils.json_validator import JSONValidator
         client = LLMClient()
         raw = client.generate(prompt, json_mode=True, deadline_sec=75)
-        data = json.loads(raw)
+        data = JSONValidator.extract_and_parse(raw)
         options = []
         for idx, opt in enumerate(data.get("options", [])[:3]):
             title_opt = str(opt.get("title", "")).strip()[:110]
@@ -782,9 +787,10 @@ Responde SOLO con JSON válido:
   original. Máximo 550 caracteres, en español.
 {duration_rule}"""
 
+        from utils.json_validator import JSONValidator
         client = LLMClient()
         raw = client.generate(prompt, json_mode=True, deadline_sec=75)
-        data = json.loads(raw)
+        data = JSONValidator.extract_and_parse(raw)
         topic = str(data.get("topic", "")).strip()[:120] or str(payload.get("title", ""))[:110]
         notes = str(data.get("extra_notes", "")).strip()[:600]
         if not topic:

@@ -18,10 +18,13 @@ class AgentModelConnector:
 
     def __init__(self, model_name: str, api_key: str, role_title: str):
         self.model_name = model_name
-        self.api_key = api_key or getattr(settings, "NVIDIA_API_KEY", "")
+        self.api_key = api_key or getattr(settings, "DEEPSEEK_API_KEY", "") or getattr(settings, "NVIDIA_API_KEY", "")
         self.role_title = role_title
+        base_url = "https://api.deepseek.com" if (
+            "deepseek" in str(model_name).lower() or (self.api_key and self.api_key.startswith("sk-"))
+        ) else "https://integrate.api.nvidia.com/v1"
         self.client = OpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
+            base_url=base_url,
             api_key=self.api_key,
             timeout=45.0,
         )
@@ -176,7 +179,13 @@ class AgentModelConnector:
 
 
 def get_architect_model() -> AgentModelConnector:
-    """Diseñador de arquitectura y decisiones estructurales (Kimi-k3 / GLM-5.3)."""
+    """Diseñador de arquitectura y decisiones estructurales (DeepSeek Flash / GLM)."""
+    if getattr(settings, "DEEPSEEK_API_KEY", ""):
+        return AgentModelConnector(
+            model_name=getattr(settings, "DEEPSEEK_MODEL", "deepseek-flash"),
+            api_key=settings.DEEPSEEK_API_KEY,
+            role_title="Arquitecto Líder (DeepSeek Flash)",
+        )
     key = getattr(settings, "GLM_API_KEY", "") or getattr(settings, "NVIDIA_API_KEY", "")
     model_name = "z-ai/glm-5.3" if getattr(settings, "GLM_API_KEY", "") else getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
     return AgentModelConnector(
@@ -187,7 +196,13 @@ def get_architect_model() -> AgentModelConnector:
 
 
 def get_implementer_model() -> AgentModelConnector:
-    """Implementador veloz de componentes, lógica y correcciones con razonamiento profundo."""
+    """Implementador veloz de componentes, lógica y correcciones con razonamiento profundo (DeepSeek Flash)."""
+    if getattr(settings, "DEEPSEEK_API_KEY", ""):
+        return AgentModelConnector(
+            model_name=getattr(settings, "DEEPSEEK_MODEL", "deepseek-flash"),
+            api_key=settings.DEEPSEEK_API_KEY,
+            role_title="Implementador Developer (DeepSeek Flash)",
+        )
     key = getattr(settings, "GLM_FLASH_API_KEY", "") or getattr(settings, "NVIDIA_API_KEY", "")
     model_name = "z-ai/glm-5.3-flash" if getattr(settings, "GLM_FLASH_API_KEY", "") else getattr(settings, "NVIDIA_MODEL", "moonshotai/kimi-k3")
     return AgentModelConnector(
@@ -198,7 +213,13 @@ def get_implementer_model() -> AgentModelConnector:
 
 
 def get_auditor_model() -> AgentModelConnector:
-    """Auditor riguroso, revisión de consistencia y búsqueda de fallos (Nemotron / Kimi)."""
+    """Auditor riguroso, revisión de consistencia y búsqueda de fallos (DeepSeek Flash / Nemotron)."""
+    if getattr(settings, "DEEPSEEK_API_KEY", ""):
+        return AgentModelConnector(
+            model_name=getattr(settings, "DEEPSEEK_MODEL", "deepseek-flash"),
+            api_key=settings.DEEPSEEK_API_KEY,
+            role_title="Auditor QA (DeepSeek Flash)",
+        )
     key = getattr(settings, "KIMI_API_KEY", "") or getattr(settings, "NVIDIA_API_KEY", "")
     model_name = getattr(settings, "NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
     return AgentModelConnector(

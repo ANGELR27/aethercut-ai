@@ -12,8 +12,9 @@ REGLAS CRÍTICAS DE EDICIÓN:
    - Todo segmento con habla activa debe ser marcado con action: "KEEP".
    - La suma continua de los segmentos de 'timeline' debe cubrir desde 0.0 hasta la duración total sin huecos.
 
-2. AUTO B-ROLL & VISUAL OVERLAYS:
-   - Detecta momentos exactos donde se mencionen conceptos visuales tangibles, lugares o tecnologías para insertar tomas de apoyo de 2.5 a 4.5 segundos.
+2. AUTO B-ROLL & VISUAL OVERLAYS (RITMO DE RETENCIÓN DE YOUTUBE):
+   - Detecta momentos exactos donde se mencionen conceptos visuales tangibles, lugares o tecnologías para insertar tomas de apoyo de 2.0 a 4.0 segundos (regla del corte ágil: nunca dejar un plano fijo más de 4 segundos).
+   - En los primeros 30 segundos (el gancho), inserta apoyos visuales más frecuentes (cada 2.0 a 2.8s) para maximizar la retención inicial.
    - Proporciona 'search_query_en' efectivo y conciso en inglés (2 a 4 palabras).
 
 3. FRASES CLAVE (captions):

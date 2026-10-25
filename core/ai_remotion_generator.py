@@ -26,13 +26,13 @@ class AIStyleDirector:
     PALETTES: Dict[str, Dict[str, str]] = {
         "cyber_cyan": {
             "name": "cyber_cyan",
-            "primary": "#00E5FF",
-            "accent": "#38BDF8",
-            "bg": "#09121A",
-            "card_theme": "cyber_cyan",
-            "sub_style": "cyber_glow",
-            "font_family": "Montserrat",
-            "vibe": "Ciencia, astronomía, IA, tecnología y futuro",
+            "primary": "#FF9436",
+            "accent": "#FFE14D",
+            "bg": "#0C0D12",
+            "card_theme": "orange_noir",
+            "sub_style": "viral",
+            "font_family": "Space Grotesk",
+            "vibe": "Ciencia, astronomía, IA, tecnología y futuro en estética obsidiana ámbar",
         },
         "emerald_matrix": {
             "name": "emerald_matrix",
@@ -95,7 +95,7 @@ class AIStyleDirector:
 
         detected_palette = "orange_noir"
         if any(w in t_low for w in ["nasa", "espacio", "telescopio", "astronom", "galaxia", "universo", "ia", "inteligencia artificial", "cyber", "robot", "quantum", "ciencia"]):
-            detected_palette = "cyber_cyan"
+            detected_palette = "orange_noir"
         elif any(w in t_low for w in ["dinero", "cripto", "bitcoin", "millon", "finanz", "econom", "negocio", "inversi", "dolar", "empresa"]):
             detected_palette = "emerald_matrix"
         elif any(w in t_low for w in ["urgente", "alerta", "breaking", "guerra", "peligro", "escandalo", "crisis", "muerte", "amenaza"]):

@@ -69,11 +69,21 @@ run(["-f", "lavfi", "-i", "sine=frequency=55:duration=0.9",
      "-map", "[out]", "-ar", "48000", "-ac", "2", str(OUT / "impact.wav")])
 print("OK impact.wav")
 
-# Alert: doble beep de notificación (990 Hz) — tipo breaking news (1.2 s)
-run(["-f", "lavfi", "-i", "aevalsrc=0.55*sin(2*PI*990*t)*between(t\,0\,0.22)+0.55*sin(2*PI*990*t)*between(t\,0.4\,0.62)+0.45*sin(2*PI*740*t)*between(t\,0.8\,1.1):d=1.2",
-     "-af", "lowpass=f=3000,volume=1.2",
-     "-ar", "48000", "-ac", "2", str(OUT / "alert.wav")])
-print("OK alert.wav")
+# Alert: tono moderno y elegante de alerta / advertencia (tríada armónica cálida A4-C#5-E5 + sub-bass suave)
+run([
+    "-f", "lavfi", "-i", "sine=frequency=440:duration=0.5",
+    "-f", "lavfi", "-i", "sine=frequency=554.37:duration=0.45",
+    "-f", "lavfi", "-i", "sine=frequency=659.25:duration=0.4",
+    "-f", "lavfi", "-i", "sine=frequency=110:duration=0.25",
+    "-filter_complex",
+    "[0]afade=t=in:d=0.015,afade=t=out:st=0.08:d=0.4,volume=0.5[t1];"
+    "[1]adelay=delays=90:all=1,afade=t=in:d=0.015,afade=t=out:st=0.15:d=0.35,volume=0.4[t2];"
+    "[2]adelay=delays=180:all=1,afade=t=in:d=0.015,afade=t=out:st=0.22:d=0.3,volume=0.35[t3];"
+    "[3]afade=t=out:st=0.02:d=0.2,volume=0.4[sub];"
+    "[t1][t2][t3][sub]amix=inputs=4:normalize=0,lowpass=f=2400,volume=0.9[out]",
+    "-map", "[out]", "-ar", "48000", "-ac", "2", str(OUT / "alert.wav")
+])
+print("OK alert.wav (modern harmonic chime)")
 
 # Pop: clic elástico y satisfactorio para stickers y badges virales (0.18 s)
 run(["-f", "lavfi", "-i", "sine=frequency=620:duration=0.18",

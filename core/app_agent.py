@@ -218,7 +218,7 @@ class AppAgentController:
         for manifest in settings.PROJECTS_DIR.glob("*/project.json"):
             try:
                 doc = json.loads(manifest.read_text(encoding="utf-8"))
-                pid = doc.get("id")
+                pid = doc.get("id") or manifest.parent.name
                 res = doc.get("result") or {}
                 opts = doc.get("options") or {}
                 name = doc.get("original_name") or res.get("title") or opts.get("topic") or "Video sin nombre"

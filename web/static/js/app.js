@@ -4011,5 +4011,57 @@ document.addEventListener("DOMContentLoaded", () => {
                 switchMode(lastMode);
             }
         } catch { /* storage bloqueado */ }
+    // Control interactivo de Piloto de Anime y Recorrido Universal
+    const btnToggleAnime = $("btnToggleAnimeAutopilot");
+    const animeLabel = $("animeAutopilotStateLabel");
+    const updateAnimeButtonUI = (enabled) => {
+        if (!animeLabel || !btnToggleAnime) return;
+        if (enabled) {
+            animeLabel.textContent = "ACTIVO";
+            btnToggleAnime.style.background = "rgba(168, 85, 247, 0.2)";
+            btnToggleAnime.style.borderColor = "rgba(168, 85, 247, 0.6)";
+            btnToggleAnime.style.color = "#c084fc";
+        } else {
+            animeLabel.textContent = "PAUSADO";
+            btnToggleAnime.style.background = "rgba(148, 163, 184, 0.12)";
+            btnToggleAnime.style.borderColor = "rgba(148, 163, 184, 0.3)";
+            btnToggleAnime.style.color = "#94a3b8";
+        }
+    };
+
+    fetch("/api/anime-series/status")
+        .then((r) => r.json())
+        .then((st) => updateAnimeButtonUI(st?.config?.enabled !== false))
+        .catch(() => {});
+
+    if (btnToggleAnime) {
+        btnToggleAnime.addEventListener("click", async () => {
+            try {
+                const res = await fetch("/api/anime-series/toggle", { method: "POST" }).then((r) => r.json());
+                updateAnimeButtonUI(res.enabled);
+            } catch (err) {
+                console.error("Error al alternar estado de anime:", err);
+            }
+        });
+    }
+
+    const btnUniversalTour = $("btnRunUniversalTour");
+    if (btnUniversalTour) {
+        btnUniversalTour.addEventListener("click", async () => {
+            try {
+                btnUniversalTour.disabled = true;
+                const prev = btnUniversalTour.innerHTML;
+                btnUniversalTour.innerHTML = `<span>⏳ Iniciando...</span>`;
+                const res = await fetch("/api/universal-tour/run-now", { method: "POST" }).then((r) => r.json());
+                alert(res.message || "Recorrido Secuencial Universal iniciado.");
+                setTimeout(() => {
+                    btnUniversalTour.disabled = false;
+                    btnUniversalTour.innerHTML = prev;
+                }, 3000);
+            } catch (err) {
+                alert("Error al iniciar recorrido: " + err.message);
+                btnUniversalTour.disabled = false;
+            }
+        });
     }
 });

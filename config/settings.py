@@ -19,6 +19,7 @@ class Settings:
     PIXABAY_API_KEY: str = os.getenv("PIXABAY_API_KEY", "")
     NVIDIA_API_KEY: str = os.getenv("NVIDIA_API_KEY", "")
     NVIDIA_MODEL: str = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
+    AETHERCUT_API_KEY: str = os.getenv("AETHERCUT_API_KEY", "")
 
     # Estudio de Publicación: miniaturas IA (Gemini image) y subida directa a YouTube
     GEMINI_IMAGE_API_KEY: str = os.getenv("GEMINI_IMAGE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
@@ -35,6 +36,8 @@ class Settings:
     GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
     GLM_FLASH_API_KEY: str = os.getenv("GLM_FLASH_API_KEY", "")
     KIMI_API_KEY: str = os.getenv("KIMI_API_KEY", "")
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+    DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
 
     # Modelo principal activo de Gemini para análisis y redacción
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")

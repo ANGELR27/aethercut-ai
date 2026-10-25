@@ -207,8 +207,9 @@ Responde SOLO en formato JSON válido:
   "confidence": 0.95,
   "reason": "Explicación breve de por qué encaja en este canal"
 }}"""
+            from utils.json_validator import JSONValidator
             raw_res = client.generate(prompt, json_mode=True, deadline_sec=15)
-            parsed = json.loads(raw_res)
+            parsed = JSONValidator.extract_and_parse(raw_res)
             best_id = parsed.get("recommended_channel_id")
             if any(c["id"] == best_id for c in channels):
                 best_channel = cls.get_channel(best_id)

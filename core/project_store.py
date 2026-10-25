@@ -33,6 +33,7 @@ class ProjectStore:
         return json.loads(self.manifest_path.read_text(encoding="utf-8"))
 
     def write(self, document: Dict[str, Any]) -> Dict[str, Any]:
+        document.setdefault("id", self.project_id)
         document["updated_at"] = self._now()
         temp = self.manifest_path.with_suffix(".tmp")
         temp.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")

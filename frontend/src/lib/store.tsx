@@ -43,6 +43,23 @@ export type BackendProject = {
   has_result?: boolean;
 };
 
+export interface ProducerPlan {
+  retention_score: number;
+  original_critique: string;
+  master_hook: string;
+  supporting_facts: Array<{ fact: string; source_tag: string }>;
+  visual_atmosphere: string;
+  recommended_bgm: string;
+  recommended_format: "reel" | "long";
+  recommended_duration_sec: number;
+  polished_prompt: string;
+  latency_sec: number;
+  channel_learning_applied?: boolean;
+  chosen_structure?: string;
+  chosen_hook_type?: string;
+  channel_name?: string;
+}
+
 type Ctx = {
   /* playback */
   playing: boolean;
@@ -62,6 +79,9 @@ type Ctx = {
   /* viewer */
   ratio: Ratio;
   setRatio: (r: Ratio) => void;
+  fitMode: "cover" | "contain";
+  setFitMode: (m: "cover" | "contain") => void;
+  toggleFitMode: () => void;
   overlays: Record<string, boolean>;
   toggleOverlay: (k: string) => void;
   previewVideoUrl: string | null;
@@ -72,6 +92,9 @@ type Ctx = {
   selected: string | null;
   select: (id: string | null) => void;
   updateClip: (id: string, patch: Partial<Clip>) => void;
+  removeClip: (id: string) => void;
+  addClip: (clip: Clip) => void;
+  duplicateClip: (id: string) => void;
   pxPerSec: number;
   setPxPerSec: (v: number) => void;
 
@@ -98,6 +121,19 @@ type Ctx = {
     velocity: number;
   };
 
+  /* ai producer & facts */
+  producerPlan: ProducerPlan | null;
+  setProducerPlan: React.Dispatch<React.SetStateAction<ProducerPlan | null>>;
+  isAuditingTopic: boolean;
+  setIsAuditingTopic: React.Dispatch<React.SetStateAction<boolean>>;
+  metricsPanelCollapsed: boolean;
+  setMetricsPanelCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  auditAndEnrichTopic: (topic: string, format?: "reel" | "long") => Promise<ProducerPlan | null>;
+
+  /* channel intelligence */
+  activeChannelId: string;
+  setActiveChannelId: (id: string) => void;
+
   /* backend integration */
   projects: BackendProject[];
   activeProjectId: string | null;
@@ -113,12 +149,28 @@ type Ctx = {
   exportStatusText: string;
   mobileMenuOpen: boolean;
   setMobileMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  leftPanelCollapsed: boolean;
+  setLeftPanelCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  toggleLeftPanel: () => void;
   exportMaster: (opts?: { burnSubtitles?: boolean; style?: string; title?: string }) => Promise<void>;
   importVideo: (file: File) => Promise<void>;
+  importVideoUrl: (url: string, title?: string) => Promise<void>;
+  splitClipAtPlayhead: () => void;
+  applyJumpCutSilences: (silences: { start: number; end: number; duration: number }[]) => void;
+  insertTtsClip: (text: string, voice?: string) => Promise<void>;
   createVideo: (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => Promise<string | null>;
   deleteProject: (id: string) => Promise<void>;
   cancelCreation: () => Promise<void>;
   resumeProject: (taskId: string) => Promise<void>;
+  shortcutsModalOpen: boolean;
+  setShortcutsModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  importModalOpen: boolean;
+  setImportModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  silenceModalOpen: boolean;
+  setSilenceModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  theaterMode: boolean;
+  setTheaterMode: React.Dispatch<React.SetStateAction<boolean>>;
+  toggleTheaterMode: () => void;
 
   /* voice */
   selectedVoice: string;
@@ -157,12 +209,16 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [loop, setLoop] = useState(true);
 
   const [ratio, setRatio] = useState<Ratio>("9:16");
+  const [fitMode, setFitMode] = useState<"cover" | "contain">("cover");
+  const toggleFitMode = useCallback(() => {
+    setFitMode((m) => (m === "cover" ? "contain" : "cover"));
+  }, []);
   const [overlays, setOverlays] = useState<Record<string, boolean>>({
     safe: true,
     captions: true,
     grid: false,
     tracking: true,
-    scopes: true,
+    scopes: false,
   });
 
   const [clips, setClips] = useState<Clip[]>(CLIPS);
@@ -196,6 +252,42 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [exportProgress, setExportProgress] = useState<number | null>(null);
   const [exportStatusText, setExportStatusText] = useState<string>("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [silenceModalOpen, setSilenceModalOpen] = useState(false);
+  const [theaterMode, setTheaterMode] = useState(false);
+  const toggleLeftPanel = useCallback(() => {
+    setLeftPanelCollapsed((prev) => !prev);
+  }, []);
+  const toggleTheaterMode = useCallback(() => {
+    setTheaterMode((prev) => {
+      const next = !prev;
+      if (next) {
+        setLeftPanelCollapsed(true);
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        const active = document.activeElement;
+        const isEditing =
+          active &&
+          (active.tagName === "INPUT" ||
+            active.tagName === "TEXTAREA" ||
+            (active as HTMLElement).isContentEditable);
+        if (!isEditing) {
+          e.preventDefault();
+          toggleLeftPanel();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleLeftPanel]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const activeEsRef = useRef<EventSource | null>(null);
 
@@ -204,6 +296,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [subtitleStyle, setSubtitleStyle] = useState<string>("kinetic");
   const [subtitleFont, setSubtitleFont] = useState<string>("Inter Tight");
   const [isMuted, setIsMuted] = useState<boolean>(false);
+
+  /* AI Producer & Hard Facts state */
+  const [producerPlan, setProducerPlan] = useState<ProducerPlan | null>(null);
+  const [isAuditingTopic, setIsAuditingTopic] = useState<boolean>(false);
+  const [metricsPanelCollapsed, setMetricsPanelCollapsed] = useState<boolean>(false);
+  const [activeChannelId, setActiveChannelId] = useState<string>("UC_8-TffWIAoiUMMDfiMUm2Q");
 
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
@@ -243,9 +341,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   /* Voice selection with persistent localStorage */
   const [selectedVoice, setSelectedVoiceState] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("lumen_selected_voice") || "es-MX-JorgeNeural";
+      return localStorage.getItem("lumen_selected_voice") || "speechify:alejandro";
     }
-    return "es-MX-JorgeNeural";
+    return "speechify:alejandro";
   });
 
   const setSelectedVoice = useCallback(
@@ -419,9 +517,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         if (!res.ok) throw new Error("Proyecto no encontrado");
         const data = await res.json();
         const proj = data.project || {};
-        const title = proj.original_name || (proj.result && proj.result.title) || `Proyecto ${id}`;
+        const title = (proj.result && proj.result.title) || proj.title || proj.original_name || `Proyecto ${id}`;
         setActiveProjectId(id);
         setActiveProjectTitle(title);
+        const projRatio = proj.options?.aspect_ratio || proj.aspect_ratio || data.aspect_ratio;
+        if (projRatio === "16:9" || projRatio === "9:16" || projRatio === "1:1" || projRatio === "4:5") {
+          setRatio(projRatio as Ratio);
+        }
         if (typeof window !== "undefined") {
           try {
             localStorage.setItem("lumen_active_project", id);
@@ -476,29 +578,32 @@ export function EditorProvider({ children }: { children: ReactNode }) {
             });
           });
 
-          // 2. Pista V2: Tarjetas informativas y B-rolls
+          // 2. Pista V2: B-rolls y Tarjetas informativas separados individualmente
+          if (editor.brolls && editor.brolls.length > 0) {
+            editor.brolls.forEach((br: any, i: number) => {
+              mappedClips.push({
+                id: br.id || `broll-${i}`,
+                track: "v2",
+                start: typeof br.start === "number" ? br.start : 0,
+                duration: Math.max(1.5, br.duration || 4),
+                label: `B-Roll · ${br.concept || br.title || `Clip ${i + 1}`}`,
+                kind: "broll",
+                frame: br.card_url || br.thumb_url,
+                ai: true,
+              });
+            });
+          }
+
           if (editor.cards && editor.cards.length > 0) {
             editor.cards.forEach((cd: any, i: number) => {
               mappedClips.push({
                 id: cd.id || `card-${i}`,
                 track: "v2",
-                start: cd.start || 0,
-                duration: Math.max(1.8, Math.min(cd.duration || 3.5, 4.5)),
+                start: typeof cd.start === "number" ? cd.start : 0,
+                duration: Math.max(1.8, cd.duration || 4.5),
                 label: `Inserto · ${cd.headline || cd.title || "Dato clave"}`,
                 kind: "broll",
                 frame: cd.card_url,
-                ai: true,
-              });
-            });
-          } else if (editor.brolls && editor.brolls.length > 0) {
-            editor.brolls.forEach((br: any, i: number) => {
-              mappedClips.push({
-                id: br.id || `broll-${i}`,
-                track: "v2",
-                start: br.start || 0,
-                duration: br.duration || 3,
-                label: `B-Roll · ${br.concept || br.title || "Inserto"}`,
-                kind: "broll",
                 ai: true,
               });
             });
@@ -659,6 +764,25 @@ export function EditorProvider({ children }: { children: ReactNode }) {
             flash("¡Video creado y masterizado!");
             loadProjects();
             loadProject(taskId);
+            import("./youtubePublish")
+              .then(async (yp) => {
+                const auto = yp.readAutoPublish();
+                if (!auto.enabled) return;
+                const st = await yp.fetchYouTubeStatus();
+                if (!st.connected) return;
+                pushLog("Publicación automática en YouTube iniciada...", "ai");
+                flash("Publicando automáticamente en YouTube...");
+                const res = await yp.publishProject(taskId, {
+                  privacy: auto.privacy,
+                  onProgress: (pct, msg) => setCreateStatusMessage(`YouTube ${Math.round(pct)}%: ${msg}`),
+                });
+                pushLog(`Publicado en YouTube: ${res.videoUrl}`, "ai");
+                flash(`Publicado en YouTube: ${res.videoUrl}`);
+              })
+              .catch((err: any) => {
+                pushLog(`No se pudo publicar automáticamente: ${err?.message || err}`, "warn");
+                flash("No se pudo publicar automáticamente en YouTube");
+              });
           } else if (p.error) {
             es.close();
             activeEsRef.current = null;
@@ -874,87 +998,52 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const finalMp4Name = safeBase.toLowerCase().endsWith(".mp4") ? safeBase : `${safeBase}.mp4`;
 
       try {
-        setExportProgress(0);
-        setExportStatusText(burnSubs ? "Quemando subtítulos..." : "Conectando...");
-        pushLog(`Iniciando descarga: ${downloadTitle} (${burnSubs ? "Con subtítulos quemados" : "Video limpio"})...`, "info");
-        flash(`Preparando descarga de ${downloadTitle}...`);
+        setExportProgress(50);
+        setExportStatusText("Descargando...");
+        pushLog(`Iniciando descarga: ${downloadTitle} (${burnSubs ? "Con subtítulos" : "Video limpio"})...`, "info");
+        flash(`Preparando ${finalMp4Name}...`);
 
-        const downloadUrl = `/api/projects/${targetId}/download/${encodeURIComponent(finalMp4Name)}?burn_subtitles=${burnSubs ? "true" : "false"}&style=${encodeURIComponent(subStyle)}&v=${Date.now()}`;
-
-        // Fetch con streaming real para calcular el porcentaje real byte a byte
-        const response = await fetch(downloadUrl);
-        if (!response.ok) {
-          throw new Error(`El servidor respondió con código ${response.status}`);
-        }
-
-        const contentLengthHeader = response.headers.get("content-length");
-        const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
-
-        let blob: Blob;
-
-        if (response.body && typeof response.body.getReader === "function") {
-          const reader = response.body.getReader();
-          let loadedBytes = 0;
-          const chunks: Uint8Array[] = [];
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value) {
-              chunks.push(value);
-              loadedBytes += value.length;
-              if (totalBytes > 0) {
-                const pct = Math.min(99, Math.round((loadedBytes / totalBytes) * 100));
-                setExportProgress(pct);
-                const loadedMb = (loadedBytes / (1024 * 1024)).toFixed(1);
-                const totalMb = (totalBytes / (1024 * 1024)).toFixed(1);
-                setExportStatusText(`${pct}% (${loadedMb}/${totalMb} MB)`);
-              } else {
-                const loadedMb = (loadedBytes / (1024 * 1024)).toFixed(1);
-                setExportProgress(50);
-                setExportStatusText(`Descargando (${loadedMb} MB)...`);
-              }
-            }
-          }
-          blob = new Blob(chunks, { type: "video/mp4" });
-        } else {
-          blob = await response.blob();
-        }
-
-        setExportProgress(100);
-        setExportStatusText("¡Descarga completa!");
-
-        // 1. Guardar en disco del navegador inmediatamente con el Blob completo en memoria
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = finalMp4Name;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          a.remove();
-          URL.revokeObjectURL(blobUrl);
-        }, 5000);
-
-        pushLog(`✓ Video máster descargado a tu computadora: ${finalMp4Name}`, "ai");
-        flash(`¡Descarga completada!: ${finalMp4Name}`);
-
-        // 2. Si el servidor se ejecuta en la misma máquina local (localhost), también guardar copia directa
         const isLocalhost = typeof window !== "undefined" &&
           (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
+        // 1. En el mismo equipo: el servidor guarda el MP4 directo en Descargas con nombre real
+        let savedDirectly = false;
         if (isLocalhost) {
-          fetch(`/api/projects/${targetId}/export-to-downloads`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              burn_subtitles: burnSubs,
-              style: subStyle,
-              title: downloadTitle,
-            }),
-          }).catch(() => {});
+          try {
+            const r = await fetch(`/api/projects/${targetId}/export-to-downloads`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                burn_subtitles: burnSubs,
+                style: subStyle,
+                title: downloadTitle,
+              }),
+            });
+            const data = await r.json();
+            if (r.ok && data?.ok) {
+              savedDirectly = true;
+              pushLog(`✓ Video guardado en Descargas: ${data.path}`, "ai");
+              flash(`¡Guardado en Descargas!: ${data.filename}`);
+            }
+          } catch (_) {
+            savedDirectly = false;
+          }
         }
 
+        // 2. Otros dispositivos (celular) o si falló la copia local: descarga estándar del navegador
+        if (!savedDirectly) {
+          const downloadUrl = `/api/projects/${targetId}/download/${encodeURIComponent(finalMp4Name)}?burn_subtitles=${burnSubs ? "true" : "false"}&style=${encodeURIComponent(subStyle)}&v=${Date.now()}`;
+          const a = document.createElement("a");
+          a.href = downloadUrl;
+          a.download = finalMp4Name;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => a.remove(), 2500);
+          pushLog(`✓ Descargando video máster: ${finalMp4Name}`, "ai");
+          flash(`¡Descargando video!: ${finalMp4Name}`);
+        }
+
+        setExportProgress(100);
         setTimeout(() => {
           setExportProgress(null);
           setExportStatusText("");
@@ -1004,6 +1093,271 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     [pushLog, flash, selectedVoice, attachCreationStream],
   );
 
+  const importVideoUrl = useCallback(
+    async (url: string, title?: string) => {
+      const cleanUrl = url.trim();
+      if (!cleanUrl) {
+        flash("Ingresa una URL válida");
+        return;
+      }
+      try {
+        setIsUploading(true);
+        pushLog(`Iniciando importación remota: ${cleanUrl.slice(0, 50)}...`, "info");
+        flash(`Conectando con enlace...`);
+
+        const res = await fetch("/api/v1/videos/process-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            video_url: cleanUrl,
+            title: title || undefined,
+            voice: selectedVoice,
+            silence_threshold: 1.5,
+            enable_broll: true,
+            enable_captions: true,
+            enable_shorts: true,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || "Error al procesar URL remota");
+
+        const taskId = data.data?.task_id || data.task_id;
+        pushLog(`Descargando y procesando video (Tarea: ${taskId})...`, "ai");
+        flash(`Tarea ${taskId} en descarga remota`);
+        attachCreationStream(taskId);
+      } catch (err: any) {
+        setIsUploading(false);
+        pushLog(`Fallo al importar URL: ${err.message}`, "warn");
+        flash(`Error: ${err.message}`);
+      }
+    },
+    [pushLog, flash, selectedVoice, attachCreationStream],
+  );
+
+  const splitClipAtPlayhead = useCallback(() => {
+    setClips((prev) => {
+      let target = prev.find(
+        (c) => c.id === selected && time > c.start + 0.15 && time < c.start + c.duration - 0.15,
+      );
+
+      if (!target) {
+        target =
+          prev.find((c) => c.track === "v1" && time > c.start + 0.15 && time < c.start + c.duration - 0.15) ||
+          prev.find((c) => c.track === "v2" && time > c.start + 0.15 && time < c.start + c.duration - 0.15) ||
+          prev.find((c) => time > c.start + 0.15 && time < c.start + c.duration - 0.15);
+      }
+
+      if (!target) {
+        flash("Coloca el cabezal sobre un clip para dividirlo (S)");
+        return prev;
+      }
+
+      const splitPoint = Math.round(time * 100) / 100;
+      const firstDuration = Math.round((splitPoint - target.start) * 100) / 100;
+      const secondDuration = Math.round((target.duration - firstDuration) * 100) / 100;
+
+      if (firstDuration < 0.2 || secondDuration < 0.2) {
+        flash("El fragmento resultante es demasiado corto para dividir");
+        return prev;
+      }
+
+      const clipA: Clip = {
+        ...target,
+        duration: firstDuration,
+      };
+
+      const clipB: Clip = {
+        ...target,
+        id: `${target.id}-split-${Date.now().toString(36)}`,
+        start: splitPoint,
+        duration: secondDuration,
+        label: `${target.label} (Parte 2)`,
+      };
+
+      flash(`✂ Clip dividido en ${splitPoint.toFixed(1)}s`);
+      return prev.map((c) => (c.id === target!.id ? clipA : c)).concat(clipB);
+    });
+  }, [time, selected, flash]);
+
+  const applyJumpCutSilences = useCallback(
+    (silences: { start: number; end: number; duration: number }[]) => {
+      if (!silences || silences.length === 0) {
+        flash("No se detectaron pausas de silencio que requieran corte");
+        return;
+      }
+
+      const sortedSilences = [...silences].sort((a, b) => a.start - b.start);
+
+      setClips((prevClips) => {
+        let updatedClips = [...prevClips];
+
+        for (const silence of sortedSilences) {
+          const sStart = silence.start;
+          const sEnd = silence.end;
+          const sDur = silence.duration;
+          if (sDur <= 0.1) continue;
+
+          const nextClips: Clip[] = [];
+
+          for (const clip of updatedClips) {
+            const clipEnd = clip.start + clip.duration;
+
+            if (clipEnd <= sStart) {
+              nextClips.push(clip);
+            } else if (clip.start >= sEnd) {
+              nextClips.push({
+                ...clip,
+                start: Math.max(0, Math.round((clip.start - sDur) * 100) / 100),
+              });
+            } else {
+              if (sStart - clip.start >= 0.2) {
+                nextClips.push({
+                  ...clip,
+                  duration: Math.round((sStart - clip.start) * 100) / 100,
+                });
+              }
+              if (clipEnd - sEnd >= 0.2) {
+                nextClips.push({
+                  ...clip,
+                  id: `${clip.id}-cut-${Date.now().toString(36)}`,
+                  start: Math.max(0, Math.round(sStart * 100) / 100),
+                  duration: Math.round((clipEnd - sEnd) * 100) / 100,
+                });
+              }
+            }
+          }
+
+          updatedClips = nextClips;
+        }
+
+        const maxEnd = updatedClips.reduce((acc, c) => Math.max(acc, c.start + c.duration), 0);
+        if (maxEnd > 0) {
+          setDuration(Math.round(maxEnd));
+        }
+
+        const totalSaved = sortedSilences.reduce((acc, s) => acc + s.duration, 0);
+        flash(`✂ ¡Auto-JumpCut aplicado! Se eliminaron ${sortedSilences.length} pausas (${totalSaved.toFixed(1)}s reducidos)`);
+        pushLog(`Auto-JumpCut completado: ${sortedSilences.length} pausas eliminadas, ${totalSaved.toFixed(1)}s recortados.`, "ai");
+
+        return updatedClips;
+      });
+    },
+    [flash, pushLog],
+  );
+
+  const insertTtsClip = useCallback(
+    async (text: string, voice?: string) => {
+      const cleanText = text.trim();
+      if (!cleanText) {
+        flash("Escribe el texto que deseas sintetizar");
+        return;
+      }
+      const v = voice || selectedVoice || "es-MX-JorgeNeural";
+      try {
+        flash("Sintetizando locución neuronal...");
+        pushLog(`Sintetizando locución con ${v}...`, "ai");
+
+        const res = await fetch("/api/v1/tts/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: cleanText,
+            voice: v,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || "Error en síntesis TTS");
+
+        const estDuration = Math.max(2.0, Math.round((cleanText.length / 14) * 10) / 10);
+        const clipStart = Math.round(time * 10) / 10;
+
+        const newClip: Clip = {
+          id: `tts-${Date.now().toString(36)}`,
+          track: "a1",
+          start: clipStart,
+          duration: estDuration,
+          label: `Voz · ${cleanText.slice(0, 24)}${cleanText.length > 24 ? "..." : ""}`,
+          kind: "voice",
+          ai: true,
+        };
+
+        setClips((prev) => [...prev, newClip]);
+        setSelected(newClip.id);
+        flash(`✓ Locución añadida a la línea de tiempo en ${clipStart}s`);
+        pushLog(`Locución insertada en timeline (${estDuration}s)`, "ai");
+      } catch (err: any) {
+        flash(`Error al generar voz: ${err.message}`);
+        pushLog(`Error en locución: ${err.message}`, "warn");
+      }
+    },
+    [time, selectedVoice, flash, pushLog],
+  );
+
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      const isEditing =
+        active &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          (active as HTMLElement).isContentEditable);
+      if (isEditing) return;
+
+      if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+        e.preventDefault();
+        setShortcutsModalOpen((prev) => !prev);
+        return;
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        toggle();
+        return;
+      }
+
+      if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        seek(Math.max(0, time - 5));
+        return;
+      }
+
+      if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        pause();
+        return;
+      }
+
+      if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        seek(Math.min(duration, time + 5));
+        return;
+      }
+
+      if (e.key === "s" || e.key === "S" || e.key === "c" || e.key === "C") {
+        e.preventDefault();
+        splitClipAtPlayhead();
+        return;
+      }
+
+      if (e.key === "Home") {
+        e.preventDefault();
+        seek(0);
+        return;
+      }
+
+      if (e.key === "End") {
+        e.preventDefault();
+        seek(duration);
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalShortcuts);
+    return () => window.removeEventListener("keydown", handleGlobalShortcuts);
+  }, [toggle, seek, pause, time, duration, splitClipAtPlayhead]);
+
   const createVideo = useCallback(
     async (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => {
       const cleanTopic = topic.trim();
@@ -1048,6 +1402,41 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     },
     [ratio, selectedVoice, pushLog, flash, attachCreationStream],
+  );
+
+  const auditAndEnrichTopic = useCallback(
+    async (topic: string, format: "reel" | "long" = "reel") => {
+      const rawTopic = topic.trim();
+      if (!rawTopic) {
+        flash("Escribe primero un tema o idea para auditar y fundamentar con datos");
+        return null;
+      }
+      try {
+        setIsAuditingTopic(true);
+        setMetricsPanelCollapsed(false);
+        flash("Productor IA: Investigando datos reales y retención en la web...");
+        const res = await fetch("/api/ai-producer/enrich-and-audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic: rawTopic,
+            format: format,
+            channel_id: activeChannelId,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Error al auditar el tema");
+        setProducerPlan(data);
+        flash(`¡Auditoría lista en panel derecho! Retención: ${data.retention_score}/100`);
+        return data;
+      } catch (err: any) {
+        flash(`Aviso: ${err.message || "No se pudo auditar el tema"}`);
+        return null;
+      } finally {
+        setIsAuditingTopic(false);
+      }
+    },
+    [flash, activeChannelId],
   );
 
   /* ---------------- keyboard ---------------- */
@@ -1149,6 +1538,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     setLoop,
     ratio,
     setRatio,
+    fitMode,
+    setFitMode,
+    toggleFitMode,
     overlays,
     toggleOverlay: (k) => setOverlays((o) => ({ ...o, [k]: !o[k] })),
     previewVideoUrl,
@@ -1158,6 +1550,27 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     select: setSelected,
     updateClip: (id, patch) =>
       setClips((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c))),
+    removeClip: (id) => {
+      setClips((cs) => cs.filter((c) => c.id !== id));
+      setSelected((curr) => (curr === id ? null : curr));
+    },
+    addClip: (clip) => {
+      setClips((cs) => [...cs, clip]);
+      setSelected(clip.id);
+    },
+    duplicateClip: (id) => {
+      setClips((cs) => {
+        const item = cs.find((c) => c.id === id);
+        if (!item) return cs;
+        const newClip: Clip = {
+          ...item,
+          id: `${item.kind}-${Date.now().toString(36)}`,
+          start: Math.round((item.start + item.duration + 0.1) * 100) / 100,
+          label: `${item.label} (Copia)`,
+        };
+        return [...cs, newClip];
+      });
+    },
     pxPerSec,
     setPxPerSec,
     progress,
@@ -1183,12 +1596,28 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     exportStatusText,
     mobileMenuOpen,
     setMobileMenuOpen,
+    leftPanelCollapsed,
+    setLeftPanelCollapsed,
+    toggleLeftPanel,
     exportMaster,
     importVideo,
+    importVideoUrl,
+    splitClipAtPlayhead,
+    applyJumpCutSilences,
+    insertTtsClip,
     createVideo,
     deleteProject,
     cancelCreation,
     resumeProject,
+    shortcutsModalOpen,
+    setShortcutsModalOpen,
+    importModalOpen,
+    setImportModalOpen,
+    silenceModalOpen,
+    setSilenceModalOpen,
+    theaterMode,
+    setTheaterMode,
+    toggleTheaterMode,
     selectedVoice,
     setSelectedVoice,
     playingVoiceId,
@@ -1204,6 +1633,15 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     setIsMuted,
     toggleMute,
     setDuration,
+    activeChannelId,
+    setActiveChannelId,
+    producerPlan,
+    setProducerPlan,
+    isAuditingTopic,
+    setIsAuditingTopic,
+    metricsPanelCollapsed,
+    setMetricsPanelCollapsed,
+    auditAndEnrichTopic,
     flash,
     log,
     toast,

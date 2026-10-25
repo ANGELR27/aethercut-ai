@@ -62,15 +62,15 @@ export function ExportModal({
       {/* Click outside to close */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/12 bg-ink-950/95 p-5 sm:p-6 shadow-[0_25px_80px_rgba(0,0,0,0.85),0_0_80px_-20px_rgba(79,123,255,0.4)] backdrop-blur-2xl z-10 text-left">
-        {/* Glow ambient */}
-        <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-beam-500/15 blur-3xl" />
-        <div className="pointer-events-none absolute -left-20 -bottom-20 h-48 w-48 rounded-full bg-purple-500/10 blur-3xl" />
+      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/12 bg-ink-950/95 p-5 sm:p-6 shadow-[0_25px_80px_rgba(0,0,0,0.95)] backdrop-blur-2xl z-10 text-left">
+        {/* Glow ambient sutil */}
+        <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-white/[0.02] blur-3xl" />
+        <div className="pointer-events-none absolute -left-20 -bottom-20 h-48 w-48 rounded-full bg-white/[0.02] blur-3xl" />
 
         {/* Modal Header */}
         <div className="flex items-start justify-between pb-4 border-b border-white/[0.08]">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl border border-beam-400/30 bg-beam-500/15 text-beam-300 shadow-[0_0_20px_rgba(79,123,255,0.25)]">
+            <div className="grid h-10 w-10 place-items-center rounded-xl border border-white/15 bg-white/[0.05] text-white">
               <IconDownload className="h-5 w-5" />
             </div>
             <div>

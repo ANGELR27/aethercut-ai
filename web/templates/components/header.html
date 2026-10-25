@@ -36,8 +36,19 @@
         </button>
     </nav>
 
-    <!-- Barra de acciones superior derecha: Deshacer, Rehacer, Nube, Compartir, Exportar, Avatar -->
+    <!-- Barra de acciones superior derecha: Controles de Pilotos, Exportar, etc. -->
     <div class="prism-topbar-right">
+        <!-- Toggle Piloto Anime (Black Clover / Shonen) -->
+        <button type="button" class="prism-icon-btn" id="btnToggleAnimeAutopilot" title="Clic para Activar o Pausar la Creación de la Serie de Anime" style="width:auto; padding:5px 12px; gap:6px; border-radius:18px; font-size:11.5px; font-weight:700; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); color:#c084fc; cursor:pointer;">
+            <span>⚔️ Anime:</span>
+            <span id="animeAutopilotStateLabel">ACTIVO</span>
+        </button>
+
+        <!-- Lanzador Recorrido Universal -->
+        <button type="button" class="prism-icon-btn" id="btnRunUniversalTour" title="Lanzar ronda secuencial por todas las páginas y canales" style="width:auto; padding:5px 12px; gap:6px; border-radius:18px; font-size:11.5px; font-weight:700; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; cursor:pointer;">
+            <span>🌐 Todos los Canales</span>
+        </button>
+
         <button type="button" class="prism-icon-btn" id="btnUndoStudio" title="Deshacer">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
         </button>

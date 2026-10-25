@@ -172,7 +172,9 @@ class VideoRenderEngine:
             placed = mapper.map_first(cue.start_sec, cue.end_sec)
             if placed:
                 s = placed[0]
-                d = min(max(placed[1] - s, 3.0), 5.0, total - s)
+                # En los primeros 30 segundos (el gancho), B-Rolls más ágiles (2.0 a 3.5s)
+                max_broll_dur = 3.5 if s < 30.0 else 4.5
+                d = min(max(placed[1] - s, 2.0), max_broll_dur, total - s)
                 if d >= 1.5:
                     is_video = path.suffix.lower() in VIDEO_EXT
                     # las fotos ya llegan enmarcadas como tarjeta (photo_frame_path)
@@ -242,7 +244,7 @@ class VideoRenderEngine:
             if it["kind"] == "video":
                 cmd += ["-t", f"{d:.2f}", "-i", it["path"]]
                 chains.append(
-                    f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps={self.fps},"
+                    f"[{i}:v]scale={W}:{H}:flags=lanczos:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps={self.fps},"
                     f"format=yuva420p,fade=t=in:st=0:d=0.3:alpha=1,fade=t=out:st={fo:.2f}:d=0.35:alpha=1,"
                     f"setpts=PTS-STARTPTS+{s:.3f}/TB[o{i}]"
                 )

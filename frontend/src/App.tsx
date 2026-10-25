@@ -5,6 +5,9 @@ import { MetricsPanel, ActivityBar } from "@/components/MetricsPanel";
 import { PreviewStage, Transport } from "@/components/PreviewStage";
 import { Timeline } from "@/components/Timeline";
 import { TopBar } from "@/components/TopBar";
+import { KeyboardShortcutsModal } from "@/components/KeyboardShortcutsModal";
+import { ImportModal } from "@/components/ImportModal";
+import { SilenceModal } from "@/components/SilenceModal";
 import { cn } from "@/utils/cn";
 
 /* compact strip: métricas esenciales en pantallas sin panel derecho */
@@ -70,18 +73,21 @@ function CompactAI() {
 }
 
 function Shell() {
-  const { mobileMenuOpen, setMobileMenuOpen } = useEditor();
+  const {
+    mobileMenuOpen,
+    setMobileMenuOpen,
+    shortcutsModalOpen,
+    setShortcutsModalOpen,
+    importModalOpen,
+    setImportModalOpen,
+    silenceModalOpen,
+    setSilenceModalOpen,
+  } = useEditor();
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-ink-1000 text-white">
-      {/* ambient background */}
-      <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_-10%,#0a142c_0%,#05070c_45%,#030407_100%)]" />
-        <div className="absolute inset-0 grid-lines opacity-40" />
-        <div className="absolute -left-32 top-1/4 h-[420px] w-[420px] rounded-full bg-beam-500/[0.09] blur-[130px] anim-breathe" />
-        <div className="absolute -right-24 bottom-0 h-[380px] w-[380px] rounded-full bg-abyss-600/45 blur-[130px]" />
-        <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/60 to-transparent" />
-      </div>
+      {/* fondo negro sólido */}
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-black" />
 
       <TopBar />
 
@@ -131,6 +137,20 @@ function Shell() {
           </div>
         </div>
       )}
+
+      {/* Modales de herramientas profesionales */}
+      <KeyboardShortcutsModal
+        isOpen={shortcutsModalOpen}
+        onClose={() => setShortcutsModalOpen(false)}
+      />
+      <ImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+      />
+      <SilenceModal
+        isOpen={silenceModalOpen}
+        onClose={() => setSilenceModalOpen(false)}
+      />
 
       <ActivityBar />
     </div>

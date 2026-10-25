@@ -55,6 +55,9 @@ class VisualAnalyzer:
             print(f"[VisualAnalyzer] OpenCV no está disponible: {exc}")
             return 0
 
+        if not hasattr(cv2, "CascadeClassifier") or not hasattr(cv2, "data") or not hasattr(cv2.data, "haarcascades"):
+            return 0
+
         cascade_dir = Path(cv2.data.haarcascades)
         classifiers = []
         for name in ["haarcascade_frontalface_alt2.xml", "haarcascade_frontalface_default.xml", "haarcascade_profileface.xml"]:
@@ -123,6 +126,8 @@ class VisualAnalyzer:
         try:
             import cv2
         except Exception:
+            return 0.5
+        if not hasattr(cv2, "CascadeClassifier") or not hasattr(cv2, "data") or not hasattr(cv2.data, "haarcascades"):
             return 0.5
         cascade_dir = Path(cv2.data.haarcascades)
         classifiers = []

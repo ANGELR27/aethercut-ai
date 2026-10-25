@@ -13,7 +13,7 @@ from cancellation import CancellationRequested
 # modelo que respondió y conservamos los demás para recuperarnos de una caída.
 # 3.8 agotó el tiempo incluso con una consulta mínima durante la comprobación
 # del 2026-10-05. Se excluye del camino crítico para no atascar cada proyecto.
-FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-3.1-flash-lite"]
+FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest"]
 
 
 def safe_log(msg: str) -> None:
@@ -130,7 +130,7 @@ class LLMClient:
                  client=None, cancel_event=None, max_models: Optional[int] = None,
                  deadline_sec: Optional[float] = None, thinking_budget: Optional[int] = None) -> str:
         def report(message: str) -> None:
-            if progress:
+            if callable(progress):
                 try:
                     progress(message)
                 except Exception as exc:
@@ -163,7 +163,7 @@ class LLMClient:
                     if cancel_event is not None and cancel_event.is_set():
                         raise CancellationRequested()
                     remaining = deadline - time.monotonic()
-                    if remaining <= 10.0:
+                    if remaining <= 2.0:
                         break
                     try:
                         report(f"Enviando solicitud a Gemini ({model}, intento {attempt}/{attempts_per_model}).")
@@ -265,13 +265,15 @@ class LLMClient:
                     "max_tokens": 12000,
                 }
                 if "nemotron" in m.lower():
-                    create_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+                    create_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": not json_mode}}
                 elif "kimi" in m.lower():
                     create_kwargs["temperature"] = 0.7
 
                 response = client.chat.completions.create(**create_kwargs)
                 msg = response.choices[0].message
-                text = (msg.content or getattr(msg, "reasoning_content", "") or "").strip()
+                content_text = (msg.content or "").strip()
+                reasoning_text = (getattr(msg, "reasoning_content", "") or "").strip()
+                text = content_text or reasoning_text
                 if text:
                     self.last_model_used = f"nvidia:{m}"
                     safe_log(f"[LLM] Respuesta exitosa obtenida desde NVIDIA ({m}).")

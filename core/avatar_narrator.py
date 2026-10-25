@@ -18,7 +18,7 @@ import edge_tts
 
 from core.models import InfoCard
 
-DEFAULT_VOICE = "es-ES-AlvaroNeural"   # Voz preferida: Álvaro divulgación tecnológica y natural
+DEFAULT_VOICE = "speechify:alejandro"   # Voz predeterminada: Alejandro Speechify (con failover automático si no hay créditos)
 VOICE_MEXICO = "es-MX-JorgeNeural"     # Voz conversacional mexicana
 VOICE_LATINO = "es-US-AlonsoNeural"    # Voz neutra estilo locutor internacional
 VOICE_COLOMBIA = "es-CO-GonzaloNeural" # Voz neutra colombiana
@@ -44,13 +44,13 @@ class AvatarNarrator:
             if correction:
                 corr_clean = re.sub(r'[\.\,]+$', '', correction)
                 templates = [
-                    f"¡Ojo amiguito! Se te acaba de escapar un dato que no es tan cierto: sobre {clean_headline}, los registros oficiales demuestran que {corr_clean}. ¡Dato mata relato!",
-                    f"¡Ojo amiguito, suena poético el discurso, pero la realidad tiene otros planes! Para {clean_headline}, los datos confirman que {corr_clean}. ¡Se nos cayó la teoría en vivo!",
-                    f"¡Ojo ahí, frenemos los caballos un segundo! Venía invicto el argumento, pero la evidencia oficial prueba que {corr_clean}. ¡Dato mata relato!",
+                    f"¡Un momento! Ese dato sobre {clean_headline} no coincide con la realidad: los registros verificados demuestran que {corr_clean}. Es un detalle crucial.",
+                    f"Atención a esta afirmación: respecto a {clean_headline}, los datos oficiales confirman que {corr_clean}. Es un giro que cambia la perspectiva.",
+                    f"Miren este detalle: sobre {clean_headline}, la información documentada prueba que {corr_clean}. Siempre conviene revisar la fuente directa.",
                 ]
                 idx = abs(hash(card.card_id or clean_headline)) % len(templates)
                 return templates[idx]
-            return f"¡Ojo amiguito! Se te escapó un dato que no es tan cierto: sobre {clean_headline}, los registros oficiales desmienten totalmente esa conclusión. ¡Dato mata relato!"
+            return f"¡Atención ahí! Sobre {clean_headline}, los registros oficiales contradicen totalmente esa conclusión. Conviene contrastar la evidencia."
 
         # 2. Cifra o estadística clave
         if card.stat_value:
@@ -58,8 +58,8 @@ class AvatarNarrator:
             detail = card.body or card.claim
             detail_short = " ".join(detail.split()[:14]).rstrip(".,;") if detail else ""
             templates = [
-                f"¡Paren las rotativas un segundo! El número real que define esto es {stat}: {detail_short}. Un dato demoledor que cambia toda la película.",
-                f"Ojo con el cálculo ahí: las métricas oficiales confirman {stat} para {clean_headline}. Cifra mata discurso, mi gente.",
+                f"Fíjense en esta cifra sorprendente: el número real para {clean_headline} es {stat}. {detail_short}. Es el dato que pone todo en perspectiva.",
+                f"Miren este número insólito: las métricas oficiales marcan {stat} en {clean_headline}. Una cifra concreta que deja las cosas claras.",
             ]
             idx = abs(hash(card.card_id or stat)) % len(templates)
             return templates[idx]
@@ -71,26 +71,26 @@ class AvatarNarrator:
                 detail = card.body or card.claim
                 detail_short = " ".join(detail.split()[:14]).rstrip(".,;") if detail else ""
                 templates = [
-                    f"¡Tal cual! Y para reforzar la idea: hay un dato clave que se le escapó al orador. Sobre {clean_headline}: {detail_short}. ¡Punto extra para el análisis!",
-                    f"¡Exacto amigazo! Y súmale esto que pocos saben: sobre {clean_headline}, los registros confirman que {detail_short}. La realidad termina de sellar el punto.",
-                    f"¡Pará la oreja ahí! El orador tiene toda la razón, y para ponerle la firma: {detail_short}. ¡Dato mata relato, mi gente!",
+                    f"Totalmente acertado. Y hay un dato fascinante que pocos conocen sobre {clean_headline}: {detail_short}. Aporta muchísimo valor al debate.",
+                    f"Exacto, y súmenle esta curiosidad clave: sobre {clean_headline}, los registros confirman que {detail_short}. Refuerza perfectamente el punto.",
+                    f"Buen apunte, y para sumar aún más contexto: {detail_short}. Los hechos reales terminan de confirmar la idea.",
                 ]
                 idx = abs(hash(card.card_id or clean_headline)) % len(templates)
                 return templates[idx]
             if kind in ("ley", "normativa", "articulo"):
-                return f"¡Bien ahí! Por fin alguien que le atina a las normas: {clean_headline} está 100% blindado por el marco legal vigente. Punto para el expositor."
-            return f"¡Exacto amigazo! Punto clavado y con sustento: los estudios técnicos y registros oficiales respaldan plenamente {clean_headline}. Así da gusto debatir."
+                return f"Un acierto total: {clean_headline} está respaldado al cien por ciento por el marco legal vigente. Punto clave para el análisis."
+            return f"Exactamente: los estudios técnicos y registros oficiales respaldan plenamente {clean_headline}. Así da gusto profundizar en el tema."
 
         # 4. Evidencia insuficiente / mito sin sustento
         if verdict == "insufficient":
             templates = [
-                f"¡Ojo amiguito! Suena muy convincente en el micrófono, pero no hay ni un solo estudio ni registro oficial que sustente {clean_headline}. Pura fe y cero evidencia.",
-                f"Mucho entusiasmo en esa frase, pero cuidado: ni en los reportes oficiales encontramos sustento para semejante afirmación. Quedó en jaque la teoría.",
+                f"Curioso punto, pero ojo: no existe ningún registro oficial ni estudio científico que sustente {clean_headline}. Conviene tomarlo con pinzas.",
+                f"Suena llamativo en el discurso, pero en los reportes contrastados no hay evidencia de semejante afirmación. Queda en duda la hipótesis.",
             ]
             idx = abs(hash(card.card_id or clean_headline)) % len(templates)
             return templates[idx]
 
-        return f"¡Un apunte clave ahí, mi gente! Sobre {clean_headline}, los datos y análisis técnicos confirman la jugada. Seguimos atentos."
+        return f"Un dato muy interesante: sobre {clean_headline}, los registros verificados confirman el punto. Sigamos atentos."
 
     async def craft_dialogue_with_ai(
         self,
@@ -118,23 +118,23 @@ EVIDENCIA Y DATOS TÉCNICOS VERIFICADOS:
 - Veredicto de los datos: {card.verdict}
 
 TU MISIÓN:
-Crear una intervención hablada CORTA, AMIGABLE, CHISTOSA, IRÓNICA Y MUY ENRIQUECEDORA (entre 20 y 35 palabras, 1 o 2 oraciones).
+Crear una intervención hablada CORTA, AMIGABLE, CURIOSA Y SORPRENDENTE (entre 20 y 35 palabras, 1 o 2 oraciones con pausas naturales).
 
-ESTRUCTURA OBLIGATORIA (CON CHISPA Y JUEGUITO):
-1. GANCHO SEGÚN EL CASO:
-   - Si es corrección/error: "¡Ojo amiguito! Se te acaba de escapar un dato que no es tan cierto...", "Suena poético el discurso, pero la realidad y los números tienen otros planes...", "¡Paren las rotativas un segundo! Venía invicto el argumento hasta que..."
-   - Si es COMPLEMENTO / REFUERZO DE DATOS (el orador tiene razón o plantea un buen tema): "¡Tal cual! Y para reforzar la idea, ojo al dato clave que se le escapó al orador...", "¡Exacto amigazo! Y súmale esto que pocos saben sobre el tema...", "¡Punto clave! Y para ponerle la firma al argumento, mira este dato demoledor..."
-2. EL DATO INCREÍBLE / ENRIQUECEDOR:
-   - Introduce un dato contundente, una cifra reveladora o una fuente de peso que sustente o complemente el punto (ej. estudios científicos, la NASA, organismos oficiales, el Código Penal, muestreos de China/EE.UU., o estadísticas de impacto).
-3. REMATE CON JUEGUITO / PUNTADA FINAL:
-   - "¡Dato mata relato, mi gente!"
-   - "¡Punto extra para el análisis!"
-   - "La realidad termina de sellar el punto."
-   - "¡Se nos cayó la teoría en vivo!" (solo si es refutación).
+ESTRUCTURA OBLIGATORIA:
+1. GANCHO NATURAL E INTRIGANTE:
+   - Si es corrección/error: "¡Un momento! Ese dato no coincide con los registros...", "Ojo con esa conclusión: la realidad documentada muestra algo muy diferente..."
+   - Si es COMPLEMENTO / REFUERZO DE DATOS: "Exactamente, y hay un detalle fascinante que pocos conocen...", "Buen apunte, y súmenle esta curiosidad que pone todo en perspectiva..."
+2. EL DATO SORPRENDENTE / REVELACIÓN:
+   - Introduce un dato concreto, una cifra exacta o una comparación insólita que despierte la curiosidad del espectador.
+3. REMATE LIMPIO Y CONVERSACIONAL:
+   - "Un detalle clave para entender el panorama."
+   - "Los hechos documentados hablan por sí solos."
+   - "Un giro que cambia por completo el análisis."
 
 REGLAS ESTRICTAS:
-- No seas acartonado, formal ni aburrido. Usa lenguaje fresco, amigable y con picardía.
-- Máximo 35 palabras.
+- Cero relleno pomposo, cero frases complejas vacías ("marco empírico", "confluencia de factores").
+- Cero diminutivos paternalistas ("amiguito"). Escribe como un divulgador inteligente conversando en un podcast.
+- Máximo 35 palabras, oraciones directas de 8 a 14 palabras con comas y pausas para respirar.
 - Devuelve ÚNICAMENTE la frase exacta que KAI dirá en voz alta, sin comillas, sin explicaciones ni prefijos."""
 
         try:
@@ -154,9 +154,18 @@ REGLAS ESTRICTAS:
 
         return self.craft_dialogue(card)
 
-    async def synthesize(self, text: str, out_path: Path, voice: Optional[str] = None) -> Tuple[Path, float]:
-        """Genera el archivo de audio MP3 y devuelve su duración exacta en segundos con entonación natural."""
+    async def synthesize(
+        self,
+        text: str,
+        out_path: Path,
+        voice: Optional[str] = None,
+        rate: Optional[str] = None,
+        pitch: Optional[str] = None,
+    ) -> Tuple[Path, float]:
+        """Genera el archivo de audio MP3 y devuelve su duración exacta en segundos con entonación y cadencia natural."""
         chosen_voice = voice or self.voice or DEFAULT_VOICE
+        effective_rate = rate or "-2%"
+        effective_pitch = pitch or "+0Hz"
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         from utils.speech_normalizer import normalize_speech_for_tts
@@ -242,11 +251,12 @@ REGLAS ESTRICTAS:
         except Exception:
             pass
 
-        # 1. Intentar edge-tts prioritario para voces neuronales exactas (es-MX-JorgeNeural, es-US-AlonsoNeural, etc.)
-        if not generated and not chosen_voice.startswith("speechify:"):
+        # 1. Intentar edge-tts prioritario o como respaldo si Speechify se quedó sin créditos o falló
+        if not generated:
+            edge_fallback = chosen_voice if not chosen_voice.startswith("speechify:") else "es-MX-JorgeNeural"
             try:
-                communicate = edge_tts.Communicate(content_text, chosen_voice, rate="+0%")
-                await asyncio.wait_for(communicate.save(str(out_path)), timeout=12.0)
+                communicate = edge_tts.Communicate(content_text, edge_fallback, rate=effective_rate, pitch=effective_pitch)
+                await asyncio.wait_for(communicate.save(str(out_path)), timeout=35.0)
                 if out_path.exists() and out_path.stat().st_size > 500:
                     generated = True
             except Exception:

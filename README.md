@@ -99,7 +99,19 @@ La prueba crea un clip temporal, revisa el análisis de audio y de escena, gener
 - `core/asset_providers.py` y `core/fact_checker.py`: recursos visuales y verificación de datos.
 - `core/render_engine.py`: cortes, subtítulos, overlays y exportación de Shorts con FFmpeg.
 - `web/`: interfaz, estilos y JavaScript del navegador.
+- `api/`: API RESTful v1 pública, SSE y Webhooks para aplicaciones externas.
+- `API_DOCUMENTATION.md`: especificación técnica completa y ejemplos de integración.
 - `main_fase*_test.py`: demos manuales de fases; algunas pueden llamar servicios externos y necesitar archivos o claves.
+
+## API RESTful v1 y Webhooks
+
+AetherCut AI incluye una API RESTful completa bajo el prefijo `/api/v1` para conectar cualquier aplicación externa (móviles, bots de Discord/Telegram, microservicios, o automatizaciones en n8n, Make y Zapier):
+
+- **Portal para Desarrolladores**: [http://127.0.0.1:8000/api/v1/docs](http://127.0.0.1:8000/api/v1/docs)
+- **Documentación Interactiva Swagger**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **Especificación Técnica Completa**: consulta [API_DOCUMENTATION.md](file:///C:/Users/angel/.gemini/antigravity-ide/scratch/ai-video-editor/API_DOCUMENTATION.md)
+
+Permite ingesta por archivo o URL remota, generación autónoma de videos, consulta en tiempo real vía SSE, extracción de Shorts 9:16, síntesis de voz TTS, radar viral y descargas directas con notificaciones webhook automáticas.
 
 ## Solución de problemas
 

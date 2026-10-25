@@ -34,9 +34,61 @@ def refine_speech_cadence(text: str) -> str:
     #    Los puntos suspensivos '...' se conservan: son pausa dramática intencional.
     clean = re.sub(r'([!?])\1+', r'\1', clean)
 
-    # 5. Punto pegado a la palabra siguiente: 'frase.Siguiente' → 'frase. Siguiente'
+    # 5. Punto y coma reemplazado por punto para dar pausa respiratoria real en TTS
+    clean = re.sub(r';\s*', '. ', clean)
+
+    # 6. Punto pegado a la palabra siguiente: 'frase.Siguiente' → 'frase. Siguiente'
     #    (solo si sigue letra: nunca rompe decimales '3.14' ni siglas con puntos).
     clean = re.sub(r'\.(?=[A-ZÁÉÍÓÚÑ])', '. ', clean)
+
+    # 7. Dos puntos con espacio asegurado para pausa prosódica
+    clean = re.sub(r':(?=[^\s\d])', ': ', clean)
+
+    # 8. Micro-pausas respiratorias en marcadores discursivos orales clave
+    discourse_markers_comma = [
+        "sin embargo", "por lo tanto", "por eso", "en realidad",
+        "de hecho", "es decir", "por ejemplo", "en consecuencia",
+        "pero ojo", "ojo con esto", "y lo más curioso", "ahora bien",
+        "al mismo tiempo", "en paralelo", "por otra parte"
+    ]
+    for marker in discourse_markers_comma:
+        # Si el marcador está al inicio de frase o tras puntuación, y no le sigue coma/punto
+        clean = re.sub(
+            rf'(?i)(\b|^|\.\s+|\!\s+|\?\s+)({re.escape(marker)})(?!\s*[,:;.!?])',
+            r'\1\2,',
+            clean
+        )
+
+    discourse_markers_colon = [
+        "miren esto", "fíjense en esto", "atención a esto",
+        "el resultado", "la clave", "un detalle fascinante",
+        "miren lo que dijo", "escuchen lo que dijo", "escuchen sus declaraciones",
+        "esto fue lo que afirmó", "atención a sus palabras", "en sus propias palabras",
+        "escuchen con atención", "miren sus declaraciones", "vean lo que sucedió",
+        "escuchémoslo", "escuchen esto"
+    ]
+    for marker in discourse_markers_colon:
+        clean = re.sub(
+            rf'(?i)(\b|^|\.\s+|\!\s+|\?\s+)({re.escape(marker)})(?!\s*[,:;.!?])',
+            r'\1\2:',
+            clean
+        )
+
+    # 9. Romper oraciones corridas excesivamente largas (>16 palabras sin pausa) antes de conjunciones
+    words = clean.split()
+    if len(words) > 16:
+        # Insertar coma antes de conjunciones coordinadas o subordinadas si la cláusula previa es larga
+        # Evitar crear ',,' o ', ,'
+        clean = re.sub(
+            r'(\b\w+\b(?:\s+\b\w+\b){9,18})\s+(pero|porque|ya que|mientras que|lo que|lo cual)\s+',
+            r'\1, \2 ',
+            clean,
+            flags=re.IGNORECASE
+        )
+
+    # Limpieza final de posibles comas redundantes generadas
+    clean = re.sub(r'\s*,\s*,+', ', ', clean)
+    clean = re.sub(r'\s{2,}', ' ', clean)
 
     return clean
 
@@ -106,6 +158,33 @@ def clean_premature_farewells(text: str) -> str:
     return clean
 
 
+def enhance_speech_emphasis(text: str) -> str:
+    """
+    Convierte marcas de énfasis de guion (*palabra*, [énfasis: ...]) en
+    puntuación prosódica natural (dos puntos suspensivos y exclamación limpia)
+    para que las voces neuronales de Edge-TTS / Azure pronuncien con relieve,
+    fuerza y peso acústico humano en los momentos clave.
+    """
+    if not text:
+        return ""
+
+    clean = text
+
+    # 1. Convertir asteriscos estilo markdown (*palabra* o **frase**) en exclamación prosódica
+    clean = re.sub(r'\*{1,2}([^*]+?)\*{1,2}', r'¡\1!', clean)
+
+    # 2. Convertir etiquetas explícitas [énfasis: ...] o [fuerte: ...]
+    clean = re.sub(r'\[(?:énfasis|enfasis|fuerte|impacto):\s*([^\]]+)\]', r': ¡\1!', clean, flags=re.IGNORECASE)
+
+    # 3. Limpieza de puntuación accidental redundante
+    clean = re.sub(r'¡{2,}', '¡', clean)
+    clean = re.sub(r'!{2,}', '!', clean)
+    clean = re.sub(r':\s*:', ':', clean)
+    clean = re.sub(r'\s{2,}', ' ', clean)
+
+    return clean.strip()
+
+
 def normalize_speech_for_tts(text: str, is_final_scene: bool = True) -> str:
     """
     Normalización limpia y de alta fidelidad para Edge-TTS:
@@ -114,7 +193,8 @@ def normalize_speech_for_tts(text: str, is_final_scene: bool = True) -> str:
     - Elimina despedidas prematuras en escenas intermedias si is_final_scene es False.
     - Convierte porcentajes fonéticamente ('25%' -> '25 por ciento').
     - Limpia siglas con guiones para pronunciación fluida ('A-D-N' -> 'ADN').
-    - Limpia comas accidentales sin insertar pausas artificiales mecánicas.
+    - Aplica modulación de énfasis prosódico natural en palabras clave.
+    - Pulir cadencia sin introducir frenadas o cortes en seco.
     """
     if not text:
         return ""
@@ -135,6 +215,9 @@ def normalize_speech_for_tts(text: str, is_final_scene: bool = True) -> str:
 
     # Normalizar porcentaje para lectura fonética correcta
     text = re.sub(r"(\d+)\s*%", r"\1 por ciento", text)
+
+    # Incorporar marcas de relieve y énfasis prosódico
+    text = enhance_speech_emphasis(text)
 
     # Pulir cadencia sin introducir frenadas o cortes en seco
     text = refine_speech_cadence(text)

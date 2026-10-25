@@ -148,6 +148,7 @@ class StreamerOptions:
     visual_mode: str = "mixed"     # mixed | svg (animaciones vectoriales propias) | stock (b-roll)
     enable_broll: bool = True
     enable_cards: bool = True
+    enable_avatar: bool = True
     extra_notes: str = ""          # Indicaciones libres del usuario para el director
     flash_audit: bool = True       # Auditoría editorial con GLM-5.3-flash
     # === MODO ANÁLISIS DE CASO ===
@@ -179,6 +180,24 @@ def build_creative_hints(options: "StreamerOptions") -> str:
         hints.append("NO uses escenas 'video_reaction' con B-Roll de stock.")
     if not options.enable_cards:
         hints.append("NO uses escenas 'card_focus' (tarjetas Bento); apoya los datos con la voz y los gráficos vectoriales.")
+
+    # Desactivación total y permanente de anime para blindar todos los canales
+    is_anime_opts = False
+
+    # Detección de producción de Cine Cristiano & Escenas Bíblicas (Huellas Sagradas)
+    is_christian_opts = (
+        getattr(options, "origin", "") in ("universal_tour_huellas", "huellas_sagradas", "cristiano_cine")
+        or any(k in (options.topic or "").lower() for k in ("cristiano", "cristiana", "bíblico", "biblico", "bíblica", "biblica", "jesús", "jesus", "huellas sagradas", "hacksaw ridge", "war room", "the shack", "la cabaña", "ben-hur", "pasión de cristo", "pasion de cristo", "diez mandamientos", "dios"))
+        or any(k in (options.extra_notes or "").lower() for k in ("cine cristiano", "fe", "pelicula cristiana", "películas cristianas", "escena bíblica"))
+    )
+    if is_christian_opts:
+        hints.append(
+            "ESTILO CINE CRISTIANO & ESCENAS BÍBLICAS OBLIGATORIO: "
+            "B-Roll enfocado en metraje cinematográfico de la película, escena bíblica o corto conmovedor referenciado (1080p, tono épico/emotivo). "
+            "CERO personas de oficina, tecnología moderna o entrevistas de noticias genéricas. "
+            "La narración debe ser profunda, conmovedora y reflexiva, con la voz pausada y cálida de Alejandro, cerrando con una lección de esperanza y fe."
+        )
+
     if (options.extra_notes or "").strip():
         hints.append(f"INDICACIONES DEL USUARIO (obligatorias): {options.extra_notes.strip()[:600]}")
     if not hints:
@@ -235,9 +254,10 @@ class StreamerPipeline:
         # REALES y analizarlos con Gemini ANTES de dirigir. Los frames quedan en
         # workdir/case_frames para que scene_engine los use como fondos.
         case_frames: List[Dict[str, Any]] = []
+        case_soundbites: List[Dict[str, Any]] = []
         source_url = str(getattr(self.options, "source_video_url", "") or "").strip()
         if source_url and source_url.lower() not in ("none", "null"):
-            case_frames = await self._prepare_case_media(source_url)
+            case_frames, case_soundbites = await self._prepare_case_media(source_url)
 
         if not plan:
             # 1. Investigación Web
@@ -258,19 +278,38 @@ class StreamerPipeline:
                 duration_target=self.options.duration_sec,
                 style_instructions=style_instructions,
                 case_frames=case_frames,
+                case_soundbites=case_soundbites,
             )
 
-        # Auditoría editorial y optimización de escenas con GLM-5.3-flash (solo para producciones nuevas)
+        # Auditoría editorial crítica y optimización de escenas con DeepSeek Flash (Supervisor Editor)
         if not is_resumed_plan:
             try:
                 from core.review_critic import FlashContentReviewer
                 reviewer = FlashContentReviewer()
                 if reviewer.available and getattr(self.options, "flash_audit", True):
-                    self._state("script", 32.0, "⚡ GLM-5.3-flash auditando guión, locución y recursos visuales...")
+                    self._state("script", 32.0, "🧐 DeepSeek Flash auditando guión, locución y recursos visuales...")
                     plan_dict = reviewer.review_and_optimize_plan(plan.to_dict(), self.options.topic)
                     plan = DirectorBroadcastPlan.from_dict(plan_dict)
             except Exception as _rev_err:
-                safe_log(f"[Streamer] Aviso en auditoría GLM-5.3-flash: {_rev_err}")
+                safe_log(f"[Streamer] Aviso en auditoría DeepSeek Flash: {_rev_err}")
+
+        # Optimizar y corregir el título para YouTube (alta curiosidad, sin faltas ortográficas, <= 95 caracteres)
+        try:
+            from core.youtube_title_optimizer import optimize_youtube_title
+            optimized_title = optimize_youtube_title(
+                raw_topic=self.options.topic,
+                style=self.options.style,
+                duration_sec=self.options.duration_sec,
+                existing_plan_title=plan.title,
+            )
+            if optimized_title:
+                plan.title = optimized_title
+                if self.project_store:
+                    self.project_store.write({"title": optimized_title, "original_name": optimized_title})
+                self._state("script", 35.0, f"Título de YouTube optimizado: «{optimized_title}»", title=optimized_title, file_name=optimized_title)
+                safe_log(f"[Streamer] 🏷️ Título de YouTube perfeccionado: «{optimized_title}»")
+        except Exception as _t_err:
+            safe_log(f"[Streamer] Aviso en optimización de título YouTube: {_t_err}")
 
         # Guardar plan en workdir y en project_store inmediatamente
         try:
@@ -284,17 +323,24 @@ class StreamerPipeline:
             raise asyncio.CancelledError()
 
         # 3. Renderizado del Avatar Animado (Loop dinámico fluido con transparencia alfa perfecta)
+        is_documentary = (
+            getattr(self.options, "origin", "") in ("geopolitics_nucleo", "the_deep_dife", "universal_tour_huellas", "documental")
+            or not getattr(self.options, "enable_avatar", True)
+        )
         avatar_clip = self.workdir / "kai_avatar.mov"
-        if not (avatar_clip.exists() and avatar_clip.stat().st_size > 50000):
-            self._state("avatar", 45.0, "Animando expresiones, respiración y lip-sync de KAI...")
-            await asyncio.to_thread(
-                self.avatar_rnd.render_reaction_clip,
-                6.0,
-                avatar_clip,
-                fps=24
-            )
+        if not is_documentary:
+            if not (avatar_clip.exists() and avatar_clip.stat().st_size > 50000):
+                self._state("avatar", 45.0, "Animando expresiones, respiración y lip-sync de KAI...")
+                await asyncio.to_thread(
+                    self.avatar_rnd.render_reaction_clip,
+                    6.0,
+                    avatar_clip,
+                    fps=24
+                )
+            else:
+                safe_log("[Streamer] Reusando loop dinámico de avatar KAI existente.")
         else:
-            safe_log("[Streamer] Reusando loop dinámico de avatar KAI existente.")
+            safe_log("[Streamer] 🎬 Modo Documental/Geopolítica: Avatar desactivado para dar prioridad 100% al metraje de archivo y mapas.")
 
         if self.cancel_event.is_set():
             raise asyncio.CancelledError()
@@ -328,6 +374,23 @@ class StreamerPipeline:
         )
         safe_log(f"[StyleDirector] 🎨 Paleta seleccionada: {theme_spec['name']} ({theme_spec['primary']} / {theme_spec['accent']}) | Tipografía/Subtítulos: {theme_spec['sub_style']}")
 
+        # Curador Inteligente de Audio: seleccionar o descargar automáticamente la mejor pista de YouTube Audio Library
+        chosen_bgm = getattr(self.options, 'bgm_track', 'default')
+        if chosen_bgm != "silent":
+            try:
+                from core.youtube_audio import async_download_best_audio_for_topic
+                pref_mood = None if chosen_bgm in ("default", "auto") else chosen_bgm
+                auto_bgm = await async_download_best_audio_for_topic(
+                    topic=self.options.topic,
+                    style=self.options.style,
+                    preferred_mood=pref_mood,
+                )
+                if auto_bgm and auto_bgm.exists():
+                    chosen_bgm = str(auto_bgm)
+                    safe_log(f"[StreamerPipeline] 🎶 Pista adaptada de YouTube Audio Library: {auto_bgm.name}")
+            except Exception as bgm_err:
+                safe_log(f"[StreamerPipeline] Fallback a audio estándar: {bgm_err}")
+
         scene_engine = SceneEngine(
             workdir=self.workdir,
             aspect_ratio=self.options.aspect_ratio,
@@ -342,8 +405,13 @@ class StreamerPipeline:
             audio_normalize=getattr(self.options, 'audio_normalize', True),
             color_grade=getattr(self.options, 'color_grade', 'cinema'),
             bgm_volume=getattr(self.options, 'bgm_volume', 0.06),
-            bgm_track=getattr(self.options, 'bgm_track', 'default'),
+            bgm_track=chosen_bgm,
             style_spec=theme_spec,
+            topic=getattr(self.options, 'topic', ''),
+            origin=getattr(self.options, 'origin', ''),
+            extra_notes=getattr(self.options, 'extra_notes', ''),
+            is_anime=False,
+            enable_avatar=getattr(self.options, 'enable_avatar', True),
         )
 
         def scene_progress(pct: float, msg: str):
@@ -652,16 +720,57 @@ class StreamerPipeline:
             safe_log(f"[StreamerPipeline] Error en emisión RTMP: {exc}")
 
     async def _gather_web_facts(self, topic: str) -> str:
-        """Busca noticias y datos reales con DuckDuckGo."""
+        """Busca noticias y datos reales con DuckDuckGo (priorizando noticias frescas y cobertura reciente)."""
         try:
             from ddgs import DDGS
             def search_ddg():
+                findings = []
+                seen_titles = set()
                 with DDGS() as ddgs:
-                    return list(ddgs.text(topic, region="es-es", max_results=5))
-            results = await asyncio.wait_for(asyncio.to_thread(search_ddg), timeout=10.0)
+                    # 1. Priorizar noticias de última hora y prensa reciente
+                    try:
+                        news_results = list(ddgs.news(topic, region="es-es", max_results=5))
+                        for n in news_results:
+                            t = (n.get("title") or "").strip()
+                            b = (n.get("body") or "").strip()
+                            d = n.get("date") or ""
+                            date_str = f" [{d[:10]}]" if d else ""
+                            if t and t.lower() not in seen_titles and b:
+                                seen_titles.add(t.lower())
+                                findings.append(f"- [NOTICIA RECIENTE{date_str}] {t}: {b[:240]}")
+                    except Exception as _e_news:
+                        safe_log(f"[Streamer] Aviso en búsqueda ddgs.news: {_e_news}")
+
+                    # 2. Si hay espacio, complementar con cobertura web reciente de la última semana
+                    if len(findings) < 4:
+                        try:
+                            web_results = list(ddgs.text(topic, region="es-es", timelimit="w", max_results=4))
+                            for r in web_results:
+                                t = (r.get("title") or "").strip()
+                                b = (r.get("body") or "").strip()
+                                if t and t.lower() not in seen_titles and b:
+                                    seen_titles.add(t.lower())
+                                    findings.append(f"- [ACTUALIDAD] {t}: {b[:220]}")
+                        except Exception:
+                            pass
+
+                    # 3. Fallback a búsqueda general si aún no hay resultados
+                    if not findings:
+                        try:
+                            gen_results = list(ddgs.text(topic, region="es-es", max_results=4))
+                            for r in gen_results:
+                                t = (r.get("title") or "").strip()
+                                b = (r.get("body") or "").strip()
+                                if t and t.lower() not in seen_titles and b:
+                                    seen_titles.add(t.lower())
+                                    findings.append(f"- [WEB] {t}: {b[:220]}")
+                        except Exception:
+                            pass
+                return findings
+
+            results = await asyncio.wait_for(asyncio.to_thread(search_ddg), timeout=14.0)
             if results:
-                lines = [f"- {r.get('title', '')}: {r.get('body', '')[:220]}" for r in results if r.get('body')]
-                return "\n".join(lines[:4])
+                return "\n".join(results[:5])
         except Exception as exc:
             safe_log(f"[Streamer] Búsqueda de soporte falló: {exc}")
         return "Noticia relevante y debate actual sobre el tema en tendencia."
@@ -670,21 +779,27 @@ class StreamerPipeline:
     # MODO ANÁLISIS DE CASO: video fuente real → fotogramas → Gemini
     # ------------------------------------------------------------------
 
-    async def _prepare_case_media(self, source_url: str) -> List[Dict[str, Any]]:
-        """Descarga el video del caso, extrae fotogramas reales y los describe.
+    async def _prepare_case_media(self, source_url: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Descarga el video del caso, extrae fotogramas reales y analiza soundbites estratégicos.
 
-        Devuelve [{"index": int, "desc": str}, ...] para el director. Es
-        tolerante a fallos: si algo falla, la transmisión continúa en modo
-        normal (sin fotogramas), con un log claro del motivo.
+        Devuelve (frames_info, soundbites_info) para el director. Es tolerante a fallos:
+        si algo falla, continúa de forma segura con lo disponible.
         """
         frames_dir = self.workdir / "case_frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
         existing = sorted(frames_dir.glob("frame_*.jpg"))
+        frames_info: List[Dict[str, Any]] = []
+        soundbites_info: List[Dict[str, Any]] = []
+        final_video = None
+
         try:
-            if not existing:
-                self._state("case_media", 6.0, "Descargando el video del caso para análisis visual...")
+            candidates = [p for p in self.workdir.glob("case_source.*") if p.suffix.lower() in (".mp4", ".mkv", ".webm", ".mov")]
+            if candidates:
+                final_video = candidates[0]
+
+            if not existing and not final_video:
+                self._state("case_media", 6.0, "Descargando el video del caso para análisis visual y auditivo...")
                 video_file = self.workdir / "case_source.%(ext)s"
-                final_video = None
 
                 def do_download():
                     import yt_dlp
@@ -711,14 +826,41 @@ class StreamerPipeline:
                 candidates = [p for p in self.workdir.glob("case_source.*") if p.suffix.lower() in (".mp4", ".mkv", ".webm", ".mov")]
                 if not candidates:
                     safe_log("[Streamer] Caso: la descarga no produjo un archivo de video.")
-                    return []
+                    return ([], [])
                 final_video = candidates[0]
 
-                if self.cancel_event.is_set():
-                    raise asyncio.CancelledError()
+            if self.cancel_event.is_set():
+                raise asyncio.CancelledError()
 
-                # Extraer fotogramas repartidos por TODA la duración (máx 12, min 3)
-                self._state("case_media", 8.0, "Extrayendo fotogramas clave del video del caso...")
+            # 1. Extracción y análisis de soundbites estratégicos del video completo
+            if final_video and final_video.exists():
+                try:
+                    self._state("case_media", 7.5, "Analizando discurso completo del video para soundbites estratégicos...")
+                    from core.soundbite_analyzer import StrategicSoundbiteAnalyzer
+                    sb_analyzer = StrategicSoundbiteAnalyzer()
+                    sbs = await asyncio.to_thread(
+                        sb_analyzer.analyze_full_video,
+                        final_video,
+                        topic=self.options.topic,
+                        workdir=self.workdir,
+                        max_soundbites=4,
+                    )
+                    for i, sb in enumerate(sbs):
+                        c_name = sb.clip_path.name if sb.clip_path else f"case_soundbite_{i}.mp4"
+                        soundbites_info.append({
+                            "clip_name": c_name,
+                            "quote": sb.quote,
+                            "duration": sb.duration,
+                            "start_sec": sb.start_sec,
+                            "end_sec": sb.end_sec,
+                        })
+                    safe_log(f"[Streamer] 🎙️ {len(soundbites_info)} soundbites estratégicos extraídos del video fuente.")
+                except Exception as sb_err:
+                    safe_log(f"[Streamer] Aviso en análisis de soundbites del caso: {sb_err}")
+
+            # 2. Extraer fotogramas repartidos por TODA la duración si aún no existen
+            if not existing and final_video:
+                self._state("case_media", 8.5, "Extrayendo fotogramas clave del video del caso...")
                 def probe_duration():
                     import subprocess
                     r = subprocess.run(
@@ -746,11 +888,10 @@ class StreamerPipeline:
                 existing = sorted(frames_dir.glob("frame_*.jpg"))
 
             if not existing:
-                return []
+                return ([], soundbites_info)
 
-            # Análisis visual con Gemini (multimodal): describir cada fotograma.
-            self._state("case_media", 9.0, f"Gemini analizando {len(existing)} fotogramas reales del caso...")
-            frames_info: List[Dict[str, Any]] = []
+            # 3. Análisis visual con Gemini (multimodal): describir cada fotograma
+            self._state("case_media", 9.2, f"Gemini analizando {len(existing)} fotogramas reales del caso...")
             try:
                 from google.genai import types as gtypes
 
@@ -775,16 +916,14 @@ class StreamerPipeline:
             except Exception as ana_exc:
                 safe_log(f"[Streamer] Análisis Gemini de fotogramas falló: {ana_exc}")
 
-            # Si Gemini no describió, registrar los frames con descripción vacía:
-            # igual sirven como fondos (el director puede anclarlos por orden).
             if not frames_info:
                 frames_info = [{"index": i, "desc": ""} for i in range(len(existing))]
-            safe_log(f"[Streamer] Caso listo: {len(frames_info)} fotogramas reales disponibles para el director.")
-            return frames_info
+            safe_log(f"[Streamer] Caso listo: {len(frames_info)} fotogramas y {len(soundbites_info)} soundbites disponibles para el director.")
+            return (frames_info, soundbites_info)
 
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            safe_log(f"[Streamer] Modo análisis de caso degradado ({exc}): continuando sin fotogramas.")
-            return []
+            safe_log(f"[Streamer] Modo análisis de caso degradado ({exc}): continuando.")
+            return ([], soundbites_info)
 

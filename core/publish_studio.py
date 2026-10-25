@@ -144,7 +144,7 @@ class PublishStudio:
         video = self.resolve_master_video(document)
         result = document.get("result") or {}
         topic = result.get("topic") or (document.get("options") or {}).get("topic") or ""
-        title = document.get("original_name") or result.get("title") or topic or "Producción KAI"
+        title = result.get("title") or document.get("title") or document.get("original_name") or topic or "Producción KAI"
         duration = result.get("duration") or (self._probe_duration(video) if video else 0.0)
         channel_classification = None
         all_channels = []
@@ -174,7 +174,7 @@ class PublishStudio:
         document = self.read_document()
         result = document.get("result") or {}
         topic = result.get("topic") or (document.get("options") or {}).get("topic") or ""
-        base_title = document.get("original_name") or result.get("title") or topic or "Producción KAI"
+        base_title = result.get("title") or document.get("title") or document.get("original_name") or topic or "Producción KAI"
         duration = result.get("duration") or 0.0
 
         speech_hint = ""
@@ -203,9 +203,10 @@ Responde SOLO con un JSON válido con estas claves:
 - "tags": lista de 12 a 18 etiquetas de búsqueda (sin #), cortas y específicas.
 - "thumbnail_text": frase corta de máximo 4 palabras para poner gigante en la miniatura (todo mayúsculas, sin puntos)."""
 
+        from utils.json_validator import JSONValidator
         client = LLMClient()
         raw = client.generate(prompt, json_mode=True, deadline_sec=60)
-        data = json.loads(raw)
+        data = JSONValidator.extract_and_parse(raw)
         tags = [t.strip().lstrip("#") for t in data.get("tags", []) if isinstance(t, str) and t.strip()]
         return {
             "title": str(data.get("title", base_title))[:100],

@@ -1,5 +1,56 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { cn } from "@/utils/cn";
+
+/* Sección expandible/ocultable con cabecera limpia */
+export function Collapsible({
+  title,
+  right,
+  defaultOpen = true,
+  children,
+  className,
+  bodyClassName,
+}: {
+  title: ReactNode;
+  right?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+  className?: string;
+  bodyClassName?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className={cn("border-b border-white/[0.06] last:border-b-0", className)}>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="group flex min-w-0 flex-1 items-center gap-2 py-2.5 text-left"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className={cn(
+              "h-3 w-3 shrink-0 text-white/35 transition-transform duration-200 group-hover:text-beam-300",
+              open ? "rotate-90" : "rotate-0",
+            )}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+          <span className="text-[11.5px] font-medium tracking-normal truncate text-white/70 group-hover:text-white transition-colors">
+            {title}
+          </span>
+        </button>
+        {right}
+      </div>
+      {open && <div className={cn("pb-3", bodyClassName)}>{children}</div>}
+    </section>
+  );
+}
 
 export function Panel({
   children,
@@ -67,8 +118,8 @@ export function IconButton({
         size === "md" && "h-9 w-9",
         size === "lg" && "h-11 w-11",
         active
-          ? "border-beam-400/40 bg-beam-500/12 text-beam-200 glow-beam"
-          : "border-white/[0.07] bg-white/[0.02] text-white/45 hover:border-white/15 hover:bg-white/[0.05] hover:text-white/85",
+          ? "border-beam-400/60 bg-beam-500/15 text-beam-200"
+          : "border-white/[0.09] bg-black text-white/50 hover:border-beam-400/40 hover:text-white",
         className,
       )}
     >
@@ -101,8 +152,8 @@ export function Toggle({
         className={cn(
           "relative h-[14px] w-[26px] shrink-0 rounded-full border transition-all duration-300",
           on
-            ? "border-beam-400/50 bg-beam-500/25 shadow-[0_0_14px_-2px_rgba(47,92,255,0.7)]"
-            : "border-white/10 bg-white/[0.03]",
+            ? "border-beam-400/60 bg-beam-500/30"
+            : "border-white/10 bg-black",
         )}
       >
         <span
@@ -130,7 +181,7 @@ export function Segmented<T extends string>({
   return (
     <div
       className={cn(
-        "flex items-center gap-0.5 rounded-xl border border-white/[0.06] bg-black/40 p-0.5",
+        "flex items-center gap-0.5 rounded-lg border border-white/[0.08] bg-black p-0.5",
         className,
       )}
     >
@@ -139,9 +190,9 @@ export function Segmented<T extends string>({
           key={o.id}
           onClick={() => onChange(o.id)}
           className={cn(
-            "relative flex-1 rounded-[9px] px-2 py-[5px] text-[10px] font-medium tracking-wide transition-all duration-300",
+            "relative flex-1 rounded-md px-2 py-[5px] text-[10px] font-medium tracking-wide transition-colors duration-200",
             value === o.id
-              ? "bg-gradient-to-b from-white/[0.12] to-white/[0.04] text-white shadow-[0_1px_0_0_rgba(255,255,255,0.1)_inset,0_6px_16px_-10px_rgba(47,92,255,0.9)]"
+              ? "bg-beam-500 text-white"
               : "text-white/35 hover:text-white/65",
           )}
         >
@@ -162,12 +213,7 @@ export function Meter({
   tone?: "beam" | "signal" | "ember";
   height?: number;
 }) {
-  const grad =
-    tone === "beam"
-      ? "linear-gradient(90deg,#142a5e,#2f5cff 60%,#7ea3ff)"
-      : tone === "signal"
-        ? "linear-gradient(90deg,#0d3a34,#46e0c0)"
-        : "linear-gradient(90deg,#4a1f14,#ff7a59)";
+  const grad = tone === "beam" ? "#2f5cff" : tone === "signal" ? "#46e0c0" : "#ff7a59";
   return (
     <div
       className="w-full overflow-hidden rounded-full bg-white/[0.05]"
@@ -195,7 +241,7 @@ export function Stat({
   glyph?: ReactNode;
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.015] p-2.5 transition-colors hover:border-white/[0.12]">
+    <div className="group relative overflow-hidden rounded-xl border border-white/[0.08] bg-black p-2.5 transition-colors hover:border-beam-400/40">
       <div className="flex items-center justify-between">
         <span className="micro-sm text-white/30">{label}</span>
         {glyph && <span className="text-white/20">{glyph}</span>}
@@ -209,7 +255,6 @@ export function Stat({
           {delta}
         </div>
       )}
-      <div className="pointer-events-none absolute inset-x-0 -bottom-6 h-8 bg-beam-500/20 blur-2xl transition-opacity duration-500 opacity-0 group-hover:opacity-100" />
     </div>
   );
 }

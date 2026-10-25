@@ -79,13 +79,14 @@ class ResourceProvenance:
 class SmartMediaCurator:
     """Motor de curaduría inteligente, verificación de recursos y alternativas visuales honestas."""
 
-    # Dominios de stock comercial con marcas de agua o restricciones severas a descartar
+    # Dominios de stock comercial con marcas de agua o restricciones severas a descartar (cero stock)
     WATERMARK_BLOCKLIST = (
         "dreamstime", "alamy", "shutterstock", "istockphoto", "istock",
-        "gettyimages", "123rf", "adobestock", "depositphotos", "bigstockphoto",
-        "freepik", "vectorstock", "pond5", "envato", "storyblocks", "motionelements",
-        "canstockphoto", "clipart", "renderhub", "turbosquid", "cgtrader",
-        "stock.adobe", "canva", "eyeem", "shutter"
+        "gettyimages", "getty", "123rf", "adobestock", "depositphotos", "depositphoto",
+        "bigstockphoto", "freepik", "vectorstock", "pond5", "envato", "storyblocks",
+        "motionelements", "canstockphoto", "clipart", "renderhub", "turbosquid",
+        "cgtrader", "stock.adobe", "canva", "eyeem", "shutter", "pexels", "pixabay",
+        "unsplash", "rawpixel", "vecteezy", "stockphoto", "fotolia"
     )
 
     # Coordenadas geográficas y sinónimos para detección de lugares
@@ -145,6 +146,335 @@ class SmartMediaCurator:
         "la verdad sobre", "lo que no sabías", "esto cambia todo", "se nos cayó la teoría",
         "ojo con esto", "paren las rotativas", "el secreto detrás", "punto de quiebre"
     )
+
+    # Perfiles conocidos de figuras públicas, líderes y protagonistas para Spotlight y Callouts
+    KNOWN_PERSON_PROFILES: Dict[str, Dict[str, str]] = {
+        "petro": {
+            "name": "Gustavo Petro",
+            "role": "Presidente de Colombia",
+            "query_wiki": "Gustavo Petro",
+        },
+        "gustavo petro": {
+            "name": "Gustavo Petro",
+            "role": "Presidente de Colombia",
+            "query_wiki": "Gustavo Petro",
+        },
+        "abelardo": {
+            "name": "Abelardo De La Espriella",
+            "role": "Abogado y Empresario",
+            "query_wiki": "Abelardo De La Espriella",
+        },
+        "abelardo de la espriella": {
+            "name": "Abelardo De La Espriella",
+            "role": "Abogado y Empresario",
+            "query_wiki": "Abelardo De La Espriella",
+        },
+        "de la espriella": {
+            "name": "Abelardo De La Espriella",
+            "role": "Abogado y Empresario",
+            "query_wiki": "Abelardo De La Espriella",
+        },
+        "uribe": {
+            "name": "Álvaro Uribe Vélez",
+            "role": "Expresidente de Colombia",
+            "query_wiki": "Álvaro Uribe",
+        },
+        "alvaro uribe": {
+            "name": "Álvaro Uribe Vélez",
+            "role": "Expresidente de Colombia",
+            "query_wiki": "Álvaro Uribe",
+        },
+        "álvaro uribe": {
+            "name": "Álvaro Uribe Vélez",
+            "role": "Expresidente de Colombia",
+            "query_wiki": "Álvaro Uribe",
+        },
+        "milei": {
+            "name": "Javier Milei",
+            "role": "Presidente de Argentina",
+            "query_wiki": "Javier Milei",
+        },
+        "javier milei": {
+            "name": "Javier Milei",
+            "role": "Presidente de Argentina",
+            "query_wiki": "Javier Milei",
+        },
+        "bukele": {
+            "name": "Nayib Bukele",
+            "role": "Presidente de El Salvador",
+            "query_wiki": "Nayib Bukele",
+        },
+        "nayib bukele": {
+            "name": "Nayib Bukele",
+            "role": "Presidente de El Salvador",
+            "query_wiki": "Nayib Bukele",
+        },
+        "trump": {
+            "name": "Donald Trump",
+            "role": "Político y Expresidente de EE.UU.",
+            "query_wiki": "Donald Trump",
+        },
+        "donald trump": {
+            "name": "Donald Trump",
+            "role": "Político y Expresidente de EE.UU.",
+            "query_wiki": "Donald Trump",
+        },
+        "biden": {
+            "name": "Joe Biden",
+            "role": "Presidente de Estados Unidos",
+            "query_wiki": "Joe Biden",
+        },
+        "joe biden": {
+            "name": "Joe Biden",
+            "role": "Presidente de Estados Unidos",
+            "query_wiki": "Joe Biden",
+        },
+        "kamala harris": {
+            "name": "Kamala Harris",
+            "role": "Líder Política de EE.UU.",
+            "query_wiki": "Kamala Harris",
+        },
+        "sheinbaum": {
+            "name": "Claudia Sheinbaum",
+            "role": "Presidenta de México",
+            "query_wiki": "Claudia Sheinbaum",
+        },
+        "claudia sheinbaum": {
+            "name": "Claudia Sheinbaum",
+            "role": "Presidenta de México",
+            "query_wiki": "Claudia Sheinbaum",
+        },
+        "lula": {
+            "name": "Luiz Inácio Lula da Silva",
+            "role": "Presidente de Brasil",
+            "query_wiki": "Luiz Inácio Lula da Silva",
+        },
+        "lula da silva": {
+            "name": "Luiz Inácio Lula da Silva",
+            "role": "Presidente de Brasil",
+            "query_wiki": "Luiz Inácio Lula da Silva",
+        },
+        "maduro": {
+            "name": "Nicolás Maduro",
+            "role": "Mandatario de Venezuela",
+            "query_wiki": "Nicolás Maduro",
+        },
+        "nicolás maduro": {
+            "name": "Nicolás Maduro",
+            "role": "Mandatario de Venezuela",
+            "query_wiki": "Nicolás Maduro",
+        },
+        "nicolas maduro": {
+            "name": "Nicolás Maduro",
+            "role": "Mandatario de Venezuela",
+            "query_wiki": "Nicolás Maduro",
+        },
+        "sánchez": {
+            "name": "Pedro Sánchez",
+            "role": "Presidente del Gobierno de España",
+            "query_wiki": "Pedro Sánchez",
+        },
+        "pedro sánchez": {
+            "name": "Pedro Sánchez",
+            "role": "Presidente del Gobierno de España",
+            "query_wiki": "Pedro Sánchez",
+        },
+        "pedro sanchez": {
+            "name": "Pedro Sánchez",
+            "role": "Presidente del Gobierno de España",
+            "query_wiki": "Pedro Sánchez",
+        },
+        "macron": {
+            "name": "Emmanuel Macron",
+            "role": "Presidente de Francia",
+            "query_wiki": "Emmanuel Macron",
+        },
+        "emmanuel macron": {
+            "name": "Emmanuel Macron",
+            "role": "Presidente de Francia",
+            "query_wiki": "Emmanuel Macron",
+        },
+        "putin": {
+            "name": "Vladímir Putin",
+            "role": "Presidente de Rusia",
+            "query_wiki": "Vladímir Putin",
+        },
+        "vladimir putin": {
+            "name": "Vladímir Putin",
+            "role": "Presidente de Rusia",
+            "query_wiki": "Vladímir Putin",
+        },
+        "zelenski": {
+            "name": "Volodímir Zelenski",
+            "role": "Presidente de Ucrania",
+            "query_wiki": "Volodímir Zelenski",
+        },
+        "volodimir zelenski": {
+            "name": "Volodímir Zelenski",
+            "role": "Presidente de Ucrania",
+            "query_wiki": "Volodímir Zelenski",
+        },
+        "musk": {
+            "name": "Elon Musk",
+            "role": "CEO de Tesla y X",
+            "query_wiki": "Elon Musk",
+        },
+        "elon musk": {
+            "name": "Elon Musk",
+            "role": "CEO de Tesla y X",
+            "query_wiki": "Elon Musk",
+        },
+        "altman": {
+            "name": "Sam Altman",
+            "role": "CEO de OpenAI",
+            "query_wiki": "Sam Altman",
+        },
+        "sam altman": {
+            "name": "Sam Altman",
+            "role": "CEO de OpenAI",
+            "query_wiki": "Sam Altman",
+        },
+        "zuckerberg": {
+            "name": "Mark Zuckerberg",
+            "role": "CEO de Meta",
+            "query_wiki": "Mark Zuckerberg",
+        },
+        "mark zuckerberg": {
+            "name": "Mark Zuckerberg",
+            "role": "CEO de Meta",
+            "query_wiki": "Mark Zuckerberg",
+        },
+        "bezos": {
+            "name": "Jeff Bezos",
+            "role": "Fundador de Amazon",
+            "query_wiki": "Jeff Bezos",
+        },
+        "jeff bezos": {
+            "name": "Jeff Bezos",
+            "role": "Fundador de Amazon",
+            "query_wiki": "Jeff Bezos",
+        },
+        "bill gates": {
+            "name": "Bill Gates",
+            "role": "Cofundador de Microsoft",
+            "query_wiki": "Bill Gates",
+        },
+    }
+
+    @classmethod
+    def detect_person_mentions(
+        cls,
+        speech_text: str,
+        sentence_boundaries: Optional[List[Tuple[float, float, str]]] = None,
+        scene_duration: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        """Detecta todas las personas mencionadas en la narración (ej: 'Petro y a su vez Abelardo')
+        y calcula el instante exacto en que son nombradas para mostrar su tarjeta con foto."""
+        if not speech_text:
+            return []
+
+        clean_text = speech_text.strip()
+        lower_text = clean_text.lower()
+        mentions: List[Dict[str, Any]] = []
+        found_names: set = set()
+
+        # 1. Búsqueda por diccionario conocido (ordenando por longitud descendente de clave)
+        sorted_keys = sorted(cls.KNOWN_PERSON_PROFILES.keys(), key=len, reverse=True)
+        for key in sorted_keys:
+            pattern = rf"\b{re.escape(key)}\b"
+            for match in re.finditer(pattern, lower_text):
+                prof = cls.KNOWN_PERSON_PROFILES[key]
+                full_name = prof["name"]
+                if full_name.lower() in found_names:
+                    continue
+
+                char_pos = match.start()
+                found_names.add(full_name.lower())
+                mentions.append({
+                    "name": full_name,
+                    "short_name": key.title(),
+                    "role": prof["role"],
+                    "query_wiki": prof["query_wiki"],
+                    "char_pos": char_pos,
+                    "duration": 2.8,
+                })
+
+        # 2. Búsqueda por cargo / título + Nombre propio con mayúsculas
+        title_pattern = re.compile(
+            r"\b(presidente|presidenta|mandatario|mandataria|líder|lider|ministro|ministra|canciller|senador|senadora|gobernador|gobernadora|fiscal|juez|abogado|abogada|director|directora|secretario|secretaria|fundador|fundadora|investigador|investigadora|científico|cientifica|cientifico|portavoz|vocero|vocera|candidato|candidata|ceo|magnate|empresario|empresaria)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b"
+        )
+        for match in title_pattern.finditer(clean_text):
+            role_title = match.group(1).title()
+            p_name = match.group(2).strip()
+            if p_name.lower() in found_names or any(w.lower() in found_names for w in p_name.split()):
+                continue
+
+            char_pos = match.start()
+            found_names.add(p_name.lower())
+            mentions.append({
+                "name": p_name,
+                "short_name": p_name.split()[0],
+                "role": role_title,
+                "query_wiki": p_name,
+                "char_pos": char_pos,
+                "duration": 2.8,
+            })
+
+        if not mentions:
+            return []
+
+        # Ordenar cronológicamente según la aparición en la narración
+        mentions.sort(key=lambda x: x["char_pos"])
+
+        # 3. Asignación de timestamps milimétricos sincronizados con la voz
+        result: List[Dict[str, Any]] = []
+        last_end_time = 0.5
+
+        for item in mentions:
+            char_pos = item["char_pos"]
+            calculated_st = 0.8
+
+            if sentence_boundaries:
+                # Encontrar el fragmento de oración correspondiente
+                found_boundary = False
+                for s_st, s_en, s_txt in sentence_boundaries:
+                    s_lower = s_txt.lower()
+                    kw_check = item["short_name"].lower()
+                    if kw_check in s_lower or item["name"].lower() in s_lower:
+                        pos_in_s = s_lower.find(kw_check)
+                        if pos_in_s < 0:
+                            pos_in_s = s_lower.find(item["name"].lower().split()[0])
+                        frac = max(0.0, min(1.0, pos_in_s / max(1, len(s_txt)))) if pos_in_s >= 0 else 0.2
+                        calculated_st = round(s_st + frac * (s_en - s_st), 2)
+                        found_boundary = True
+                        break
+                if not found_boundary:
+                    calculated_st = round((char_pos / max(1, len(clean_text))) * scene_duration, 2)
+            else:
+                calculated_st = round((char_pos / max(1, len(clean_text))) * scene_duration, 2)
+
+            # Evitar solapamiento entre múltiples personas mencionadas seguidas
+            target_st = max(calculated_st, last_end_time + 0.25)
+            # Asegurar que comience al menos en 0.5s y quepa antes del fin de la escena
+            target_st = max(0.5, target_st)
+            card_dur = item["duration"]
+
+            if target_st + card_dur > scene_duration - 0.2:
+                # Ajustar duración si está cerca del final
+                card_dur = max(1.8, scene_duration - target_st - 0.2)
+
+            if target_st < scene_duration - 1.2:
+                last_end_time = target_st + card_dur
+                result.append({
+                    "name": item["name"],
+                    "short_name": item["short_name"],
+                    "role": item["role"],
+                    "query_wiki": item["query_wiki"],
+                    "start_time": target_st,
+                    "duration": round(card_dur, 2),
+                })
+
+        return result
 
     # --------------------------------------------------------------------------
     # 1. Identificar qué afirmación o concepto de la narración necesita apoyo
@@ -217,7 +547,40 @@ class SmartMediaCurator:
                     recommended_nature=VisualNature.SIMBOLICO,
                 )
 
-        # 3. Detectar Acontecimiento histórico con año concreto en la locución (ej. 1959, 1969, 2020)
+        # 3. Detectar Persona, Mandatario o Figura Pública concreta
+        person_match = re.search(
+            r"\b(?:presidente|presidenta|mandatario|mandataria|líder|lider|ministro|ministra|canciller|senador|senadora|gobernador|gobernadora|fiscal|juez|abogado|abogada|director|directora|secretario|secretaria|fundador|fundadora|investigador|investigadora|científico|cientifica|cientifico|portavoz|vocero|vocera|candidato|candidata|ceo|magnate|empresario|empresaria)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b",
+            clean_text,
+        )
+        if not person_match:
+            # Coincidencia con figuras internacionales conocidas de alta frecuencia en noticias y debate
+            known_figures = re.search(
+                r"\b(Javier Milei|Milei|Donald Trump|Trump|Joe Biden|Biden|Kamala Harris|Gustavo Petro|Petro|Nayib Bukele|Bukele|Pedro Sánchez|Sánchez|Lula da Silva|Lula|Claudia Sheinbaum|Sheinbaum|Emmanuel Macron|Macron|Olaf Scholz|Scholz|Vladimir Putin|Putin|Volod[ií]mir Zelenski|Zelenski|Zelensky|Benjamin Netanyahu|Netanyahu|Elon Musk|Musk|Sam Altman|Altman|Jensen Huang|Mark Zuckerberg|Zuckerberg|Jeff Bezos|Bezos|Bill Gates|Gates|Tim Cook|Satya Nadella)\b",
+                clean_text,
+                re.IGNORECASE,
+            )
+            if known_figures:
+                person_name = known_figures.group(1).title()
+                return VisualIntent(
+                    intent_type=VisualIntentType.PERSON_ENTITY,
+                    entity_name=person_name,
+                    raw_sentence=clean_text,
+                    trigger_words=[person_name],
+                    suggested_template="source_chip",
+                    recommended_nature=VisualNature.DOCUMENTAL_REAL,
+                )
+        else:
+            p_name = person_match.group(1).strip()
+            return VisualIntent(
+                intent_type=VisualIntentType.PERSON_ENTITY,
+                entity_name=p_name,
+                raw_sentence=clean_text,
+                trigger_words=[p_name],
+                suggested_template="source_chip",
+                recommended_nature=VisualNature.DOCUMENTAL_REAL,
+            )
+
+        # 4. Detectar Acontecimiento histórico con año concreto en la locución (ej. 1959, 1969, 2020)
         year_match = re.search(r"\b(18\d\d|19\d\d|20[0-2]\d)\b", clean_text)
         if year_match:
             year_int = int(year_match.group(1))
@@ -322,6 +685,11 @@ class SmartMediaCurator:
             clean_words = dict.fromkeys(clean_t.split())
             clean_topic = " ".join(clean_words)
 
+            if intent.intent_type == VisualIntentType.PERSON_ENTITY:
+                p_name = intent.entity_name
+                q_base = f"{clean_topic} {p_name}" if p_name.lower() not in clean_topic.lower() else clean_topic
+                return f"{q_base} discurso rueda de prensa conferencia official speech"
+
             if intent.intent_type == VisualIntentType.HISTORICAL_EVENT and intent.year:
                 year_str = str(intent.year)
                 y_part = f" {year_str}" if year_str not in clean_topic else ""
@@ -330,10 +698,14 @@ class SmartMediaCurator:
 
             if intent.intent_type == VisualIntentType.GEO_LOCATION and intent.location:
                 loc_part = f" {intent.location}" if intent.location.lower() not in clean_topic.lower() else ""
-                return f"{clean_topic}{loc_part} authentic landscape documentary footage 4k"
+                return f"{clean_topic}{loc_part} geography authentic landscape documentary footage 4k"
 
             if intent.intent_type == VisualIntentType.STAT_NUMBER and intent.stat_value:
                 return f"{clean_topic} documentary footage 4k"
+
+            is_news = any(k in clean_topic.lower() for k in ("news", "breaking", "actualidad", "noticia", "report", "crisis", "debate", "speech", "rueda de prensa"))
+            if is_news:
+                return f"{clean_topic} authentic news report press footage"
 
             return f"{clean_topic} documentary footage 4k"
 
@@ -344,6 +716,9 @@ class SmartMediaCurator:
 
         ent_clean = re.sub(r'[\.\,\;]+$', '', ent).strip()
 
+        if intent.intent_type == VisualIntentType.PERSON_ENTITY:
+            return f"{ent_clean} discurso rueda de prensa conferencia official speech"
+
         if intent.intent_type == VisualIntentType.HISTORICAL_EVENT and intent.year:
             loc_part = f" {intent.location}" if intent.location else ""
             year_str = str(intent.year)
@@ -351,7 +726,7 @@ class SmartMediaCurator:
             return f"{ent_clean}{loc_part}{year_part} historical archive photograph documentary 4k"
 
         if intent.intent_type == VisualIntentType.GEO_LOCATION and intent.location:
-            return f"{ent_clean} {intent.location} landscape documentary footage 4k"
+            return f"{ent_clean} {intent.location} geography landscape documentary footage 4k"
 
         if intent.intent_type == VisualIntentType.VERSUS_COMPARISON and intent.secondary_entity:
             return f"{ent_clean} vs {intent.secondary_entity} comparison study documentary footage 4k"
@@ -361,6 +736,10 @@ class SmartMediaCurator:
 
         if intent.intent_type == VisualIntentType.STAT_NUMBER and intent.stat_value:
             return f"{ent_clean} documentary footage 4k"
+
+        is_ent_news = any(k in ent_clean.lower() for k in ("news", "breaking", "actualidad", "noticia", "report", "crisis", "debate", "speech"))
+        if is_ent_news:
+            return f"{ent_clean} authentic news report press footage"
 
         return f"{ent_clean} documentary footage 4k"
 
@@ -642,16 +1021,33 @@ class SmartMediaCurator:
                     found = True
                     break
 
-        # Duración concisa adaptada al tipo de elemento
-        if intent.intent_type in (VisualIntentType.IMPACT_PHRASE, VisualIntentType.STAT_NUMBER):
-            ideal_dur = 3.0
-        elif intent.intent_type in (VisualIntentType.GEO_LOCATION, VisualIntentType.VERSUS_COMPARISON):
-            ideal_dur = 4.0
+        # Duración adaptada estratégicamente al tipo de elemento visual
+        # Para elementos importantes (mapas, comparativas, evidencia documental, estadísticas),
+        # se otorga tiempo suficiente en pantalla para que el espectador pueda asimilar y leer.
+        if intent.intent_type in (VisualIntentType.GEO_LOCATION, VisualIntentType.VERSUS_COMPARISON):
+            ideal_dur = 7.5
+        elif intent.intent_type in (VisualIntentType.HISTORICAL_EVENT, VisualIntentType.COMPLEX_CONCEPT):
+            ideal_dur = 6.8
+        elif intent.intent_type == VisualIntentType.STAT_NUMBER:
+            ideal_dur = 5.8
+        elif intent.intent_type == VisualIntentType.IMPACT_PHRASE:
+            ideal_dur = 4.2
         else:
-            ideal_dur = 3.5
+            ideal_dur = 4.8
 
-        # Garantizar que el elemento se retire al menos 0.6s antes de que termine la escena
-        max_allowed_dur = max(2.0, scene_duration - start_t - 0.6)
+        # En escenas largas (>= 12s), ampliar holgura proporcional para elementos clave
+        if scene_duration >= 12.0 and intent.intent_type in (
+            VisualIntentType.GEO_LOCATION,
+            VisualIntentType.VERSUS_COMPARISON,
+            VisualIntentType.HISTORICAL_EVENT,
+            VisualIntentType.STAT_NUMBER,
+            VisualIntentType.COMPLEX_CONCEPT,
+        ):
+            ideal_dur = min(8.8, max(ideal_dur, round(scene_duration * 0.35, 1)))
+
+        # Garantizar que el elemento se retire al menos 0.7s antes de que termine la escena
+        max_allowed_dur = max(2.5, scene_duration - start_t - 0.7)
         display_dur = min(ideal_dur, max_allowed_dur)
 
         return round(start_t, 2), round(display_dur, 2)
+

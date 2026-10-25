@@ -32,6 +32,7 @@ from core.director import DirectorBroadcastPlan, DirectorScene, SceneCard
 from core.models import InfoCard
 from core.orchestrator import AssetOrchestrator
 from core.llm import safe_log
+from core.youtube_audio import get_youtube_bgm_track, get_youtube_sfx_path
 from utils.file_manager import FileManager
 
 
@@ -49,6 +50,121 @@ SUBTITLE_STYLES: Dict[str, str] = {
 }
 
 
+def srt_time_to_ass(t_str: str) -> str:
+    """Convierte timestamp de SRT ('00:00:01,461') a formato ASS ('0:00:01.46')."""
+    t_str = t_str.strip().replace(",", ".")
+    parts = t_str.split(":")
+    if len(parts) == 3:
+        h = int(parts[0])
+        m = parts[1]
+        s_parts = parts[2].split(".")
+        s = s_parts[0]
+        cs = (s_parts[1] + "00")[:2] if len(s_parts) > 1 else "00"
+        return f"{h}:{m}:{s}.{cs}"
+    return "0:00:00.00"
+
+
+def generate_ass_from_srt(
+    srt_path: Path,
+    ass_path: Path,
+    width: int,
+    height: int,
+    sub_style: str = "hormozi",
+    font_size: int = 52,
+    margin_v: int = 380,
+) -> Path:
+    """Genera archivo ASS nativo con PlayResX y PlayResY calibrados para renderizado de subtítulos sin cortes ni desbordes."""
+    style_specs = {
+        "hormozi": {
+            "font": "Segoe UI Black",
+            "primary": "&H0000FFFF",  # Amarillo brillante (#FFFF00 en BGR)
+            "secondary": "&H00FFFFFF",
+            "outline_c": "&H00000000",
+            "back_c": "&H80000000",
+            "bold": -1,
+            "outline": 5,
+            "shadow": 2,
+            "uppercase": True,
+        },
+        "viral": {
+            "font": "Segoe UI Black",
+            "primary": "&H00D4F500",  # Lima/Cyan viral
+            "secondary": "&H00FFFFFF",
+            "outline_c": "&H00000000",
+            "back_c": "&H80000000",
+            "bold": -1,
+            "outline": 5,
+            "shadow": 2,
+            "uppercase": True,
+        },
+        "mrbeast": {
+            "font": "Segoe UI Black",
+            "primary": "&H0000FFFF",
+            "secondary": "&H0038BDF8",
+            "outline_c": "&H00000000",
+            "back_c": "&H80000000",
+            "bold": -1,
+            "outline": 6,
+            "shadow": 3,
+            "uppercase": True,
+        },
+        "classic": {
+            "font": "Segoe UI",
+            "primary": "&H00FFFFFF",
+            "secondary": "&H0000FFFF",
+            "outline_c": "&H00000000",
+            "back_c": "&H60000000",
+            "bold": -1,
+            "outline": 4,
+            "shadow": 2,
+            "uppercase": False,
+        },
+    }
+    spec = style_specs.get((sub_style or "").strip().lower(), style_specs["hormozi"])
+    is_upper = spec.get("uppercase", False)
+
+    header = f"""[Script Info]
+Title: Dynamic Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+PlayResX: {width}
+PlayResY: {height}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{spec['font']},{font_size},{spec['primary']},{spec['secondary']},{spec['outline_c']},{spec['back_c']},{spec['bold']},0,0,0,100,100,0,0,1,{spec['outline']},{spec['shadow']},2,60,60,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    dialogues = []
+    if srt_path.exists():
+        raw_content = srt_path.read_text(encoding="utf-8", errors="ignore").replace("\r\n", "\n").replace("\r", "\n")
+        blocks = [b.strip() for b in raw_content.split("\n\n") if b.strip()]
+        for block in blocks:
+            lines = [l.strip() for l in block.split("\n") if l.strip()]
+            time_idx = -1
+            for idx, line in enumerate(lines):
+                if "-->" in line:
+                    time_idx = idx
+                    break
+            if time_idx != -1 and len(lines) > time_idx + 1:
+                start_raw, end_raw = lines[time_idx].split("-->")
+                start_ass = srt_time_to_ass(start_raw)
+                end_ass = srt_time_to_ass(end_raw)
+                text = r"\N".join(lines[time_idx + 1 :])
+                if is_upper:
+                    text = text.upper()
+                dialogues.append(
+                    f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{text}"
+                )
+
+    ass_path.write_text(header + "\n".join(dialogues) + "\n", encoding="utf-8")
+    return ass_path
+
+
 def subtitle_force_style(sub_style: str, font_size: int, margin_v: int) -> str:
     """Devuelve el force_style de libass para el preset pedido (fallback: classic) con alineación centrada y márgenes seguros."""
     base = SUBTITLE_STYLES.get((sub_style or "classic").strip().lower(), SUBTITLE_STYLES["classic"])
@@ -58,17 +174,17 @@ def subtitle_force_style(sub_style: str, font_size: int, margin_v: int) -> str:
 
 
 # Modulación de voz emocional real (rate=velocidad, pitch=tono)
-# Estos valores cambian la prosodia del TTS para dar vida real a las escenas
+# Estos valores cambian la prosodia del TTS para dar vida real a las escenas con respiración humana
 EMOTION_VOICE_MODULATION: Dict[str, Tuple[str, str]] = {
-    "excited":   ("+8%",  "+2Hz"),    # Más rápido y más agudo — entusiasmo alto
-    "surprised": ("+4%",  "+4Hz"),    # Ligeramente más rápido y más agudo
-    "serious":   ("-6%",  "-3Hz"),    # Más lento y más grave — peso y autoridad
-    "skeptical": ("-4%",  "-2Hz"),    # Ligeramente más lento, tono bajo — escepticismo
-    "confident": ("+2%",  "+0Hz"),    # Ritmo seguro, tono neutro — autoridad natural
-    "humor":     ("+5%",  "+3Hz"),    # Más ágil y ligero — tono divertido
-    "dramatic":  ("-10%", "-5Hz"),   # Muy lento y grave — efecto cinematográfico
-    "podcast":   ("-3%",  "+0Hz"),    # Ritmo relajado, conversacional
-    "breaking":  ("+12%", "+1Hz"),   # Urgente — breaking news
+    "excited":   ("+1%",  "+1Hz"),    # Dinámico y entusiasta con dicción nítida (sin correr)
+    "surprised": ("+0%",  "+2Hz"),    # Asombro natural y pausa clara
+    "serious":   ("-5%",  "-2Hz"),    # Más pausado y grave — peso y autoridad
+    "skeptical": ("-4%",  "-1Hz"),    # Ligeramente más lento — tono reflexivo
+    "confident": ("-1%",  "+0Hz"),    # Ritmo seguro y natural de locución
+    "humor":     ("+1%",  "+1Hz"),    # Ágil y ligero, espontáneo
+    "dramatic":  ("-8%",  "-3Hz"),    # Pausado y de suspenso cinematográfico
+    "podcast":   ("-3%",  "+0Hz"),    # Ritmo relajado, conversacional con pausas humanas
+    "breaking":  ("+2%",  "+1Hz"),    # Noticioso ágil pero articulado y respirable (nunca acelerado)
 }
 
 # Presets de color grading cinematico para FFmpeg eq+curves
@@ -105,7 +221,16 @@ class SceneEngine:
         bgm_volume: float = 0.06,
         bgm_track: str = "default",
         style_spec: Optional[Dict[str, Any]] = None,
+        topic: str = "",
+        origin: str = "",
+        extra_notes: str = "",
+        is_anime: Optional[bool] = None,
+        enable_avatar: bool = True,
     ):
+        self.topic = topic or ""
+        self.origin = origin or ""
+        self.extra_notes = extra_notes or ""
+        self.enable_avatar = enable_avatar
         self.style_spec = style_spec
         if style_spec:
             if not card_theme or card_theme in ("dark", "auto"):
@@ -129,6 +254,41 @@ class SceneEngine:
         self.color_grade = color_grade
         self.bgm_volume = bgm_volume
         self.bgm_track = bgm_track
+
+        # Si topic u origin no vinieron explícitos, intentar leer project.json del workdir
+        if not self.topic:
+            for p_file in [self.workdir / "project.json", self.workdir.parent / "project.json"]:
+                if p_file.exists():
+                    try:
+                        p_data = json.loads(p_file.read_text(encoding="utf-8"))
+                        self.topic = self.topic or p_data.get("topic") or p_data.get("original_name") or ""
+                        opts = p_data.get("options") or {}
+                        self.origin = self.origin or opts.get("origin") or ""
+                        self.extra_notes = self.extra_notes or opts.get("extra_notes") or ""
+                    except Exception:
+                        pass
+
+        # Desactivación total y permanente de anime para blindar los canales contra contaminación visual
+        combined_text = f"{self.topic} {self.origin} {self.extra_notes}".lower()
+        self.is_anime = False
+        self.anime_series_name = ""
+
+        # Asignación de Marca de Agua de Canal Unificada
+        if self.is_anime:
+            self.brand_watermark = f"{self.anime_series_name} T 4"
+        elif any(k in combined_text for k in ("huellas", "cristiano", "fe", "biblico", "dios")):
+            self.brand_watermark = "Huellas Sagradas"
+        elif any(k in combined_text for k in ("nucleo", "deep dife", "geopolitica")):
+            self.brand_watermark = "Núcleo Ideológico"
+        elif any(k in combined_text for k in ("contrapunto", "pixelgrama", "debate")):
+            self.brand_watermark = "Contrapunto"
+        elif any(k in combined_text for k in ("palabras", "podcast", "entrevista")):
+            self.brand_watermark = "Palabras con Peso"
+        else:
+            self.brand_watermark = "AetherCut"
+
+        self._total_scenes = 8
+        self._anime_used_src: List[Tuple[int, float]] = []
         self.narrator = AvatarNarrator(voice=voice)
         self.card_renderer = InfoCardRenderer(self.W, self.H, theme=card_theme)
         from core.web_card_renderer import WebCardRenderer
@@ -136,13 +296,16 @@ class SceneEngine:
         from core.kinetic_titles import KineticTitleRenderer
         self.title_renderer = KineticTitleRenderer(self.web_renderer)
         self.chat_renderer = LiveChatRenderer(width=340 if not self.is_vertical else 300)
-        (self.workdir / "assets").mkdir(parents=True, exist_ok=True)
         self.orchestrator = AssetOrchestrator(target_dir=self.workdir / "assets")
+        if self.is_anime:
+            from core.asset_providers import YouTubeReactionAssetProvider
+            self.orchestrator.providers = [YouTubeReactionAssetProvider()]
         try:
-            from core.glm_motion_director import GLMMotionDirector
-            self.glm_motion_director = GLMMotionDirector()
+            from core.deepseek_motion_director import deepseek_motion_director
+            self.deepseek_motion_director = deepseek_motion_director
         except Exception:
-            self.glm_motion_director = None
+            self.deepseek_motion_director = None
+        self.glm_motion_director = None
         try:
             from core.motion_graphics_engine import MotionGraphicsEngine
             self.motion_engine = MotionGraphicsEngine(self.web_renderer, is_vertical=self.is_vertical)
@@ -153,6 +316,13 @@ class SceneEngine:
             self.ai_remotion = AIRemotionGenerator()
         except Exception:
             self.ai_remotion = None
+        self.used_visual_paths: set = set()
+        self.used_clip_names: set = set()
+        try:
+            from core.asset_providers import YouTubeReactionAssetProvider
+            YouTubeReactionAssetProvider.reset_used_assets()
+        except Exception:
+            pass
 
 
     @staticmethod
@@ -222,15 +392,20 @@ class SceneEngine:
         if status_cb:
             status_cb(f"Dirigiendo Escena {scene.scene_id}: {scene.name} ({scene.type})")
 
-        # 1. Síntesis de voz neural con modulación emocional y pronunciación fluida
         speech_text = scene.speech.strip()
         if not speech_text:
             speech_text = "Dato mata relato, analicemos este punto a fondo."
 
+        if self.is_anime:
+            self._current_scene_speech = speech_text
+            self._current_scene_name = scene.name
+            sc_id_m = re.search(r'\d+', str(scene.scene_id))
+            self._current_scene_num = int(sc_id_m.group(0)) if sc_id_m else 1
+
         from utils.speech_normalizer import normalize_speech_for_tts
         tts_speech_text = normalize_speech_for_tts(speech_text)
 
-        rate_mod, pitch_mod = EMOTION_VOICE_MODULATION.get(scene.emotion, ("+0%", "+0Hz"))
+        rate_mod, pitch_mod = EMOTION_VOICE_MODULATION.get(scene.emotion, ("-2%", "+0Hz"))
         audio_path = scene_dir / "voice.mp3"
 
         sentence_boundaries = []
@@ -239,7 +414,9 @@ class SceneEngine:
         # 1. Síntesis neuronal de alta fidelidad con el narrador (Speechify / Gemini / Voz seleccionada por el usuario)
         try:
             safe_log(f"[SceneEngine] Sintetizando locución con la voz seleccionada ({self.voice}) para escena {scene.scene_id}...")
-            _, tts_duration = await self.narrator.synthesize(tts_speech_text, audio_path, voice=self.voice)
+            _, tts_duration = await self.narrator.synthesize(
+                tts_speech_text, audio_path, voice=self.voice, rate=rate_mod, pitch=pitch_mod
+            )
             if audio_path.exists() and audio_path.stat().st_size > 500:
                 audio_generated = True
                 safe_log(f"[SceneEngine] Audio de escena {scene.scene_id} generado exitosamente con voz {self.voice} ({audio_path.stat().st_size} bytes)")
@@ -319,6 +496,7 @@ class SceneEngine:
 
         broll_img = None
         is_opening_scene = (int(getattr(scene, "scene_id", 1)) == 1)
+        is_hook_scene = is_opening_scene
 
         # Solo usar el estudio streamer si explícitamente se pide avatar_cam en escenas intermedias y NO hay visual_query
         # En la apertura (escena 1), SIEMPRE se busca material visual/documental relevante del tema
@@ -329,14 +507,28 @@ class SceneEngine:
             elif Path("assets/streamer_studio_room.jpg").exists():
                 broll_img = Path("assets/streamer_studio_room.jpg")
 
-        if scene.type == "vector_motion":
-            # Sustituir monigotes/stickmen vectoriales por B-Roll temático cinemático en alta definición
+        # PRECISIÓN QUIRÚRGICA (solo anime): cada mención de personaje/acción en la voz
+        # dispara un corte al plano del episodio donde eso realmente aparece.
+        anime_precise_clips: List[Tuple[Path, float]] = []
+        if self.is_anime:
             try:
-                v_concept = scene.visual_query or f"{scene.name} motion graphics 4k tech"
-                safe_log(f"[SceneEngine] 🎬 Obteniendo B-Roll cinemático HD para escena conceptual {scene.scene_id}: '{v_concept}'")
+                anime_precise_clips = await self._plan_anime_precise_clips(
+                    scene, scene_dir, speech_text, audio_path, sentence_boundaries, duration
+                )
+            except Exception as _pe:
+                safe_log(f"[SceneEngine] Precisión anime no disponible, método base: {_pe}")
+                anime_precise_clips = []
+            if anime_precise_clips:
+                broll_img = anime_precise_clips[0][0]
+
+        if scene.type == "vector_motion" and not anime_precise_clips:
+            # Sustituir monigotes/stickmen vectoriales por metraje periodístico o documental real en alta definición
+            try:
+                v_concept = scene.visual_query or f"{scene.name} documental reportaje 4k"
+                safe_log(f"[SceneEngine] 🎬 Obteniendo material periodístico/documental HD para escena conceptual {scene.scene_id}: '{v_concept}'")
                 broll_img = await self._get_scene_visual(v_concept, scene_dir, is_video_scene=True, intent=visual_intent)
                 if not broll_img or not broll_img.exists():
-                    fallback_concept = f"{scene.name} concept documentary 4k"
+                    fallback_concept = f"{scene.name} investigacion periodismo documentary 4k"
                     broll_img = await self._get_scene_visual(fallback_concept, scene_dir, is_video_scene=True, intent=visual_intent)
             except Exception as _ev:
                 safe_log(f"[SceneEngine] Fallback en visual conceptual: {_ev}")
@@ -388,13 +580,43 @@ class SceneEngine:
 
         # 2b. Descargar clips secuenciales de referencia (visual_beats) o segundo clip complementario
         bg_clips: List[Tuple[Path, float]] = []
-        if broll_img and broll_img.exists():
+        if anime_precise_clips:
+            bg_clips = list(anime_precise_clips)
+        if broll_img and broll_img.exists() and not anime_precise_clips:
             bg_clips.append((broll_img, 0.0))
+            if hasattr(self, "used_clip_names"):
+                self.used_clip_names.add(broll_img.name)
+
+        def _is_distinct_clip(cand: Optional[Path], current_clips: List[Tuple[Path, float]]) -> bool:
+            if not cand or not cand.exists():
+                return False
+            if self.is_anime and cand.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                return False
+            cand_p = cand.resolve() if hasattr(cand, "resolve") else cand
+            for p, _ in current_clips:
+                if p == cand or p.name == cand.name:
+                    return False
+                try:
+                    if p.resolve() == cand_p:
+                        return False
+                except Exception:
+                    pass
+            # Evitar repetición global entre distintas escenas del proyecto (solo para b-rolls externos)
+            if not self.is_anime:
+                used_paths = getattr(self, "used_visual_paths", set())
+                if str(cand) in used_paths or str(cand_p) in used_paths:
+                    return False
+                used_names = getattr(self, "used_clip_names", set())
+                if cand.name in used_names:
+                    return False
+            return True
 
         # Si el director aportó visual_beats con frases exactas, sincronizar cortes con esas frases
         beats = getattr(scene, "visual_beats", []) or []
         vq2 = getattr(scene, "visual_query2", "") or ""
-        if beats and len(beats) > 1 and duration >= 5.0:
+        if anime_precise_clips:
+            pass  # plan quirúrgico ya sincronizado con la voz
+        elif beats and len(beats) > 1 and duration >= 5.0:
             # Calcular momentos de corte para cada beat
             segment_step = duration / len(beats)
             for b_idx, beat in enumerate(beats[1:], start=1):
@@ -411,29 +633,106 @@ class SceneEngine:
                             break
                 try:
                     clip_path = await self._get_scene_visual(b_query, scene_dir, is_video_scene=True)
-                    if clip_path and clip_path.exists():
+                    if clip_path and _is_distinct_clip(clip_path, bg_clips):
                         bg_clips.append((clip_path, b_time))
+                        if hasattr(self, "used_clip_names"):
+                            self.used_clip_names.add(clip_path.name)
                 except Exception as _eb:
                     safe_log(f"[SceneEngine] Error obteniendo beat visual '{b_query}': {_eb}")
         elif vq2 and vq2.strip() and vq2.strip().lower() != (scene.visual_query or "").strip().lower():
             try:
                 broll_img2 = await self._get_scene_visual(vq2, scene_dir, is_video_scene=True)
-                if broll_img2 and broll_img2.exists():
+                if broll_img2 and _is_distinct_clip(broll_img2, bg_clips):
                     bg_clips.append((broll_img2, round(duration * 0.5, 2)))
+                    if hasattr(self, "used_clip_names"):
+                        self.used_clip_names.add(broll_img2.name)
             except Exception as _e:
                 safe_log(f"[SceneEngine] Fallback en segundo clip: {_e}")
 
-        # 2c. Enriquecer ritmo visual: evitar permanecer demasiado tiempo en un mismo clip estatico
-        # Salvo escenas de reaccion pura o avatar cam, garantizar variacion visual dinamica cada ~4.0 - 5.0s
-        if scene.type not in ("video_reaction", "avatar_cam") and duration >= 6.5:
+        # 2c. Afinidad Semántica y Visual Lock vs. Ritmo Dinámico
+        # Distingue entre:
+        # A) Evidencia Directa / Documento Clave / Cita Oficial / Cifras Críticas:
+        #    -> Visual Anchor ACTIVO: El video "se posa" con calma, foco visual y estabilidad para leer y asimilar la prueba.
+        # B) Fondos Decorativos o de Stock en Narración:
+        #    -> Ritmo dinámico acelerado (cortes cada 2.4s a 3.2s sin repetir el mismo plano).
+        card_obj = getattr(scene, "card", None)
+        c_template_raw = str(getattr(card_obj, "template", "") if hasattr(card_obj, "template") else (card_obj.get("template", "") if isinstance(card_obj, dict) else "")).lower().strip()
+        c_badge_raw = str(getattr(card_obj, "badge", "") if hasattr(card_obj, "badge") else (card_obj.get("badge", "") if isinstance(card_obj, dict) else "")).upper().strip()
+
+        is_evidence_card = bool(card_obj) and (
+            c_template_raw in (
+                "document_evidence_split", "document_evidence", "split_evidence", "platzi_evidence", "informe_split",
+                "quote_evidence", "quote", "citation",
+                "newspaper_clipping", "newspaper", "press_clipping", "titular_prensa",
+                "stat_counter", "stat_card",
+                "versus_split", "versus", "vs",
+                "map", "geointel_map",
+                "timeline_milestone", "timeline", "cronologia",
+                "spec_matrix", "benchmark_table",
+                "workflow_diagram", "router_pattern",
+                "social_post", "tweet"
+            )
+            or any(k in c_badge_raw for k in (
+                "INFORME", "EVIDENCIA", "DOCUMENT", "ONU", "UNODC", "CITACIÓN", "OFICIAL",
+                "NOTICIA", "PRENSA", "PERIODICO", "PERIÓDICO", "TITULAR",
+                "VERSUS", "COMPARATIVA", "RÉCORD", "RECORD", "CIFRA", "ESTADÍSTICA",
+                "MAPA", "GEO", "CRONOLOGIA", "TIMELINE", "BENCHMARK", "MATRIZ"
+            ))
+        )
+
+        is_exact_evidence = (
+            is_evidence_card
+            or getattr(scene, "soundbite_clip", None) is not None
+            or getattr(scene, "case_frame", None) is not None
+            or getattr(scene, "is_evidence", False)
+            or (visual_intent and visual_intent.intent_type in (
+                VisualIntentType.HISTORICAL_EVENT,
+                VisualIntentType.GEO_LOCATION,
+                VisualIntentType.VERSUS_COMPARISON,
+                VisualIntentType.STAT_NUMBER,
+                VisualIntentType.COMPLEX_CONCEPT,
+            ))
+            or any(k in (scene.name or "").lower() for k in ("declaración", "soundbite", "evidencia", "prueba", "documento", "confesión", "informe", "balance", "cifra"))
+        )
+
+        # Reglas Editoriales de Ritmo, Prevención de Congelamiento y Protección de Copyright (YouTube Content ID):
+        # 1. YouTube Content ID: El algoritmo automático de fingerprinting de YouTube analiza fragmentos continuos
+        #    que exceden los 6 a 8 segundos. Mantener cada clip individual estrictamente entre 2.2s y 5.5s
+        #    garantiza el estándar de Fair Use (Uso Legítimo) y bloquea reclamos automatizados de terceros.
+        # 2. Sin congelamiento eterno: Si una escena dura 7 a 20 segundos, se distribuyen entre 3 a 4 clips según relevancia.
+        #    - En escenas de evidencia: intervalo estable de 4.2s a 5.0s (tiempo para leer datos/documentos sin rebasar el umbral).
+        #    - En escenas narrativas o de gancho: intervalo dinámico de 2.0s a 3.2s (máxima retención y variedad).
+        should_anchor_evidence = is_exact_evidence and not is_hook_scene
+
+        if self.is_anime:
+            # RITMO EDITORIAL DINÁMICO PARA ANIME RECAP (Cortes Estratégicos y Cambio de Planos):
+            # Cambios de cámara y cortes cada 3.2s a 4.0s para sincronía perfecta con la narración sin estancamientos.
+            target_interval = 3.6
+            max_allowed_gap = 4.2
+            max_clips_limit = max(4, math.ceil(duration / 3.4))
+            safe_log(f"[SceneEngine] 🎬 Pacing ANIME DINÁMICO (Escena {scene.scene_id}): Cortes estratégicos cada {target_interval}s (máx {max_clips_limit} planos).")
+        elif should_anchor_evidence:
+            target_interval = 4.2  # Tiempo de lectura confortable pero seguro ante Content ID (< 5.5s)
+            max_allowed_gap = 5.0  # Máximo gap continuo permitido antes de obligar a un corte
+            max_clips_limit = max(2, math.ceil(duration / 3.8))
+            safe_log(f"[SceneEngine] 🎯 Visual Anchor ACTIVO (Escena {scene.scene_id}): Evidencia clave -> Intervalo de {target_interval}s para lectura (sin congelamiento ni riesgo Content ID).")
+        else:
+            target_interval = 2.2 if is_hook_scene else 3.0
+            max_allowed_gap = 2.8 if is_hook_scene else 3.8
+            max_clips_limit = max(3, math.ceil(duration / (2.0 if is_hook_scene else 2.8)))
+
+        if (not anime_precise_clips) and (scene.type != "avatar_cam" or is_hook_scene or should_anchor_evidence) and duration >= (3.6 if is_hook_scene else 4.6):
             existing_times = [t for _, t in bg_clips]
             all_pts = sorted(existing_times + [duration])
             max_gap = max((all_pts[i+1] - all_pts[i] for i in range(len(all_pts)-1)), default=duration)
 
-            if max_gap > 5.2:
-                target_cut = 4.5
-                while target_cut <= duration - 2.2 and len(bg_clips) < 4:
-                    if not any(abs(t - target_cut) < 2.0 for t in existing_times):
+            target_clips_min = max(3, math.ceil(duration / 3.8)) if self.is_anime else (2 if duration < 7.0 else (3 if duration < 13.0 else 4))
+            force_cuts = (max_gap > max_allowed_gap) or (len(bg_clips) < target_clips_min)
+
+            if force_cuts:
+                target_cut = target_interval
+                while target_cut <= duration - 1.2 and len(bg_clips) < max_clips_limit:
+                    if not any(abs(t - target_cut) < 1.0 for t in existing_times):
                         sub_q = ""
                         # 1. Usar visual_queries secundarias diseñadas por el director si existen
                         if scene.visual_queries and len(bg_clips) < len(scene.visual_queries):
@@ -448,22 +747,90 @@ class SceneEngine:
                                     sub_q = f"{vb['query']} 4k"
                                     break
 
-                        # 3. Variación cinemática en inglés sobre la query base (evita búsquedas en español)
+                        # 3. Variación cinemática anclada al tema o persona
                         if not sub_q:
-                            base_q = scene.visual_query or "documentary cinematic"
-                            variations = ["close up detail 4k", "wide angle perspective 4k", "slow motion cinematic 4k"]
-                            var_suffix = variations[(len(bg_clips) - 1) % len(variations)]
-                            sub_q = f"{base_q} {var_suffix}"
+                            base_q = scene.visual_query or "documentary footage"
+                            if self.is_anime:
+                                anime_name = getattr(self, "anime_series_name", "Black Clover")
+                                clean_base = base_q.replace("4k", "").replace("documentary", "").replace("footage", "").strip()
+                                # Anclaje dinámico al episodio específico del arco
+                                range_m = re.search(r'(?:episodios?|episodes?|ep\.?)\s*(\d+)\s*(?:-|a|to)\s*(\d+)', str(getattr(self, "topic", "")), re.IGNORECASE)
+                                ep_m = re.search(r'(?:ep|episode|episodio)\s*(\d+)', (base_q + " " + getattr(scene, "name", "")).lower())
+                                if ep_m:
+                                    target_ep_str = ep_m.group(1)
+                                elif range_m:
+                                    min_ep = int(range_m.group(1))
+                                    max_ep = int(range_m.group(2))
+                                    sc_num = getattr(self, "_current_scene_num", 1)
+                                    tot_sc = len(getattr(self, "scenes", [])) or 6
+                                    calc_ep = min_ep + int(((sc_num - 1) / max(1, tot_sc)) * (max_ep - min_ep + 0.99))
+                                    target_ep_str = str(min(max_ep, max(min_ep, calc_ep)))
+                                else:
+                                    target_ep_str = "1"
+
+                                ep_anchor = f"episode {target_ep_str}"
+                                variations = [
+                                    "action clip",
+                                    "sakuga clip",
+                                    "fight clip",
+                                    "scene clip"
+                                ]
+                                var_suffix = variations[(len(bg_clips) - 1) % len(variations)]
+                                noise_sub = {"in", "on", "at", "to", "for", "from", "with", "by", "the", "a", "an", "and", "or", "of", "no", "not", "into", "en", "de", "la", "el", "los", "las", "un", "una", "y", "o", "del", "al", "anime", "video", "clip", "scene", "episode", "episodio", "ep"}
+                                speech_words = [w for w in re.findall(r'[a-zA-ZáéíóúÁÉÍÓÚñÑ]+', speech_text) if len(w) >= 4 and w.lower() not in noise_sub and w.lower() not in anime_name.lower()]
+                                sub_words = [w for w in re.findall(r'[a-zA-Z]+', clean_base) if w.lower() not in noise_sub and w.lower() not in anime_name.lower()]
+                                salient = sub_words[:2] or speech_words[:2]
+                                core_sub = " ".join(salient)
+                                sub_q = f"{anime_name} {ep_anchor} {core_sub} {var_suffix}".strip()
+                            else:
+                                is_person_or_speech = any(k in base_q.lower() for k in (
+                                    "speech", "interview", "press", "president", "presidente", "minister",
+                                    "milei", "trump", "musk", "biden", "petro", "bukele", "sanchez", "altman", "news"
+                                ))
+                                if is_person_or_speech:
+                                    variations = [
+                                        "press conference angle",
+                                        "speech statement closeup",
+                                        "reaction audience media angle",
+                                        "official press report footage",
+                                        "alternate speech angle"
+                                    ]
+                                else:
+                                    variations = [
+                                        "close up detail 4k",
+                                        "wide angle perspective 4k",
+                                        "dynamic documentary angle",
+                                        "archival footage hd",
+                                        "cinematic motion angle 4k"
+                                    ]
+                                var_suffix = variations[(len(bg_clips) - 1) % len(variations)]
+                                sub_q = f"{base_q} {var_suffix}"
 
                         try:
                             supp_clip = await self._get_scene_visual(sub_q, scene_dir, is_video_scene=True)
-                            if supp_clip and supp_clip.exists():
+                            if supp_clip and _is_distinct_clip(supp_clip, bg_clips):
                                 bg_clips.append((supp_clip, round(target_cut, 2)))
                                 existing_times.append(round(target_cut, 2))
-                                safe_log(f"[SceneEngine] Variacion B-Roll enriquecida en t={target_cut:.1f}s: '{sub_q}'")
+                                if hasattr(self, "used_clip_names"):
+                                    self.used_clip_names.add(supp_clip.name)
+                                safe_log(f"[SceneEngine] ⚡ Corte de ritmo dinámico (Micro-Pacing t={target_cut:.1f}s): '{sub_q}'")
+                            elif self.is_anime and broll_img and broll_img.exists() and broll_img.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
+                                # Reutilizar metraje auténtico oficial de la escena con offset dinámico sin arriesgar descargas espurias
+                                bg_clips.append((broll_img, round(target_cut, 2)))
+                                existing_times.append(round(target_cut, 2))
+                                safe_log(f"[SceneEngine] 🎬 Reencuadre cinemático sobre metraje oficial de la escena (t={target_cut:.1f}s)")
+                            elif self.is_anime:
+                                # Reutilizar clips oficiales canónicos ya verificados y descargados en este proyecto
+                                existing_assets = list((self.work_dir / "assets").glob("scene_cue_*_yt.mp4")) if hasattr(self, "work_dir") and (self.work_dir / "assets").exists() else []
+                                valid_assets = [a for a in existing_assets if a.exists() and a.stat().st_size > 100000]
+                                if valid_assets:
+                                    borrowed = valid_assets[(len(bg_clips) * 3) % len(valid_assets)]
+                                    bg_clips.append((borrowed, round(target_cut, 2)))
+                                    existing_times.append(round(target_cut, 2))
+                                    safe_log(f"[SceneEngine] 🎬 Reencuadre desde archivo oficial canónico existente: {borrowed.name} (t={target_cut:.1f}s)")
                         except Exception as _esup:
                             safe_log(f"[SceneEngine] Fallback en B-Roll complementario: {_esup}")
-                    target_cut += 4.5
+                    target_cut += target_interval
 
         # Filtrar clips corruptos o sin frames decodificables
         valid_bg_clips = []
@@ -474,11 +841,6 @@ class SceneEngine:
                 safe_log(f"[SceneEngine] ⚠️ Descartando clip corrupto o sin frames decodificables: {p.name}")
         bg_clips = valid_bg_clips
 
-        # Ordenar clips de fondo por segundo de inicio
-        bg_clips.sort(key=lambda x: x[1])
-        if bg_clips and bg_clips[0][1] > 0.0:
-            bg_clips[0] = (bg_clips[0][0], 0.0)
-
         # Si no se pudo obtener ningún B-Roll o falló la descarga, usar estudio ambiental
         if not bg_clips:
             studio_blur_path = Path("assets/streamer_studio_blur_9_16.jpg" if self.is_vertical else "assets/streamer_studio_blur_16_9.jpg")
@@ -486,53 +848,213 @@ class SceneEngine:
             if fallback_bg.exists():
                 bg_clips.append((fallback_bg, 0.0))
 
-        # Generar clip de avatar con sincronización reactiva labial a la voz de la escena
-        scene_avatar_clip = scene_dir / "kai_avatar_synced.mov"
-        try:
-            from core.avatar_renderer import AvatarRenderer
-            rnd = AvatarRenderer()
-            await asyncio.to_thread(
-                rnd.render_reaction_clip,
-                duration_sec=duration,
-                out_path=scene_avatar_clip,
-                audio_path=audio_path,
-                fps=24
-            )
-            # Validar que el render realmente produjo un archivo utilizable:
-            # en escenas consecutivas el render puede "completar" sin excepción
-            # pero dejar un archivo vacío/corrupto (recursos agotados). Sin esta
-            # verificación, el FFmpeg de la escena intentaba abrir un .mov roto
-            # y la escena entera salía truncada (0.4s en vez de 15s).
-            if not scene_avatar_clip.exists() or scene_avatar_clip.stat().st_size < 10000:
-                safe_log(f"[SceneEngine] Avatar sincronizado inválido o vacío para escena {scene.scene_id}: fallback a base.")
-                scene_avatar_clip = None
-        except Exception as exc:
-            safe_log(f"[SceneEngine] Fallback a avatar clip base: {exc}")
-            scene_avatar_clip = None
+        # Garantía Universal Anti-Congelamiento y Variación Continua (Fotos y Videos):
+        # En canales normales/periodismo: subdivide en tomas de 2.6s a 3.4s con punch-ins.
+        # EN ANIME RECAP: Cada clip de animación fluye naturalmente (7s a 10s).
+        # PROHIBIDO cortar cada 2 segundos y PROHIBIDO repetir el mismo clip 20 veces.
+        bg_clips.sort(key=lambda x: x[1])
+        if anime_precise_clips:
+            pass  # cortes ya anclados a cada mención; no tocar
+        elif self.is_anime:
+            distinct_anime_clips: List[Tuple[Path, float]] = []
+            last_t = -999.0
+            for clip_p, t_start in bg_clips:
+                if not distinct_anime_clips:
+                    distinct_anime_clips.append((clip_p, 0.0))
+                    last_t = 0.0
+                elif (t_start - last_t) >= 2.2:
+                    distinct_anime_clips.append((clip_p, round(t_start, 2)))
+                    last_t = t_start
 
-        # 2d. Microelementos visuales cineticos sutiles disenados por GLM-5.3 (HyperFrames / Remotion / Native)
-        motion_overlay_path = None
-        if getattr(self, "motion_engine", None) and getattr(self, "glm_motion_director", None):
+            # Garantía Absoluta: Si hay menos de 3 planos y la escena dura >= 5s,
+            # subdividir en cortes estratégicos cada 3.5s para alternancia y movimiento continuo
+            if len(distinct_anime_clips) < max(2, math.ceil(duration / 4.0)) and duration >= 5.0:
+                base_clip, _ = distinct_anime_clips[0]
+                dense_anime: List[Tuple[Path, float]] = [(base_clip, 0.0)]
+                t_step = 3.5
+                cur_t = t_step
+                cut_idx = 1
+                while cur_t <= duration - 1.2:
+                    dense_anime.append((base_clip, round(cur_t, 2)))
+                    cur_t += t_step
+                    cut_idx += 1
+                distinct_anime_clips = dense_anime
+
+            bg_clips = distinct_anime_clips
+        else:
+            all_collected_media = [p for p, _ in bg_clips if p and p.exists()]
+            dense_clips: List[Tuple[Path, float]] = []
+            for idx_c, (clip_p, t_start) in enumerate(bg_clips):
+                t_next = bg_clips[idx_c + 1][1] if (idx_c + 1 < len(bg_clips)) else duration
+                seg_len = round(t_next - t_start, 2)
+                dense_clips.append((clip_p, t_start))
+
+                if seg_len > max_allowed_gap and seg_len >= 4.0:
+                    is_img_seg = clip_p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+                    sub_step = 2.6 if is_hook_scene else (3.2 if is_img_seg else 4.2)
+                    t_sub = round(t_start + sub_step, 2)
+                    alt_idx = 0
+                    while t_sub <= t_next - 1.2:
+                        if len(all_collected_media) > 1 and is_img_seg:
+                            next_media = all_collected_media[(idx_c + alt_idx + 1) % len(all_collected_media)]
+                        else:
+                            next_media = clip_p
+                        dense_clips.append((next_media, t_sub))
+                        alt_idx += 1
+                        t_sub = round(t_sub + sub_step, 2)
+
+            dense_clips.sort(key=lambda x: x[1])
+            bg_clips = dense_clips
+
+        # Detección inteligente de cortes de declaración / Soundbite del protagonista
+        # REGLA ESTRICTA DE ANIME: Si es anime/manga/ficción, NUNCA se activa soundbite de personas reales
+        # ni se pausa la locución. El narrador habla continuo al 100% y los visuales son clips puros de anime.
+        if self.is_anime:
+            is_soundbite_scene = False
+        else:
+            speech_low = (scene.speech or "").lower()
+            name_low = (scene.name or "").lower()
+            quote_keywords = [
+                "dijo", "afirmó", "afirmo", "declaró", "declaro", "aseguró", "aseguro",
+                "expresó", "expreso", "manifestó", "manifiesto", "palabras", "discurso",
+                "conferencia", "entrevista", "declaraciones", "cita", "testimonio",
+                "rueda de prensa", "escuchen", "miren lo que dijo", "atención a lo que",
+                "esto afirmó", "declaró ante", "en sus propias palabras", "escuchémoslo", "escuchenlo"
+            ]
+            is_quote_context = any(k in speech_low or k in name_low for k in quote_keywords)
+            is_soundbite_scene = (
+                scene.type == "video_reaction"
+                or getattr(scene, "soundbite", False)
+                or is_quote_context
+                or getattr(self, "enable_clip_audio", False)
+            )
+
+        clip_audio_candidate = None
+        soundbite_offset = 0.0
+        soundbite_window = 0.0
+
+        if not self.is_anime:
+            # 1. Si el director asignó un clip de soundbite real del video fuente:
+            sb_clip_name = getattr(scene, "soundbite_clip", None)
+            if sb_clip_name:
+                for cand_p in [
+                    self.workdir / "case_soundbites" / sb_clip_name,
+                    self.workdir / sb_clip_name,
+                    Path(sb_clip_name),
+                ]:
+                    if cand_p.exists() and cand_p.stat().st_size > 10000:
+                        clip_audio_candidate = cand_p
+                        soundbite_offset = getattr(scene, "soundbite_offset", 0.0) or 0.0
+                        soundbite_window = getattr(scene, "soundbite_dur", None) or 3.8
+                        safe_log(f"[SceneEngine] 🎯 Soundbite directo del director vinculado: {cand_p.name} (dur={soundbite_window:.2f}s)")
+                        break
+
+            # 2. Si no hay soundbite predefinido pero es escena de soundbite/reacción:
+            if not clip_audio_candidate:
+                clip_audio_candidate = self._get_clip_with_audio(bg_clips)
+                if is_soundbite_scene and clip_audio_candidate:
+                    # Análisis semántico y de voz para encontrar el punto estratégico y lógico donde habla la persona
+                    try:
+                        from core.soundbite_analyzer import StrategicSoundbiteAnalyzer
+                        sb_analyzer = StrategicSoundbiteAnalyzer()
+                        target_kw = getattr(scene, "chips", []) + [w for w in (scene.name or "").split() if len(w) > 3]
+                        sb_info = await asyncio.to_thread(
+                            sb_analyzer.find_best_soundbite_in_clip,
+                            clip_audio_candidate,
+                            scene.speech,
+                            target_kw,
+                        )
+                        if sb_info:
+                            soundbite_offset = sb_info.start_sec
+                            soundbite_window = max(2.6, min(5.8, sb_info.duration + 0.35))
+                            safe_log(f"[SceneEngine] 🎙️ Soundbite estratégico detectado (t={soundbite_offset:.2f}s, dur={soundbite_window:.2f}s): «{sb_info.quote}»")
+                        else:
+                            soundbite_offset = 0.0
+                            soundbite_window = 3.6
+                    except Exception as _sbe:
+                        safe_log(f"[SceneEngine] Aviso detectando offset de soundbite: {_sbe}")
+                        soundbite_offset = 0.0
+                        soundbite_window = 3.6
+
+        # Pausas estratégicas para cortes de declaración / clips del protagonista:
+        # - sb_pause_before: Pausa de suspense / respiración (0.40s) tras terminar KAI y antes de que hable la persona.
+        # - sb_pause_after: Pausa de reflexión (0.55s) tras terminar la declaración para absorber su impacto antes de la siguiente escena.
+        sb_pause_before = 0.0 if self.is_anime else 0.40
+        sb_pause_after = 0.0 if self.is_anime else 0.55
+
+        if is_soundbite_scene and clip_audio_candidate and not self.is_anime:
+            soundbite_start_t = round(tts_duration + sb_pause_before, 2)
+            duration = max(duration, round(soundbite_start_t + soundbite_window + sb_pause_after, 2))
+            dur_str = f"{duration:.2f}"
+            # Asegurar que el fondo corte al clip del protagonista al iniciar el soundbite (con micro-anticipo visual cinemático)
+            clip_switch_t = max(0.0, round(soundbite_start_t - 0.20, 2))
+            has_clip_at_sb = any(p == clip_audio_candidate and abs(t - clip_switch_t) < 0.35 for p, t in bg_clips)
+            if not has_clip_at_sb and clip_switch_t < duration:
+                bg_clips.append((clip_audio_candidate, clip_switch_t))
+                bg_clips.sort(key=lambda x: x[1])
+            safe_log(f"[SceneEngine] 🎙️ Soundbite activo: reservando {soundbite_window:.2f}s para voz real del protagonista ({clip_audio_candidate.name}) con pausas estratégicas (pre={sb_pause_before}s, post={sb_pause_after}s). Duración escena: {duration:.2f}s")
+
+        # Generar clip de avatar con sincronización reactiva labial a la voz de la escena
+        is_scene_documentary = (
+            getattr(self, "origin", "") in ("geopolitics_nucleo", "the_deep_dife", "universal_tour_huellas", "documental")
+            or any(k in (getattr(self, "topic", "") or "").lower() for k in ("geopolitica", "geopolítica", "historia", "documental", "estrecho", "malaca", "guerra", "imperio", "misterio"))
+            or not getattr(self, "enable_avatar", True)
+        )
+        scene_avatar_clip = None if is_scene_documentary else (scene_dir / "kai_avatar_synced.mov")
+        if not is_scene_documentary:
             try:
-                acc_col = getattr(scene, "accent_color", "#ff9436") or "#ff9436"
-                motion_spec = self.glm_motion_director.design_motion_spec(
-                    scene_name=scene.name,
-                    speech_text=speech_text,
-                    duration=duration,
-                    accent_color=acc_col,
-                    scene_type=getattr(scene, "type", "broll_narration"),
+                from core.avatar_renderer import AvatarRenderer
+                rnd = AvatarRenderer()
+                await asyncio.to_thread(
+                    rnd.render_reaction_clip,
+                    duration_sec=duration,
+                    out_path=scene_avatar_clip,
+                    audio_path=audio_path,
+                    fps=24
                 )
-                motion_overlay_path = await self.motion_engine.render_scene_motion_overlay(
-                    motion_spec=motion_spec,
-                    duration=duration,
-                    scene_dir=scene_dir,
-                    scene_id=scene.scene_id,
-                )
-                if motion_overlay_path and motion_overlay_path.exists():
-                    safe_log(f"[SceneEngine] ? Capa de microelementos cineticos GLM-5.3 lista para escena {scene.scene_id}")
-            except Exception as _me:
-                safe_log(f"[SceneEngine] Fallback en motion graphics: {_me}")
-                motion_overlay_path = None
+                if not scene_avatar_clip.exists() or scene_avatar_clip.stat().st_size < 10000:
+                    safe_log(f"[SceneEngine] Avatar sincronizado inválido o vacío para escena {scene.scene_id}: fallback a base.")
+                    scene_avatar_clip = None
+            except Exception as exc:
+                safe_log(f"[SceneEngine] Fallback a avatar clip base: {exc}")
+                scene_avatar_clip = None
+        else:
+            safe_log(f"[SceneEngine] 🎬 Escena {scene.scene_id}: Avatar sincronizado omitido para estilo documental puro.")
+
+        # 2d. Microelementos visuales cinéticos y badges dinámicos diseñados por DeepSeek Flash
+        # 2d. Microelementos visuales cinéticos y badges dinámicos diseñados por DeepSeek Flash
+        motion_overlay_path = None
+        motion_badges = []
+        motion_stat = None
+        if getattr(self, "motion_engine", None):
+            motion_dir = getattr(self, "deepseek_motion_director", None)
+            if motion_dir:
+                try:
+                    acc_col = getattr(scene, "accent_color", "#ff9436") or "#ff9436"
+                    motion_spec = motion_dir.design_motion_spec(
+                        scene_name=scene.name,
+                        speech_text=speech_text,
+                        duration=duration,
+                        accent_color=acc_col,
+                        scene_type=getattr(scene, "type", "broll_narration"),
+                    )
+                    motion_assets = await self.motion_engine.render_scene_motion_assets(
+                        motion_spec=motion_spec,
+                        duration=duration,
+                        scene_dir=scene_dir,
+                        scene_id=scene.scene_id,
+                        accent_color=acc_col,
+                    )
+                    motion_overlay_path = motion_assets.get("bg_overlay")
+                    motion_badges = motion_assets.get("badges", [])
+                    motion_stat = motion_assets.get("stat")
+                    if motion_overlay_path and motion_overlay_path.exists():
+                        safe_log(f"[SceneEngine] ✓ Capa de motion graphics DeepSeek Flash lista para escena {scene.scene_id} ({len(motion_badges)} insignias escalonadas)")
+                except Exception as _me:
+                    safe_log(f"[SceneEngine] Fallback en motion graphics: {_me}")
+                    motion_overlay_path = None
+                    motion_badges = []
+                    motion_stat = None
 
         # 3. Preparar tarjeta Bento moderna o alternativa visual honesta
         card_img_path = None
@@ -545,14 +1067,9 @@ class SceneEngine:
         if not scene.card and visual_intent and visual_intent.intent_type != VisualIntentType.GENERAL_BROLL:
             from core.director import SceneCard
             if visual_intent.intent_type == VisualIntentType.STAT_NUMBER and visual_intent.stat_value:
-                scene.card = SceneCard(
-                    headline=visual_intent.entity_name,
-                    stat=visual_intent.stat_value,
-                    body=visual_intent.raw_sentence[:100],
-                    badge="MÉTRICA VERIFICADA",
-                    template="stat_counter",
-                )
-                safe_log(f"[SmartMediaCurator] 📊 Cifra en locución -> Generando Stat Counter: {visual_intent.stat_value}")
+                # Las cifras y porcentajes se animan con Motion Graphics cinéticos flotantes (DeepSeek Flash)
+                # sin crear tarjetas toscas estáticas que oscurezcan el video.
+                safe_log(f"[SmartMediaCurator] 📊 Cifra en locución ({visual_intent.stat_value}) -> Animación cinética flotante DeepSeek sin card tosco.")
             elif visual_intent.intent_type == VisualIntentType.GEO_LOCATION:
                 scene.card = SceneCard(
                     headline=visual_intent.entity_name,
@@ -685,8 +1202,8 @@ class SceneEngine:
                         card_visual_type = "tech_card"
                         safe_log(f"[SceneEngine] 💻 Tarjeta Técnica Flotante (Tech Card) generada para escena {scene.scene_id}: {c_headline}")
 
-                # 0c. Cifra Récord / Métrica Clave con medidor en gradiente
-                elif c_template in ("stat_counter", "stat_card") or any(k in c_badge for k in ("RÉCORD", "RECORD", "CIFRA", "MÉTRICA", "METRICA")) or ("%" in c_stat or (c_stat and any(ch.isdigit() for ch in c_stat) and len(c_stat) < 12 and not any(k in c_badge for k in ("MAPA", "GEO")))):
+                # 0c. Cifra Récord / Métrica Clave con medidor en gradiente (solo si no es otra plantilla explícita)
+                elif c_template in ("stat_counter", "stat_card") or ((c_template in ("auto", "default", "") or not c_template) and (any(k in c_badge for k in ("RÉCORD", "RECORD", "CIFRA", "MÉTRICA", "METRICA")) or ("%" in c_stat or (c_stat and any(ch.isdigit() for ch in c_stat) and len(c_stat) < 12 and not any(k in c_badge for k in ("MAPA", "GEO", "INFORME", "EVIDENCIA", "DOCUMENTO")))))):
                     card_res = self.web_renderer.render_visual_template(
                         template_name="stat_counter",
                         out_png=card_img_path,
@@ -820,33 +1337,103 @@ class SceneEngine:
                         card_visual_type = "timeline_milestone"
                         safe_log(f"[SceneEngine] ⏳ Línea de Tiempo Documental generada para escena {scene.scene_id}: {c_headline}")
 
+                # 0l. Diagrama de Arquitectura / Patrón de Enrutamiento Agéntico (Estilo Santa IA - Router Pattern)
+                elif c_template in ("workflow_diagram", "workflow", "router_pattern", "agent_graph", "nodos_agente", "diagrama_flujo") or any(k in c_badge for k in ("ROUTER", "ARQUITECTURA", "PATRON", "PATRÓN", "FLUJO", "AGENTES", "AGENTE")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="workflow_diagram",
+                        out_png=card_img_path,
+                        params={
+                            "title": c_headline,
+                            "note": c_body or "Aislamiento de contexto: solo el agente seleccionado consume tokens.",
+                            **c_params
+                        },
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "workflow_diagram"
+                        safe_log(f"[SceneEngine] 🔀 Diagrama de Arquitectura / Router Agéntico generado para escena {scene.scene_id}: {c_headline}")
+
+                # 0m. Consola Terminal HUD / Claude Code CLI (Estilo Dev / Santa IA)
+                elif c_template in ("terminal_hud", "terminal", "cli_console", "code_terminal", "consola_codigo") or any(k in c_badge for k in ("TERMINAL", "CLI", "CODIGO", "CÓDIGO", "CLAUDE CODE", "COMMAND")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="terminal_hud",
+                        out_png=card_img_path,
+                        params={
+                            "command": c_headline,
+                            "body": c_body,
+                            **c_params
+                        },
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "terminal_hud"
+                        safe_log(f"[SceneEngine] 💻 Consola Terminal HUD generada para escena {scene.scene_id}: {c_headline}")
+
+                # 0n. Matriz de Especificaciones / Benchmark Comparativo (Estilo Santa IA)
+                elif c_template in ("spec_matrix", "benchmark_table", "matrix_table", "comparativa_metricas", "benchmark") or any(k in c_badge for k in ("BENCHMARK", "MATRIZ", "COMPARATIVA", "METRICAS", "MÉTRICAS")):
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="spec_matrix",
+                        out_png=card_img_path,
+                        params={
+                            "title": c_headline,
+                            "subtitle": c_body,
+                            "tag": c_badge or "BENCHMARK DE ARQUITECTURA",
+                            **c_params
+                        },
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "spec_matrix"
+                        safe_log(f"[SceneEngine] 📊 Matriz de Especificaciones / Benchmark generada para escena {scene.scene_id}: {c_headline}")
+
+                # 0o. Pantalla Dividida Documental (Estilo Platzi + Agustín Laje)
+                elif c_template in ("document_evidence_split", "document_evidence", "split_evidence", "platzi_evidence", "informe_split") or any(k in c_badge for k in ("INFORME OFICIAL", "EVIDENCIA DOCUMENTAL", "ONU", "UNODC", "CITACIÓN FORMAL", "DOCUMENTO")):
+                    doc_img = str(broll_img) if broll_img and Path(broll_img).exists() else c_params.get("image_path")
+                    card_res = self.web_renderer.render_visual_template(
+                        template_name="document_evidence_split",
+                        out_png=card_img_path,
+                        params={
+                            "headline": c_headline,
+                            "excerpt": c_body or c_headline,
+                            "institution": c_params.get("institution") or (c_badge if c_badge != "DATO CLAVE" else "ORGANISMO OFICIAL"),
+                            "date_str": c_params.get("date_str") or "INFORME OFICIAL",
+                            "highlight_phrase": c_params.get("highlight_phrase") or c_stat or "",
+                            "image_path": doc_img,
+                            "stat_value": c_stat or c_params.get("stat_value") or "",
+                            "stat_label": c_params.get("stat_label") or "Métrica Clave",
+                            "stat_value2": c_params.get("stat_value2") or "",
+                            "stat_label2": c_params.get("stat_label2") or "",
+                            "tag": c_badge or "EVIDENCIA DOCUMENTAL",
+                            "presenter_name": c_params.get("presenter_name", "ANÁLISIS DOCUMENTAL"),
+                            "layout_mode": "split" if not self.is_vertical else "card_only",
+                            **c_params,
+                        },
+                        variant=c_variant,
+                    )
+                    if card_res and card_res.exists():
+                        card_visual_type = "document_evidence_split"
+                        safe_log(f"[SceneEngine] 📜 Pantalla Dividida Documental Platzi/Laje generada para escena {scene.scene_id}: {c_headline}")
+
                 # 1. Mapa Geopolítico / Satelital Táctico GeoIntel (si aplica específicamente)
                 elif c_template in ("map", "geointel_map") or any(k in c_badge for k in ("MAPA", "GEO", "GEOPOLÍTICA", "UBICACIÓN", "UBICACION")) or "mapa" in c_headline.lower():
-                    map_result = self.web_renderer.render_geointel_map_to_image(
-                        location_title=c_headline,
-                        country_name=c_stat or "ZONA DE INVESTIGACIÓN",
-                        out_png=card_img_path,
-                        coordinates_str="COORDENADAS SATELITALES",
-                        notes=c_body,
-                        badge=c_badge or "RECONOCIMIENTO GEOGRÁFICO",
-                    )
-                    if map_result:
-                        card_visual_type = "map"
-                        safe_log(f"[SceneEngine] 🗺️ Mapa Geopolítico GeoIntel generado para escena {scene.scene_id}")
+                    bg_has_map = any("map" in str(getattr(b, "query", "")).lower() or "satellite" in str(getattr(b, "query", "")).lower() for b in getattr(scene, "visual_beats", [])) or "map" in str(scene.visual_query).lower() or "satellite" in str(scene.visual_query).lower()
+                    if bg_has_map and self.is_vertical:
+                        safe_log(f"[SceneEngine] 🌍 Metraje de fondo es mapa satelital completo; omitiendo tarjeta superpuesta para apreciar el mapa en 100% de la pantalla.")
+                        card_img_path = None
                     else:
-                        self.web_renderer.render_to_image(
-                            headline=c_headline,
+                        map_result = self.web_renderer.render_geointel_map_to_image(
+                            location_title=c_headline,
+                            country_name=c_stat or "ZONA DE INVESTIGACIÓN",
                             out_png=card_img_path,
-                            stat_value=c_stat or "DATO CLAVE",
-                            stat_label="Cifra Verificada",
-                            body=c_body,
-                            badge=c_badge or "DATO VERIFICADO",
-                            source="Registro Oficial 2026",
-                            style="auto",
-                            image_path=broll_img,
+                            coordinates_str="COORDENADAS SATELITALES",
+                            notes=c_body,
+                            badge=c_badge or "RECONOCIMIENTO GEOGRÁFICO",
                         )
-                        card_visual_type = "bento"
-                        safe_log(f"[SceneEngine] 📊 Tarjeta Bento estándar generada para escena {scene.scene_id}")
+                        if map_result and map_result.exists():
+                            card_visual_type = "map"
+                            safe_log(f"[SceneEngine] 🗺️ Mapa Geopolítico GeoIntel generado para escena {scene.scene_id}")
+                        else:
+                            card_img_path = None
 
                 # 2. Bento estándar (Fallback final)
                 else:
@@ -1003,7 +1590,7 @@ class SceneEngine:
                     tag=free_data.get("tag", ""),
                     subtitle=free_data.get("subtitle", ""),
                     highlight=free_data.get("highlight", ""),
-                    accent_color=free_data.get("accent_color", "#38bdf8"),
+                    accent_color=free_data.get("accent_color", "#ff9436"),
                 )
                 free_title_blur_bg = bool(free_data.get("blur_bg", True))
                 safe_log(f"[SceneEngine] 🎬 Texto Libre Cinemático Flotante generado para escena {scene.scene_id}")
@@ -1125,6 +1712,56 @@ class SceneEngine:
 
         srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
 
+        # 4b. Detección inteligente de personas/protagonistas mencionados para Spotlight con foto
+        person_spotlight_overlays: List[Dict[str, Any]] = []
+        try:
+            from core.smart_media_curator import SmartMediaCurator
+            from core.web_media import WikiMediaClient
+            mentions = SmartMediaCurator.detect_person_mentions(
+                speech_text=speech_text or "",
+                sentence_boundaries=sentence_boundaries,
+                scene_duration=duration,
+            )
+            if mentions:
+                portraits_dir = self.workdir / "portraits"
+                portraits_dir.mkdir(parents=True, exist_ok=True)
+                wiki_client = WikiMediaClient()
+
+                for m_idx, m in enumerate(mentions):
+                    p_slug = re.sub(r'[^a-z0-9]+', '_', m['name'].lower()).strip('_')
+                    portrait_p = portraits_dir / f"{p_slug}.jpg"
+                    if not portrait_p.exists() or portrait_p.stat().st_size < 500:
+                        try:
+                            w_res = await wiki_client.search(m.get("query_wiki") or m["name"])
+                            if w_res and w_res.image_url:
+                                await wiki_client.download_image(w_res.image_url, portrait_p)
+                        except Exception as _we:
+                            safe_log(f"[SceneEngine] Aviso buscando retrato wiki para {m['name']}: {_we}")
+
+                    spotlight_png = scene_dir / f"person_spotlight_{scene.scene_id}_{m_idx}_{p_slug}.png"
+                    tpl_params = {
+                        "name": m["name"],
+                        "role": m.get("role") or "Figura Pública",
+                        "image_path": str(portrait_p) if (portrait_p.exists() and portrait_p.stat().st_size > 500) else None,
+                        "tag": "PROTAGONISTA" if m_idx == 0 else "PERSONAJE",
+                    }
+                    rendered_p = self.web_renderer.render_visual_template(
+                        template_name="person_spotlight",
+                        out_png=spotlight_png,
+                        params=tpl_params,
+                        variant=getattr(scene, "theme_variant", "orange_noir") or "orange_noir",
+                    )
+                    if rendered_p and rendered_p.exists():
+                        person_spotlight_overlays.append({
+                            "png_path": rendered_p,
+                            "start_time": m["start_time"],
+                            "duration": m["duration"],
+                            "name": m["name"],
+                        })
+                        safe_log(f"[SceneEngine] 👤 Spotlight con foto generado para '{m['name']}' (t={m['start_time']:.1f}s - {m['start_time'] + m['duration']:.1f}s)")
+        except Exception as _pe:
+            safe_log(f"[SceneEngine] Aviso en detección de personas: {_pe}")
+
         # 5. Montar filtergraph de FFmpeg específico para el layout de la escena
         inputs: List[str] = []
         filter_parts: List[str] = []
@@ -1138,16 +1775,30 @@ class SceneEngine:
                 if first_is_image:
                     inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(first_bg_path)])
                     kb_frames = max(1, int(float(dur_str) * 25))
+                    z_step = max(0.0003, round(0.14 / kb_frames, 5))
+                    pan_step = max(0.2, round(25.0 / kb_frames, 2))
+                    kb_mode = int(scene.scene_id) % 4
+                    if kb_mode == 0:
+                        kb_filter = f"zoompan=z='min(zoom+{z_step},1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps=25"
+                    elif kb_mode == 1:
+                        kb_filter = f"zoompan=z='if(lte(zoom,1.02),1.02,max(1.02,1.15-{z_step}*on))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps=25"
+                    elif kb_mode == 2:
+                        kb_filter = f"zoompan=z=1.08:x='min(x+{pan_step},iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps=25"
+                    else:
+                        kb_filter = f"zoompan=z=1.08:x='max(0,iw-iw/zoom-{pan_step}*on)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps=25"
                     filter_parts.append(
-                        f"[0:v]scale={int(self.W * 1.12)}:{int(self.H * 1.12)}:force_original_aspect_ratio=increase,"
-                        f"crop={int(self.W * 1.12)}:{int(self.H * 1.12)},"
-                        f"zoompan=z='min(zoom+0.0003,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)-{self.H//10}*on/{kb_frames}':d={kb_frames}:s={self.W}x{self.H}:fps=25,"
+                        f"[0:v]scale={int(self.W * 1.14)}:{int(self.H * 1.14)}:force_original_aspect_ratio=increase,"
+                        f"crop={int(self.W * 1.14)}:{int(self.H * 1.14)},"
+                        f"{kb_filter},"
                         f"setsar=1[v_bg0]"
                     )
                 else:
-                    inputs.extend(["-t", dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(first_bg_path)])
+                    inputs.extend(["-t", dur_str, "-r", "25", "-i", str(first_bg_path)])
+                    cam_x = f"'(in_w-out_w)/2 + 35*(t/{dur_str})'"
+                    cam_y = f"'(in_h-out_h)/2 + 18*(t/{dur_str})'"
                     filter_parts.append(
-                        f"[0:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1,"
+                        f"[0:v]scale={int(self.W * 1.08)}:{int(self.H * 1.08)}:force_original_aspect_ratio=increase,"
+                        f"crop={self.W}:{self.H}:x={cam_x}:y={cam_y},setsar=1,"
                         f"tpad=stop_mode=clone:stop_duration={dur_str},trim=duration={dur_str},setpts=PTS-STARTPTS[v_bg0]"
                     )
                 cur_v = "v_bg0"
@@ -1171,16 +1822,65 @@ class SceneEngine:
                     if is_img:
                         inputs.extend(["-loop", "1", "-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
                         kb_frames_sub = max(1, int(seg_dur * 25))
+                        z_step_sub = max(0.0003, round(0.14 / kb_frames_sub, 5))
+                        pan_step = max(0.2, round(25.0 / kb_frames_sub, 2))
+                        kb_mode = (int(scene.scene_id) + i) % 4
+                        if kb_mode == 0:
+                            kb_filter = f"zoompan=z='min(zoom+{z_step_sub},1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25"
+                        elif kb_mode == 1:
+                            kb_filter = f"zoompan=z='if(lte(zoom,1.02),1.02,max(1.02,1.15-{z_step_sub}*on))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25"
+                        elif kb_mode == 2:
+                            kb_filter = f"zoompan=z=1.08:x='min(x+{pan_step},iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25"
+                        else:
+                            kb_filter = f"zoompan=z=1.08:x='max(0,iw-iw/zoom-{pan_step}*on)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25"
+
                         filter_parts.append(
-                            f"[{clip_in_idx}:v]scale={int(self.W * 1.12)}:{int(self.H * 1.12)}:force_original_aspect_ratio=increase,"
-                            f"crop={int(self.W * 1.12)}:{int(self.H * 1.12)},"
-                            f"zoompan=z='min(zoom+0.0003,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25,"
+                            f"[{clip_in_idx}:v]scale={int(self.W * 1.14)}:{int(self.H * 1.14)}:force_original_aspect_ratio=increase,"
+                            f"crop={int(self.W * 1.14)}:{int(self.H * 1.14)},"
+                            f"{kb_filter},"
                             f"setsar=1,trim=duration={seg_dur_str},setpts=PTS-STARTPTS[{seg_tag}]"
                         )
                     else:
-                        inputs.extend(["-t", seg_dur_str, "-r", "25", "-stream_loop", "-1", "-i", str(clip_p)])
+                        is_soundbite_seg = (
+                            is_soundbite_scene
+                            and clip_audio_candidate
+                            and clip_p == clip_audio_candidate
+                            and abs(t_start - round(tts_duration, 2)) < 0.35
+                            and soundbite_offset > 0.05
+                        )
+                        # Offset temporal dinámico y reencuadre punch-in para cortes sucesivos del mismo archivo
+                        same_file_prev = (i > 0 and bg_clips[i - 1][0] == clip_p)
+                        v_offset = (i * 4.5) if (same_file_prev and not is_soundbite_seg) else 0.0
+                        if is_soundbite_seg:
+                            inputs.extend(["-ss", f"{soundbite_offset:.3f}", "-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
+                        elif v_offset > 0.1:
+                            inputs.extend(["-ss", f"{v_offset:.2f}", "-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
+                        else:
+                            inputs.extend(["-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
+
+                        # Movimiento cinemático continuo y alternancia de cámaras para cada plano:
+                        cam_mode = i % 4
+                        if cam_mode == 0:
+                            scale_factor = 1.08
+                            cam_x = f"'(in_w-out_w)/2 + 30*(t/{seg_dur_str})'"
+                            cam_y = f"'(in_h-out_h)/2'"
+                        elif cam_mode == 1:
+                            scale_factor = 1.08
+                            cam_x = f"'(in_w-out_w)/2 - 30*(t/{seg_dur_str})'"
+                            cam_y = f"'(in_h-out_h)/2 + 15*(t/{seg_dur_str})'"
+                        elif cam_mode == 2:
+                            scale_factor = 1.15  # Plano cerrado / punch-in dramático
+                            cam_x = f"'(in_w-out_w)/2'"
+                            cam_y = f"'(in_h-out_h)/2 - 15*(t/{seg_dur_str})'"
+                        else:
+                            scale_factor = 1.10
+                            cam_x = f"'(in_w-out_w)/2 + 15*(t/{seg_dur_str})'"
+                            cam_y = f"'(in_h-out_h)/2 + 20*(t/{seg_dur_str})'"
+
+                        trans_fade = ",fade=t=in:st=0:d=0.18:color=black" if i > 0 else ""
                         filter_parts.append(
-                            f"[{clip_in_idx}:v]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},setsar=1,"
+                            f"[{clip_in_idx}:v]scale={int(self.W * scale_factor)}:{int(self.H * scale_factor)}:force_original_aspect_ratio=increase,"
+                            f"crop={self.W}:{self.H}:x={cam_x}:y={cam_y},setsar=1{trans_fade},"
                             f"tpad=stop_mode=clone:stop_duration={seg_dur_str},trim=duration={seg_dur_str},setpts=PTS-STARTPTS[{seg_tag}]"
                         )
                 all_segs = "".join(seg_tags)
@@ -1204,15 +1904,44 @@ class SceneEngine:
             cur_v = "v_bg_motion"
 
         # Desenfoque temporal dinámico: si hay tarjeta o texto libre cinemático, desenfocar durante su aparición
-        # Duración de la tarjeta por TIEMPO DE LECTURA (regla broadcast: ~1/3 s por
-        # palabra + 1.2s de animación/buffer, acotado 4-6.5s). Antes usaba hasta 9.5s
-        # fijos: la card se volvía un adorno permanente tapando el video.
+        # Duración de la tarjeta adaptada por importancia conceptual y tiempo de lectura:
+        # - Elementos clave (mapas, comparativas versus, citas/pruebas forenses, prensa, cifras récord):
+        #   Permanecen en pantalla de 5.5s a 8.5s (o proporcional en escenas largas) para que el espectador pueda asimilar y leer.
+        # - Elementos ligeros (chips de autoría, sellos rápidos): 3.0s a 4.5s.
         if card_img_path and card_img_path.exists():
             c_hl = scene.card.get("headline") if isinstance(scene.card, dict) else getattr(scene.card, "headline", "")
             c_bd = scene.card.get("body") if isinstance(scene.card, dict) else getattr(scene.card, "body", "")
+            c_bg = str(scene.card.get("badge") if isinstance(scene.card, dict) else getattr(scene.card, "badge", "") or "").upper()
+            c_tmpl = str(scene.card.get("template") if isinstance(scene.card, dict) else getattr(scene.card, "template", "") or "").lower()
             card_words = len(f"{c_hl or ''} {c_bd or ''}".split())
-            # Tarjeta: acotada estrictamente por temporización inteligente (y sale antes del corte de escena)
-            card_duration = max(2.2, min(smart_card_dur or 4.0, min(max(2.0, duration - card_start_time - 0.5), 0.20 * card_words + 1.8)))
+
+            # Detectar si es un elemento visual de alta relevancia temática, documental o gráfica
+            is_important_visual = (
+                card_visual_type in ("document_evidence_split", "versus_split", "quote_evidence", "newspaper_clipping", "social_post", "stat_counter", "alert_banner")
+                or c_tmpl in ("document_evidence_split", "split_evidence", "platzi_evidence", "map", "versus_split", "quote_evidence", "newspaper_clipping", "social_post", "stat_counter", "alert_banner", "timeline_milestone")
+                or any(k in c_bg for k in ("MAPA", "GEO", "VERSUS", "COMPARATIVA", "EVIDENCIA", "PRUEBA", "OFICIAL", "DESCLASIFICADO", "ARCHIVO", "DOCUMENTO", "INFORME", "RÉCORD", "RECORD", "CIFRA", "CRÍTICO", "CRITICO", "ALERTA"))
+                or (visual_intent and visual_intent.intent_type in (
+                    VisualIntentType.GEO_LOCATION,
+                    VisualIntentType.VERSUS_COMPARISON,
+                    VisualIntentType.HISTORICAL_EVENT,
+                    VisualIntentType.STAT_NUMBER,
+                    VisualIntentType.COMPLEX_CONCEPT
+                ))
+                or getattr(scene, "case_frame", None) is not None
+            )
+
+            if is_important_visual:
+                reading_calc = max(5.5, 0.32 * card_words + 2.5)
+                ideal_calc = max(reading_calc, smart_card_dur or 6.5)
+                max_card_cap = 8.5 if duration < 25.0 else min(10.5, duration * 0.40)
+            else:
+                reading_calc = max(3.0, 0.22 * card_words + 1.8)
+                ideal_calc = min(reading_calc, smart_card_dur or 4.2)
+                max_card_cap = 5.0
+
+            # Garantizar que el elemento se retire limpiamente antes del corte de escena (al menos 0.7s de margen)
+            max_allowed = max(2.2, duration - card_start_time - 0.7)
+            card_duration = max(2.2, min(ideal_calc, min(max_card_cap, max_allowed)))
         else:
             card_duration = 0.0
         # Duración del texto libre: con serie cinética la ventana cubre el
@@ -1226,20 +1955,27 @@ class SceneEngine:
         else:
             free_title_dur = 0.0
 
-        if card_duration > 0:
+        if is_scene_documentary or getattr(self, "pure_footage", False):
+            # En documentales / geopolítica, metraje de archivo 4K a 100% brillo y claridad sin velos oscuros
+            filter_parts.append(f"[{cur_v}]copy[v_dim]")
+        elif card_duration > 0:
             if card_visual_type in ("verdict_badge", "tech_card"):
                 # Badges y tech cards flotan limpiamente sobre el video nítido sin desenfoque pesado
-                filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.15:t=fill[v_dim]")
-            else:
-                # Bento Box / Cita / Mapa / Stat Counter: Dimming nítido y elegante sin boxblur CPU-bloat
+                filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.10:t=fill[v_dim]")
+            elif card_visual_type in ("document_evidence_split", "quote_evidence", "newspaper_clipping"):
+                # Para documentos oficiales y prensa editorial: atenuación cinematográfica sutil
                 filter_parts.append(
-                    f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.40:t=fill:enable='between(t,{card_start_time:.2f},{card_start_time + card_duration:.2f})'[v_dim]"
+                    f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.35:t=fill:enable='between(t,{card_start_time:.2f},{card_start_time + card_duration:.2f})'[v_dim]"
+                )
+            else:
+                # Bento Box / Cita / Mapa / Stat Counter
+                filter_parts.append(
+                    f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.25:t=fill:enable='between(t,{card_start_time:.2f},{card_start_time + card_duration:.2f})'[v_dim]"
                 )
         elif free_title_dur > 0:
-            # Atenuación cinematográfica durante la aparición del gran texto libre
-            filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.45:t=fill:enable='between(t,0.4,{0.4 + free_title_dur:.2f})'[v_dim]")
+            filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.25:t=fill:enable='between(t,0.4,{0.4 + free_title_dur:.2f})'[v_dim]")
         else:
-            filter_parts.append(f"[{cur_v}]drawbox=x=0:y=0:w={self.W}:h={self.H}:color=black@0.15:t=fill[v_dim]")
+            filter_parts.append(f"[{cur_v}]copy[v_dim]")
         cur_v = "v_dim"
 
         # Avatar según layout de cámara
@@ -1263,13 +1999,34 @@ class SceneEngine:
             cam = str(getattr(scene, "camera", "pip_corner") or "pip_corner").lower().strip()
             sc_type = str(getattr(scene, "type", "video_reaction") or "video_reaction").lower().strip()
 
-            av_w_pip = int(self.W * (0.24 if not self.is_vertical else 0.36))
-            av_x_pip = int(self.W - av_w_pip - (40 if not self.is_vertical else 26))
-            av_y_pip = int(self.H - av_w_pip - (40 if not self.is_vertical else 96))
+            if self.is_anime:
+                # Avatar discreto y pequeño en esquina inferior (sin estorbar el combate ni los personajes del anime)
+                av_w_pip = int(self.W * (0.11 if not self.is_vertical else 0.16))
+                av_x_pip = int(self.W - av_w_pip - 20)
+                av_y_pip = int(self.H - av_w_pip - (25 if not self.is_vertical else 55))
+            else:
+                av_w_pip = int(self.W * (0.24 if not self.is_vertical else 0.36))
+                av_x_pip = int(self.W - av_w_pip - (40 if not self.is_vertical else 26))
+                av_y_pip = int(self.H - av_w_pip - (40 if not self.is_vertical else 96))
 
-            if cam in ("voice_over", "none", "hidden") or sc_type == "voice_over":
-                # Escena puramente visual o voz en off: el avatar no se superpone
-                safe_log(f"[SceneEngine] 🎙️ Escena {scene.scene_id}: Modo voz en off, pantalla completa para contenido visual.")
+            is_documentary = (
+                getattr(self, "origin", "") in ("geopolitics_nucleo", "the_deep_dife", "universal_tour_huellas", "documental")
+                or any(k in (getattr(self, "topic", "") or "").lower() for k in ("geopolitica", "geopolítica", "historia", "documental", "estrecho", "malaca", "guerra", "imperio", "misterio"))
+                or not getattr(self, "enable_avatar", True)
+            )
+
+            if is_documentary or cam in ("voice_over", "none", "hidden") or sc_type == "voice_over":
+                # Escena puramente visual o documental: el avatar NO se superpone, pantalla completa limpia para metraje 4K
+                safe_log(f"[SceneEngine] 🎙️ Escena {scene.scene_id}: Modo cinematográfico documental, pantalla completa para metraje de archivo (cero avatar).")
+
+            elif self.is_anime:
+                # En anime: el avatar SIEMPRE sale pequeño abajo en esquina PIP discreta, jamás tapando el centro
+                filter_parts.append(
+                    f"[{av_idx}:v]scale={av_w_pip}:{av_w_pip},format=rgba[avatar];"
+                    f"[{cur_v}][avatar]overlay={av_x_pip}:{av_y_pip}:eof_action=pass[v_av]"
+                )
+                cur_v = "v_av"
+                safe_log(f"[SceneEngine] 🎬 Avatar Anime en PIP inferior discreto ({av_w_pip}x{av_w_pip}) en escena {scene.scene_id}.")
 
             elif is_opening or cam == "pip_delayed":
                 # APERTURA DINÁMICA: Los primeros 2.0s a 2.5s están dedicados 100% al impacto visual
@@ -1283,6 +2040,34 @@ class SceneEngine:
                 )
                 cur_v = "v_av"
                 safe_log(f"[SceneEngine] 🎬 Apertura dinámica activa en escena {scene.scene_id}: Avatar entra en PIP a los {delay_t:.1f}s.")
+
+            elif cam == "split_screen" or card_visual_type == "document_evidence_split":
+                # MODO PANTALLA DIVIDIDA PLATZI / AGUSTÍN LAJE:
+                # El presentador se ubica en el pod vertical izquierdo alineado con la plantilla
+                if not self.is_vertical:
+                    av_w_split = 510
+                    av_h_split = 740
+                    av_x_split = 65
+                    av_y_split = 135
+                    filter_parts.append(
+                        f"[{av_idx}:v]scale={av_w_split}:{av_h_split}:force_original_aspect_ratio=increase,"
+                        f"crop={av_w_split}:{av_h_split},format=rgba[avatar_split];"
+                        f"[{cur_v}][avatar_split]overlay={av_x_split}:{av_y_split}:eof_action=pass[v_av]"
+                    )
+                    cur_v = "v_av"
+                    safe_log(f"[SceneEngine] 🎬 Pantalla dividida activa en escena {scene.scene_id}: Avatar en Pod izquierdo (510x740).")
+                else:
+                    # En formato vertical, presentador centrado en tercio superior
+                    av_w_split = int(self.W * 0.88)
+                    av_h_split = int(self.H * 0.36)
+                    av_x_split = int((self.W - av_w_split) / 2)
+                    av_y_split = 80
+                    filter_parts.append(
+                        f"[{av_idx}:v]scale={av_w_split}:{av_h_split}:force_original_aspect_ratio=increase,"
+                        f"crop={av_w_split}:{av_h_split},format=rgba[avatar_split];"
+                        f"[{cur_v}][avatar_split]overlay={av_x_split}:{av_y_split}:eof_action=pass[v_av]"
+                    )
+                    cur_v = "v_av"
 
             elif cam == "hero_center" and not is_opening and not (card_img_path and card_img_path.exists()):
                 # Solo permitido en escenas intermedias/finales sin tarjeta que bloquee el centro
@@ -1302,6 +2087,18 @@ class SceneEngine:
                     f"[{cur_v}][avatar]overlay={av_x_pip}:{av_y_pip}:eof_action=pass[v_av]"
                 )
                 cur_v = "v_av"
+
+        # ── Ventana del overlay Remotion (cifra animada) ──
+        # Regla de limpieza: solo UNA cifra/dato a la vez en pantalla. Mientras el overlay
+        # Remotion está activo se suprimen popups, lower third, años flotantes y rótulos con números.
+        remo_active = bool(ai_remotion_mov and ai_remotion_mov.exists() and not (card_img_path and card_img_path.exists()))
+        remo_start, remo_end = 0.0, 0.0
+        if remo_active:
+            remo_len = min(duration, 3.8)
+            remo_start = max(0.3, min(float(card_start_time or 0.5), max(0.3, duration - remo_len - 0.2)))
+            remo_end = min(duration - 0.1, remo_start + remo_len)
+            popup_img_path = None
+            lower_third_img_path = None
 
         # Overlay adicional según tipo de escena: Texto Libre Cinemático o Tarjeta Bento
         if kinetic_word_paths and not (ai_remotion_mov and ai_remotion_mov.exists()):
@@ -1426,6 +2223,17 @@ class SceneEngine:
                 filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
                 cur_v = "v_card"
 
+            elif card_visual_type == "document_evidence_split":
+                # Pantalla dividida Platzi + Agustín Laje (1920x1080 o Vertical)
+                filter_parts.append(
+                    f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.30:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
+                )
+                if self.is_vertical:
+                    filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='(H-h)/2':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                else:
+                    filter_parts.append(f"[{cur_v}][card_animated]overlay=x=0:y=0:enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                cur_v = "v_card"
+
             else:
                 # Bento Box / Versus Split / Quote / Mapa estándar
                 slide_dist = 26
@@ -1490,7 +2298,7 @@ class SceneEngine:
         # ── AÑOS FLOTANTES: cuando la locución menciona un año, aparece suelto
         # (sin tarjeta) con estilo tipográfico rotativo. Nunca rompe la escena.
         try:
-            if card_duration <= 0:
+            if card_duration <= 0 and not remo_active:
                 _yrs = self.title_renderer.find_years(speech_text or "")[:2]
                 _busy_until = (0.4 + free_title_dur + 0.3) if free_title_dur > 0 else 0.0
                 _last_end = 0.0
@@ -1575,12 +2383,68 @@ class SceneEngine:
             )
             cur_v = "v_prv"
 
+        # Superposición de insignias secuenciales escalonadas (Países, fechas, empresas) diseñadas por DeepSeek Flash
+        if motion_badges:
+            total_b = len(motion_badges)
+            rack_gap = 16
+            total_rack_w = sum(b.get("width", 220) for b in motion_badges) + (total_b - 1) * rack_gap
+            start_x = max(40, (self.W - total_rack_w) // 2)
+            cur_badge_x = start_x
+            rack_y = int(self.H * 0.18) if not self.is_vertical else int(self.H * 0.16)
+
+            for bi, b_meta in enumerate(motion_badges):
+                b_path = b_meta.get("path")
+                if not b_path or not b_path.exists():
+                    continue
+                b_st = float(b_meta.get("delay_sec", 1.0 + bi * 1.2))
+                b_end = min(duration - 0.3, max(b_st + 3.2, duration - 0.4))
+                b_fo = max(b_st + 0.3, b_end - 0.35)
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(b_path)])
+                b_idx = num_in
+                num_in += 1
+                b_w = b_meta.get("width", 220)
+
+                pop_calc = f"min(max((t-{b_st:.2f})/0.25\\,0)\\,1)"
+                b_y_expr = f"{rack_y} + 22*(1-pow({pop_calc}\\,3))"
+                filter_parts.append(
+                    f"[{b_idx}:v]format=rgba,fade=t=in:st={b_st:.2f}:d=0.20:alpha=1,fade=t=out:st={b_fo:.2f}:d=0.35:alpha=1[b_item_{bi}];"
+                    f"[{cur_v}][b_item_{bi}]overlay=x='{cur_badge_x}':y='{b_y_expr}':enable='between(t,{b_st:.2f},{b_end:.2f})'[v_bdg_{bi}]"
+                )
+                cur_v = f"v_bdg_{bi}"
+                cur_badge_x += b_w + rack_gap
+
+        # Superposición de métrica cinética destacada (porcentaje o cifra animada) diseñada por DeepSeek Flash
+        if motion_stat and not card_img_path:
+            s_path = motion_stat.get("path")
+            if s_path and s_path.exists():
+                s_st = float(motion_stat.get("delay_sec", 1.4))
+                s_end = min(duration - 0.3, max(s_st + 3.8, duration - 0.4))
+                s_fo = max(s_st + 0.3, s_end - 0.35)
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(s_path)])
+                s_idx = num_in
+                num_in += 1
+                stat_y = int(self.H * 0.32) if not self.is_vertical else int(self.H * 0.28)
+                stat_pop = f"min(max((t-{s_st:.2f})/0.28\\,0)\\,1)"
+                stat_y_expr = f"{stat_y} + 26*(1-pow({stat_pop}\\,3))"
+                filter_parts.append(
+                    f"[{s_idx}:v]format=rgba,fade=t=in:st={s_st:.2f}:d=0.22:alpha=1,fade=t=out:st={s_fo:.2f}:d=0.35:alpha=1[stat_anim];"
+                    f"[{cur_v}][stat_anim]overlay=x='(W-w)/2':y='{stat_y_expr}':enable='between(t,{s_st:.2f},{s_end:.2f})'[v_mstat]"
+                )
+                cur_v = "v_mstat"
+
         # Superposicion de palabras clave / anos flotantes (rotulos de enfasis sin cards)
         if keyword_callout_overlays:
             kw_dur = 2.1
             for k_i, k_data in enumerate(keyword_callout_overlays):
                 k_path = k_data["path"]
                 k_frac = k_data["frac"]
+                # Con overlay Remotion activo: no mostrar rótulos numéricos ni solapados con la cifra animada
+                if remo_active:
+                    _kt = str(k_data.get("text", ""))
+                    _kt_start = max(0.8, min(duration - 2.5, k_frac * duration))
+                    if any(ch.isdigit() for ch in _kt) or (_kt_start < remo_end + 0.3 and _kt_start + 2.1 > remo_start - 0.3):
+                        safe_log(f"[SceneEngine] 🧹 Rótulo '{_kt}' omitido en escena {scene.scene_id}: cifra Remotion activa.")
+                        continue
                 # Determinar momento idoneo evitando colision con card o free_title
                 ideal_t = max(0.8, min(duration - kw_dur - 0.4, k_frac * duration))
                 if card_img_path and card_img_path.exists() and card_duration > 0:
@@ -1623,37 +2487,98 @@ class SceneEngine:
 
         # Superposición de Overlay Cinemático Remotion (React + Alpha ProRes)
         # Exclusión mutua estricta: asegurar que nunca se superponga sobre una tarjeta existente
-        if ai_remotion_mov and ai_remotion_mov.exists() and not (card_img_path and card_img_path.exists()):
+        if remo_active:
             inputs.extend(["-t", dur_str, "-r", "25", "-i", str(ai_remotion_mov)])
             remo_idx = num_in
             num_in += 1
+            # setpts desplaza el overlay al instante inteligente; eof_action=pass + enable
+            # garantizan que desaparece al terminar (antes quedaba el último fotograma congelado).
             filter_parts.append(
-                f"[{remo_idx}:v]scale={self.W}:{self.H},format=rgba[v_remo]"
+                f"[{remo_idx}:v]scale={self.W}:{self.H},format=rgba,setpts=PTS-STARTPTS+{remo_start:.2f}/TB[v_remo]"
             )
-            filter_parts.append(f"[{cur_v}][v_remo]overlay=0:0[v_with_remo]")
+            filter_parts.append(
+                f"[{cur_v}][v_remo]overlay=0:0:eof_action=pass:enable='between(t,{remo_start:.2f},{remo_end:.2f})'[v_with_remo]"
+            )
             cur_v = "v_with_remo"
 
-        # Subtítulos con libass (solo si burn_subtitles está activo; de lo contrario quedan limpios para el editor frontend)
-        if srt_path and srt_path.exists() and getattr(self, "burn_subtitles", False):
-            esc_srt = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
-            sub_size = 22 if self.is_vertical else 18
-            margin_v = 75 if self.is_vertical else 35
-            force_style = subtitle_force_style(self.sub_style, sub_size, margin_v)
+        # Superposición de tarjetas Spotlight con Foto sincronizadas con la mención de cada persona
+        if person_spotlight_overlays:
+            for ps_idx, ps in enumerate(person_spotlight_overlays):
+                ps_png = ps["png_path"]
+                if ps_png.exists():
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(ps_png)])
+                    ps_idx_in = num_in
+                    num_in += 1
+                    ps_st = ps["start_time"]
+                    ps_end = min(duration - 0.15, ps_st + ps["duration"])
+                    ps_fo = max(ps_st + 0.3, ps_end - 0.28)
+                    filter_parts.append(
+                        f"[{ps_idx_in}:v]format=rgba,fade=t=in:st={ps_st:.2f}:d=0.25:alpha=1,fade=t=out:st={ps_fo:.2f}:d=0.28:alpha=1[ps_{ps_idx}_anim]"
+                    )
+                    slide_dist = 22
+                    ps_calc = f"min(max((t-{ps_st:.2f})/0.28\\,0)\\,1)"
+                    if self.is_vertical:
+                        ps_x = "((W-w)/2)"
+                        ps_y_base = int(self.H * 0.72)
+                    else:
+                        ps_x = "60"
+                        ps_y_base = int(self.H - 195)
+                    ps_ease_y = f"{ps_y_base} + {slide_dist}*(1-pow({ps_calc}\\,3))"
+                    filter_parts.append(
+                        f"[{cur_v}][ps_{ps_idx}_anim]overlay=x='{ps_x}':y='{ps_ease_y}':enable='between(t,{ps_st:.2f},{ps_end:.2f})'[v_ps_{ps_idx}]"
+                    )
+                    cur_v = f"v_ps_{ps_idx}"
+
+        # Subtítulos con libass (queman en pantalla si burn_subtitles está activo, en vertical o en modo anime)
+        should_burn_subs = (
+            getattr(self, "burn_subtitles", False)
+            or self.is_anime
+            or (self.is_vertical and getattr(self, "subs_enabled", True))
+        )
+        if srt_path and srt_path.exists() and should_burn_subs:
+            ass_path = srt_path.with_suffix(".ass")
+            sub_size = 32 if not self.is_vertical else 54
+            margin_v = 45 if not self.is_vertical else 380
+            st_style = self.sub_style
+            if self.is_vertical and st_style in ("classic", "default", ""):
+                st_style = "hormozi"
+            generate_ass_from_srt(
+                srt_path,
+                ass_path,
+                width=self.W,
+                height=self.H,
+                sub_style=st_style,
+                font_size=sub_size,
+                margin_v=margin_v,
+            )
+            esc_ass = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
             filter_parts.append(
-                f"[{cur_v}]subtitles='{esc_srt}':force_style='{force_style}'[v_sub]"
+                f"[{cur_v}]ass='{esc_ass}'[v_sub]"
             )
             cur_v = "v_sub"
 
-        # Título superior / HUD y Marca de Agua Ángel R sutil
-        font_p = FileManager.get_system_font_path()
-        font_param = f"fontfile='{font_p}':" if font_p else ""
-        clean_tag = re.sub(r"[^\w\s-]", "", scene.name).strip()[:30] or "EN VIVO"
-        hud_fontsize = 18 if self.is_vertical else 20
-        wm_fontsize = 16 if self.is_vertical else 18
-        filter_parts.append(
-            f"[{cur_v}]drawtext={font_param}text='● EN VIVO  |  {clean_tag.upper()}':fontcolor=white:fontsize={hud_fontsize}:x=44:y=34:box=1:boxcolor=black@0.65:boxborderw=8,"
-            f"drawtext={font_param}text='Ángel R':fontcolor=white@0.35:fontsize={wm_fontsize}:x=w-tw-44:y=34[v_out]"
+        # Título superior / HUD y Marca de Agua:
+        # En videos verticales 9:16 (Shorts/Reels) o documentales cinematográficos, CERO banners tipo debug
+        # con nombres de escena internos ni marcas toscas. 100% metraje limpio.
+        show_hud = (
+            getattr(self, "show_hud_header", True)
+            and not self.is_vertical
+            and not is_scene_documentary
         )
+        if show_hud:
+            font_p = FileManager.get_system_font_path()
+            font_param = f"fontfile='{font_p}':" if font_p else ""
+            clean_tag = re.sub(r"[^\w\s-]", "", scene.name).strip()[:35] or "RESUMEN"
+            wm_text = getattr(self, "brand_watermark", "AetherCut")
+            hud_fontsize = 20
+            wm_fontsize = 18
+            hud_text = f"● EN VIVO  |  {clean_tag.upper()}" if not self.is_anime else f"{self.anime_series_name.upper()}  |  {clean_tag.upper()}"
+            filter_parts.append(
+                f"[{cur_v}]drawtext={font_param}text='{hud_text}':fontcolor=white:fontsize={hud_fontsize}:x=44:y=34:box=1:boxcolor=black@0.65:boxborderw=8,"
+                f"drawtext={font_param}text='{wm_text}':fontcolor=white@0.45:fontsize={wm_fontsize}:x=w-tw-44:y=34:box=1:boxcolor=black@0.35:boxborderw=6[v_out]"
+            )
+        else:
+            filter_parts.append(f"[{cur_v}]copy[v_out]")
 
         # Audio mix: voz de la escena + BGM sutil + SFX de transición
         # Aseguramos que la pista de voz llene la duración si es necesario con apad
@@ -1661,22 +2586,71 @@ class SceneEngine:
         voice_in_idx = num_in
         num_in += 1
 
+        # Verificación y activación de la presencia sonora real del protagonista (soundbite)
+        should_use_clip_audio = is_soundbite_scene and bool(clip_audio_candidate and clip_audio_candidate.exists()) and not self.is_anime
+        clip_audio_source = clip_audio_candidate if should_use_clip_audio else None
+        has_clip_audio = bool(clip_audio_source and clip_audio_source.exists())
+
         # Audio profesional: loudnorm EBU R128 para broadcast (-16 LUFS target)
+        has_bgm = bool(bgm_path and bgm_path.exists())
         if self.audio_normalize:
-            voice_norm = f"[{voice_in_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,loudnorm=I=-16:TP=-1.5:LRA=11,apad=whole_dur={dur_str}[a_voice]"
+            v_prep = f"[{voice_in_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,loudnorm=I=-16:TP=-1.5:LRA=11,apad=whole_dur={dur_str}"
         else:
-            voice_norm = f"[{voice_in_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,apad=whole_dur={dur_str}[a_voice]"
+            v_prep = f"[{voice_in_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,apad=whole_dur={dur_str}"
+
+        # Control de sidechain para BGM
+        if has_bgm:
+            voice_norm = f"{v_prep},asplit=2[a_voice][a_voice_ctrl_bgm]"
+        else:
+            voice_norm = f"{v_prep}[a_voice]"
 
         audio_filter_parts = [voice_norm]
         audio_mix_inputs = ["[a_voice]"]
 
-        if bgm_path and bgm_path.exists():
+        # Punto exacto donde KAI cede el turno y comienza el soundbite del protagonista con respiración estratégica
+        sb_pause_before = 0.0 if self.is_anime else 0.40
+        soundbite_start = round(tts_duration + sb_pause_before, 2)
+
+        if has_bgm:
             inputs.extend(["-t", dur_str, "-stream_loop", "-1", "-i", str(bgm_path)])
             bgm_idx = num_in
             num_in += 1
-            bgm_vol = getattr(self, 'bgm_volume', 0.06)
-            audio_filter_parts.append(f"[{bgm_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={bgm_vol:.3f}[a_bgm]")
+            bgm_vol = getattr(self, 'bgm_volume', 0.08)
+            # Durante la voz de KAI: sidechain ducking normal (-14dB).
+            # Durante el soundbite del protagonista (t >= soundbite_start - 0.15): BGM baja a cama sutil (0.035) para que la persona se escuche perfecta.
+            if has_clip_audio:
+                sb_duck_start = max(0.0, soundbite_start - 0.20)
+                sb_duck_end = round(soundbite_start + soundbite_window + 0.25, 2)
+                bgm_vol_expr = f"volume='if(between(t,{sb_duck_start:.2f},{sb_duck_end:.2f}),0.035,{bgm_vol:.3f})':eval=frame"
+            else:
+                bgm_vol_expr = f"volume={bgm_vol:.3f}"
+            audio_filter_parts.append(
+                f"[{bgm_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,{bgm_vol_expr}[a_bgm_raw];"
+                f"[a_bgm_raw][a_voice_ctrl_bgm]sidechaincompress=threshold=0.06:ratio=4:attack=50:release=350[a_bgm]"
+            )
             audio_mix_inputs.append("[a_bgm]")
+
+        if has_clip_audio:
+            # Entrada con offset estratégico exacto para que el audio empiece desde la primera palabra de la frase lógica
+            inputs.extend(["-ss", f"{soundbite_offset:.3f}", "-t", f"{soundbite_window:.3f}", "-i", str(clip_audio_source)])
+            clip_a_idx = num_in
+            num_in += 1
+            delay_ms = int(soundbite_start * 1000)
+            # REGLA DE ORO DE SOUNDBITES / CORTES DE DECLARACIÓN:
+            # 1. Mientras KAI habla y durante la pausa previa de suspense (t < soundbite_start): silencio total (adelay mantiene la pista en espera)
+            # 2. Cuando entra la declaración (t >= soundbite_start): la voz real entra nítida con fade-in suave (120ms)
+            #    y un fade-out gradual (280ms) antes de terminar el corte para evitar cualquier corte seco, click digital o sensación de truncado.
+            sb_fade_in_d = 0.12
+            sb_fade_out_d = 0.28
+            sb_fade_out_st = round(max(soundbite_start + 0.5, soundbite_start + soundbite_window - sb_fade_out_d), 2)
+            audio_filter_parts.append(
+                f"[{clip_a_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                f"adelay={delay_ms}|{delay_ms},volume=0.92,"
+                f"afade=t=in:st={soundbite_start:.2f}:d={sb_fade_in_d:.2f},"
+                f"afade=t=out:st={sb_fade_out_st:.2f}:d={sb_fade_out_d:.2f}[a_clip]"
+            )
+            audio_mix_inputs.append("[a_clip]")
+            safe_log(f"[SceneEngine] 🎙️ Audio original estratégico del protagonista activo en t={soundbite_start:.2f}s (pre-pausa={sb_pause_before}s, offset={soundbite_offset:.2f}s, dur={soundbite_window:.2f}s, fade_out={sb_fade_out_st:.2f}s, clip={clip_audio_source.name})")
 
         # SFX de escena general (si aplica)
         sfx_path = self._get_sfx_path(scene.sfx)
@@ -1700,7 +2674,19 @@ class SceneEngine:
                 "quote_evidence": "whoosh",
                 "quote": "pop",
                 "bento": "whoosh",
-                "map": "whoosh",
+                "map": "alert",
+                "geointel_map": "alert",
+                "newspaper_clipping": "paper",
+                "newspaper": "paper",
+                "press_clipping": "paper",
+                "workflow_diagram": "chime",
+                "workflow": "chime",
+                "router_pattern": "chime",
+                "terminal_hud": "pop",
+                "terminal": "pop",
+                "cli_console": "pop",
+                "spec_matrix": "impact",
+                "benchmark_table": "impact",
             }
             card_sfx_type = sfx_map_by_type.get(card_visual_type, "whoosh")
             c_sfx_path = self._get_sfx_path(card_sfx_type)
@@ -1709,11 +2695,26 @@ class SceneEngine:
                 c_sfx_idx = num_in
                 num_in += 1
                 c_del_ms = max(50, int(card_start_time * 1000))
+                card_vol = 0.45 if card_sfx_type == "alert" else 0.70
                 audio_filter_parts.append(
                     f"[{c_sfx_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
-                    f"adelay=delays={c_del_ms}:all=1,volume=0.85[a_card_sfx]"
+                    f"adelay=delays={c_del_ms}:all=1,volume={card_vol:.2f}[a_card_sfx]"
                 )
                 audio_mix_inputs.append("[a_card_sfx]")
+
+            # SFX secundario: trazo de rotulador fluorescente sobre el titular (estilo Vox / Adrià Solà)
+            if card_visual_type in ("newspaper_clipping", "newspaper", "press_clipping"):
+                m_sfx = self._get_sfx_path("marker")
+                if m_sfx and m_sfx.exists():
+                    inputs.extend(["-i", str(m_sfx)])
+                    m_idx = num_in
+                    num_in += 1
+                    m_del = max(50, int((card_start_time + 0.35) * 1000))
+                    audio_filter_parts.append(
+                        f"[{m_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                        f"adelay=delays={m_del}:all=1,volume=0.60[a_marker_sfx]"
+                    )
+                    audio_mix_inputs.append("[a_marker_sfx]")
 
         if popup_img_path and popup_img_path.exists():
             p_sfx_path = self._get_sfx_path("pop")
@@ -1740,6 +2741,52 @@ class SceneEngine:
                     f"adelay=delays={ch_del_ms}:all=1,volume=0.75[a_chip_sfx]"
                 )
                 audio_mix_inputs.append("[a_chip_sfx]")
+
+        # SFX sincronizado al instante de aparición de tarjetas de persona / spotlight
+        if person_spotlight_overlays:
+            for ps_idx, ps in enumerate(person_spotlight_overlays[:2]):
+                ps_sfx = self._get_sfx_path("pop")
+                if ps_sfx and ps_sfx.exists():
+                    inputs.extend(["-i", str(ps_sfx)])
+                    ps_sfx_idx = num_in
+                    num_in += 1
+                    ps_del_ms = max(50, int(ps["start_time"] * 1000))
+                    audio_filter_parts.append(
+                        f"[{ps_sfx_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                        f"adelay=delays={ps_del_ms}:all=1,volume=0.35[a_ps_sfx_{ps_idx}]"
+                    )
+                    audio_mix_inputs.append(f"[a_ps_sfx_{ps_idx}]")
+
+        # Diseño sonoro de retención: un whoosh sutil en cada corte de plano (técnica Vox/Magnates)
+        # y un chime al entrar la cifra animada Remotion.
+        try:
+            cut_times = [float(t) for _, t in bg_clips[1:]] if bg_clips else []
+            cut_sfx = self._get_sfx_path("whoosh")
+            if cut_sfx and cut_sfx.exists():
+                for c_i, c_t in enumerate(cut_times[:5]):
+                    if c_t < 0.4 or c_t > duration - 0.4:
+                        continue
+                    inputs.extend(["-i", str(cut_sfx)])
+                    cs_idx = num_in
+                    num_in += 1
+                    audio_filter_parts.append(
+                        f"[{cs_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                        f"adelay=delays={max(0, int((c_t - 0.08) * 1000))}:all=1,volume=0.22[a_cut_sfx{c_i}]"
+                    )
+                    audio_mix_inputs.append(f"[a_cut_sfx{c_i}]")
+            if remo_active:
+                remo_sfx = self._get_sfx_path("chime")
+                if remo_sfx and remo_sfx.exists():
+                    inputs.extend(["-i", str(remo_sfx)])
+                    rs_idx = num_in
+                    num_in += 1
+                    audio_filter_parts.append(
+                        f"[{rs_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                        f"adelay=delays={int(remo_start * 1000)}:all=1,volume=0.6[a_remo_sfx]"
+                    )
+                    audio_mix_inputs.append("[a_remo_sfx]")
+        except Exception as _cse:
+            safe_log(f"[SceneEngine] SFX de cortes omitido: {_cse}")
 
         # Normalizar a espacio de color estándar broadcast (bt709, limitado tv, yuv420p)
         # Esto previene desfases de SPS o decodificación JPEG yuvj420p entre escenas en concat copy
@@ -1891,7 +2938,20 @@ class SceneEngine:
             "silent":    None,  # Sin música
         }
         bgm_track_key = getattr(self, 'bgm_track', 'default') if hasattr(self, 'bgm_track') else 'default'
-        bgm_candidate = BGM_TRACKS.get(bgm_track_key, BGM_TRACKS["default"])
+        # 1. Si bgm_track_key es una ruta directa a un archivo de audio existente
+        if isinstance(bgm_track_key, Path) and bgm_track_key.exists():
+            bgm_candidate = bgm_track_key
+        elif isinstance(bgm_track_key, str) and (Path(bgm_track_key).is_file() and Path(bgm_track_key).exists()):
+            bgm_candidate = Path(bgm_track_key)
+        else:
+            # 2. Buscar si existe un track dedicado en la Biblioteca de YouTube (assets/audio/youtube_library/bgm/)
+            yt_bgm = get_youtube_bgm_track(str(bgm_track_key))
+            if yt_bgm and yt_bgm.exists():
+                bgm_candidate = yt_bgm
+            elif str(bgm_track_key).lower() == "silent":
+                bgm_candidate = None
+            else:
+                bgm_candidate = BGM_TRACKS.get(str(bgm_track_key), BGM_TRACKS["default"])
         # Si el track específico no existe, caer al default
         if bgm_candidate and not bgm_candidate.exists():
             bgm_candidate = BGM_TRACKS["default"]
@@ -1911,41 +2971,50 @@ class SceneEngine:
 
         scene_files: List[Path] = []
         total_scenes = len(plan.scenes)
+        self._total_scenes = total_scenes
 
-        for i, scene in enumerate(plan.scenes):
-            if self.cancel_event and self.cancel_event.is_set():
-                safe_log(f"[SceneEngine] Cancelación solicitada antes de la escena {scene.scene_id}. Abortando render.")
-                raise asyncio.CancelledError("Render de transmisión cancelado por el usuario.")
+        # Renderizado concurrente de múltiples escenas a la vez para aprovechar la máquina y los recursos
+        sem = asyncio.Semaphore(2)  # Procesar 2 escenas en paralelo de forma óptima
+        completed_count = 0
 
-            pct = 70.0 + (float(i) / max(1, total_scenes)) * 18.0
-            if progress_cb:
-                progress_cb(pct, f"Grabando Escena {scene.scene_id}/{total_scenes}: {scene.name} ({scene.type})...")
+        async def render_single_scene(idx: int, sc: DirectorScene) -> tuple[int, Path]:
+            nonlocal completed_count
+            async with sem:
+                if self.cancel_event and self.cancel_event.is_set():
+                    raise asyncio.CancelledError("Render cancelado por el usuario.")
 
-            # Reintento por escena: FFmpeg falla a veces de forma transitoria bajo
-            # carga (return -22, streams sin paquetes). Antes, una escena fallida
-            # abortaba TODO el run aunque las demás ya estuvieran listas.
-            try:
-                sc_file = await self.render_scene(
-                    scene=scene,
-                    avatar_clip=avatar_clip,
-                    avatar_webm=avatar_webm,
-                    bgm_path=bgm_path,
-                    chat_overlay_path=chat_overlay_path,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as scene_err:
-                safe_log(f"[SceneEngine] Escena {scene.scene_id} falló ({str(scene_err)[:150]}). Reintentando 1 vez...")
+                safe_log(f"[SceneEngine] Grabando en paralelo escena {sc.scene_id}/{total_scenes}: {sc.name} ({sc.type})...")
+                try:
+                    sc_path = await self.render_scene(
+                        scene=sc,
+                        avatar_clip=avatar_clip,
+                        avatar_webm=avatar_webm,
+                        bgm_path=bgm_path,
+                        chat_overlay_path=chat_overlay_path,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as scene_err:
+                    safe_log(f"[SceneEngine] Reintentando escena {sc.scene_id} tras fallo transitorio: {str(scene_err)[:120]}")
+                    sc_path = await self.render_scene(
+                        scene=sc,
+                        avatar_clip=avatar_clip,
+                        avatar_webm=avatar_webm,
+                        bgm_path=bgm_path,
+                        chat_overlay_path=chat_overlay_path,
+                    )
+
+                completed_count += 1
+                pct = 70.0 + (float(completed_count) / max(1, total_scenes)) * 18.0
                 if progress_cb:
-                    progress_cb(pct, f"Escena {scene.scene_id} falló por un error transitorio; reintentando...")
-                sc_file = await self.render_scene(
-                    scene=scene,
-                    avatar_clip=avatar_clip,
-                    avatar_webm=avatar_webm,
-                    bgm_path=bgm_path,
-                    chat_overlay_path=chat_overlay_path,
-                )
-            scene_files.append(sc_file)
+                    progress_cb(pct, f"Grabando {completed_count}/{total_scenes} escenas en paralelo: {sc.name}...")
+                return (idx, sc_path)
+
+        tasks = [render_single_scene(i, scene) for i, scene in enumerate(plan.scenes)]
+        results = await asyncio.gather(*tasks)
+        # Ordenar rigurosamente por índice original para preservar la secuencia exacta del guion
+        results.sort(key=lambda x: x[0])
+        scene_files = [path for _, path in results]
 
         # Concatenación final instantánea
         if progress_cb:
@@ -2020,8 +3089,85 @@ class SceneEngine:
         except Exception as _e_clean:
             safe_log(f"[SceneEngine] Limpieza post-render: {_e_clean}")
 
+        # Generar empaque de YouTube con capítulos SEO y timestamps automáticos
+        try:
+            await self._generate_youtube_packaging(output_file, plan.scenes, scene_files)
+        except Exception as _e_yt:
+            safe_log(f"[SceneEngine] Aviso: no se generó empaque YouTube: {_e_yt}")
+
         safe_log(f"[SceneEngine] Transmisión completa masterizada con {total_scenes} escenas en: {output_file}")
         return output_file
+
+    async def _generate_youtube_packaging(
+        self,
+        output_file: Path,
+        scenes: List[DirectorScene],
+        scene_files: List[Path],
+    ) -> Dict[str, Any]:
+        """Genera automáticamente la descripción SEO de YouTube con marcas de tiempo,
+        capítulos clicables, hashtags y miniatura heroica para publicación instantánea.
+        """
+        try:
+            timestamps = []
+            cur_time = 0.0
+            for i, (sc, f_path) in enumerate(zip(scenes, scene_files)):
+                m = int(cur_time // 60)
+                s = int(cur_time % 60)
+                ts_str = f"{m:02d}:{s:02d}"
+                chapter_title = re.sub(r"^[0-9]+[\.\-\s]*", "", sc.name).strip() or f"Parte {i+1}"
+                timestamps.append((ts_str, chapter_title, cur_time))
+
+                try:
+                    p = await asyncio.create_subprocess_exec(
+                        "ffprobe", "-v", "error",
+                        "-show_entries", "format=duration",
+                        "-of", "default=noprint_wrappers=1:nokey=1",
+                        str(f_path),
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    )
+                    out, _ = await p.communicate()
+                    cur_time += float(out.strip()) if out.strip() else sc.duration_est
+                except Exception:
+                    cur_time += sc.duration_est
+
+            thumb_hero = self.workdir / "thumbnail_hero.jpg"
+            if not thumb_hero.exists() and output_file.exists():
+                try:
+                    await asyncio.create_subprocess_exec(
+                        "ffmpeg", "-y", "-ss", "00:00:02.500", "-i", str(output_file),
+                        "-vframes", "1", "-q:v", "2", str(thumb_hero),
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    )
+                except Exception:
+                    pass
+
+            chapters_text = "\n".join([f"{ts} - {title}" for ts, title, _ in timestamps])
+            tags = ["#Documental", "#Investigacion", "#Analisis", "#Historia", "#Explicacion"]
+            
+            full_desc = (
+                f"Capítulos:\n{chapters_text}\n\n"
+                f"─── Sobre este informe ───\n"
+                f"Análisis documental e investigación audiovisual realizada con fuentes verificadas.\n\n"
+                f"{' '.join(tags)}"
+            )
+
+            pkg_data = {
+                "chapters": [{"timestamp": ts, "title": title, "seconds": sec} for ts, title, sec in timestamps],
+                "description": full_desc,
+                "thumbnail_path": str(thumb_hero) if thumb_hero.exists() else None,
+                "total_scenes": len(scenes),
+                "total_duration_est": round(cur_time, 2),
+            }
+
+            (self.workdir / "youtube_chapters.txt").write_text(chapters_text, encoding="utf-8")
+            (self.workdir / "youtube_description.txt").write_text(full_desc, encoding="utf-8")
+            (self.workdir / "youtube_packaging.json").write_text(json.dumps(pkg_data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+            safe_log(f"[SceneEngine] 🎬 Empaque de YouTube generado: {len(timestamps)} capítulos en youtube_chapters.txt")
+            return pkg_data
+        except Exception as _e_pkg:
+            safe_log(f"[SceneEngine] Error generando empaque YouTube: {_e_pkg}")
+            return {}
 
     def _settings_signature(self) -> Dict[str, Any]:
         """Huella de los parámetros que cambian el pixel/sonido de una escena.
@@ -2086,7 +3232,73 @@ class SceneEngine:
                     return json.loads(cf.read_text(encoding="utf-8"))
                 except Exception:
                     pass
+    def _get_clip_with_audio(self, bg_clips: List[Any]) -> Optional[Path]:
+        """Encuentra el primer clip de video en bg_clips que contenga una pista de audio decodificable real."""
+        for item in bg_clips:
+            p = item[0] if isinstance(item, (tuple, list)) else item
+            if not p or not getattr(p, "exists", lambda: False)() or p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                continue
+            try:
+                chk = subprocess.run(
+                    ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(p)],
+                    capture_output=True, text=True, timeout=8
+                )
+                if "audio" in chk.stdout.lower():
+                    return p
+            except Exception:
+                pass
         return None
+
+    async def _plan_anime_precise_clips(
+        self,
+        scene: Any,
+        scene_dir: Path,
+        speech_text: str,
+        audio_path: Optional[Path],
+        sentence_boundaries: List[Tuple[float, float, str]],
+        duration: float,
+    ) -> List[Tuple[Path, float]]:
+        """Solo anime: corta del episodio canónico el plano exacto de lo que la voz menciona.
+
+        Devuelve [(clip, t_inicio_en_escena)] o [] si el índice no está listo (método base).
+        """
+        from core.anime_scene_matcher import AnimeSceneMatcher, parse_episode_range
+        from core.anime_episode_manager import AnimeEpisodeManager
+
+        series = getattr(self, "anime_series_name", "Black Clover")
+        episodes = parse_episode_range(str(getattr(self, "topic", "") or ""))
+        if not episodes:
+            return []
+        m = re.search(r"\d+", str(getattr(scene, "scene_id", "1")))
+        num = int(m.group(0)) if m else 1
+        total = max(1, int(getattr(self, "_total_scenes", 8) or 8))
+        num = max(1, min(num, total))
+        label = str(getattr(scene, "scene_id", num))
+
+        cuts = await asyncio.to_thread(
+            AnimeSceneMatcher.plan_scene,
+            series, episodes, speech_text, sentence_boundaries, audio_path, duration,
+            (num - 1) / total, 1.0 / total, self._anime_used_src, label,
+        )
+        if not cuts:
+            return []
+
+        out: List[Tuple[Path, float]] = []
+        for i, c in enumerate(cuts):
+            seg_dur = float(c["dur"]) + 0.8
+            clip_path = scene_dir / f"anime_precise_{i}.mp4"
+            res = await asyncio.to_thread(
+                AnimeEpisodeManager.extract_clip_at,
+                series, int(c["ep"]), float(c["src"]), seg_dur, clip_path,
+            )
+            if not res:
+                continue
+            t_start = 0.0 if not out else round(float(c["t"]), 2)
+            out.append((res, t_start))
+            safe_log(
+                f"[SceneEngine] 🎯 Escena {label} t={c['t']:.1f}s «{c.get('text','')}» → Ep {c['ep']} @ {c['src']:.1f}s ({c.get('why','')})"
+            )
+        return out if len(out) >= 2 or (out and duration < 5.0) else []
 
     async def _get_scene_visual(
         self,
@@ -2100,25 +3312,112 @@ class SceneEngine:
             from core.models import BRollCue
             from core.smart_media_curator import SmartMediaCurator
 
+            # REGLA ESTRICTA DE ANIME: Método 1 (Corte directo de episodios canónicos completos)
+            # En resúmenes de anime, NUNCA se busca en YouTube. Se extrae directamente del capítulo oficial.
+            if self.is_anime:
+                from core.anime_episode_manager import AnimeEpisodeManager
+                anime_title = getattr(self, "anime_series_name", "Black Clover")
+                range_m = re.search(r'(?:episodios?|episodes?|ep\.?)\s*(\d+)\s*(?:-|a|to)\s*(\d+)', str(getattr(self, "topic", "")), re.IGNORECASE)
+                single_m = re.search(r'(?:episodios?|episodes?|ep\.?)\s*(\d+)', str(query), re.IGNORECASE)
+
+                if single_m:
+                    scene_ep = int(single_m.group(1))
+                elif range_m:
+                    min_ep = int(range_m.group(1))
+                    max_ep = int(range_m.group(2))
+                    sc_num = getattr(self, "_current_scene_num", 1)
+                    tot_sc = len(getattr(self, "scenes", [])) or 6
+                    calc_ep = min_ep + int(((sc_num - 1) / max(1, tot_sc)) * (max_ep - min_ep + 0.99))
+                    scene_ep = int(min(max_ep, max(min_ep, calc_ep)))
+                else:
+                    scene_ep = 1
+
+                cue_count = len(getattr(self, "used_visual_paths", set()))
+                out_clip = scene_dir / f"anime_canonical_ep{scene_ep}_{cue_count}.mp4"
+
+                clip_p = AnimeEpisodeManager.extract_clip_for_scene(
+                    series_name=anime_title,
+                    episode_num=scene_ep,
+                    scene_num=getattr(self, "_current_scene_num", 1),
+                    total_scenes=len(getattr(self, "scenes", [])) or 6,
+                    duration=10.0,
+                    out_path=out_clip,
+                    sub_clip_idx=cue_count,
+                )
+                if clip_p and clip_p.exists():
+                    p_str = str(clip_p.resolve()) if hasattr(clip_p, "resolve") else str(clip_p)
+                    self.used_visual_paths.add(p_str)
+                    if hasattr(self, "used_clip_names"):
+                        self.used_clip_names.add(clip_p.name)
+                    return clip_p
+
+                # Respaldo Canónico Estricto: Reintentar corte seguro del episodio sin jamás salir a YouTube
+                safe_retry_clip = AnimeEpisodeManager.extract_clip_for_scene(
+                    series_name=anime_title,
+                    episode_num=scene_ep,
+                    scene_num=1,
+                    total_scenes=6,
+                    duration=10.0,
+                    out_path=scene_dir / f"anime_canonical_ep{scene_ep}_safe_{cue_count}.mp4",
+                    sub_clip_idx=0,
+                )
+                if safe_retry_clip and safe_retry_clip.exists():
+                    p_str = str(safe_retry_clip.resolve()) if hasattr(safe_retry_clip, "resolve") else str(safe_retry_clip)
+                    self.used_visual_paths.add(p_str)
+                    return safe_retry_clip
+
+                # Reutilizar metraje canónico previo de la serie si ya existe
+                for prev in getattr(self, "used_visual_paths", set()):
+                    if Path(prev).exists() and ("anime_canonical" in str(prev) or "episode" in str(prev)):
+                        return Path(prev)
+
+                return None
+
             search_q = query
             if intent:
                 search_q = SmartMediaCurator.build_targeted_search_query(intent, query)
             elif query and len(query.split()) <= 2:
                 search_q = f"{query} documentary evidence 4k"
 
-            cue_id = f"scene_cue_{abs(hash(search_q or query)) % 10000}"
+            cue_count = len(getattr(self, "used_visual_paths", set()))
+            cue_id = f"scene_cue_{abs(hash(search_q or query)) % 10000}_{cue_count}"
+            fallback_q = (intent.entity_name if intent else "") or query or "noticia prensa investigacion"
             cue = BRollCue(
                 cue_id=cue_id,
                 start_sec=0.0,
                 end_sec=10.0,
-                concept=query or "technology abstract",
-                search_query_en=search_q or query or "technology abstract",
+                concept=query or fallback_q,
+                search_query_en=search_q or query or fallback_q,
                 reasoning="Escena visual de fondo",
-                asset_type="video" if is_video_scene else "photo",
+                asset_type="video" if (is_video_scene or self.is_anime) else "photo",
             )
             res = await self.orchestrator._resolve_single_cue(cue)
+            if self.is_anime and (not res.local_file_path or Path(res.local_file_path).suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")):
+                safe_log(f"[SceneEngine] 🎬 Fallback anime clip para '{query}'...")
+                anime_title = getattr(self, "anime_series_name", "Black Clover")
+                cue.cue_id = f"{cue_id}_anifall"
+                cue.search_query_en = f"{anime_title} episode {scene_ep} {content_kw} scene".strip()
+                cue.asset_type = "video"
+                res = await self.orchestrator._resolve_single_cue(cue)
+
             if res.local_file_path and Path(res.local_file_path).exists():
                 p = Path(res.local_file_path)
+                if self.is_anime and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                    return None
+                p_str = str(p.resolve()) if hasattr(p, "resolve") else str(p)
+                # Si el asset ya fue utilizado previamente en el proyecto, intentar obtener una variante no repetida
+                if hasattr(self, "used_visual_paths") and p_str in self.used_visual_paths:
+                    safe_log(f"[SceneEngine] ⚠️ Clip ya usado previamente en el proyecto ({p.name}), buscando ángulo alternativo...")
+                    alt_q = f"{search_q or query} cobertura archivo perspectiva diferente {cue_count + 1}"
+                    cue.cue_id = f"{cue_id}_var{cue_count}"
+                    cue.search_query_en = alt_q
+                    res_alt = await self.orchestrator._resolve_single_cue(cue)
+                    if res_alt.local_file_path and Path(res_alt.local_file_path).exists():
+                        p_alt = Path(res_alt.local_file_path)
+                        p_alt_str = str(p_alt.resolve()) if hasattr(p_alt, "resolve") else str(p_alt)
+                        if p_alt_str not in self.used_visual_paths:
+                            p = p_alt
+                            p_str = p_alt_str
                 # Copiar sidecar de procedencia al directorio de la escena si existe
                 prov_file = self.orchestrator.target_dir / f"{cue_id}_provenance.json"
                 if prov_file.exists():
@@ -2301,6 +3600,11 @@ class SceneEngine:
         # ("NoneType no tiene .lower") abortaba el broadcast completo.
         if not sfx_name or not isinstance(sfx_name, str):
             return None
+        # 1. Priorizar SFX de alta definición desde la Biblioteca de YouTube si está disponible
+        yt_sfx = get_youtube_sfx_path(sfx_name)
+        if yt_sfx and yt_sfx.exists():
+            return yt_sfx
+        # 2. Fallback a efectos estándar del sistema
         _audio_dir = settings.BASE_DIR / "assets" / "audio"
         sfx_map = {
             "whoosh": _audio_dir / "whoosh.wav",
@@ -2308,6 +3612,9 @@ class SceneEngine:
             "impact": _audio_dir / "impact.wav",
             "alert": _audio_dir / "alert.wav",
             "pop": _audio_dir / "pop.wav",
+            "paper": _audio_dir / "paper.wav",
+            "marker": _audio_dir / "marker.wav",
+            "riser": _audio_dir / "riser.wav",
             "none": None,
         }
         return sfx_map.get(sfx_name.lower().strip())

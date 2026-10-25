@@ -90,8 +90,49 @@ def get_speechify_status() -> Dict[str, Any]:
     }
 
 
-def synthesize_speechify(text: str, voice_id: str) -> Optional[bytes]:
-    """Sintetiza texto usando Speechify probando la clave activa y conmutando si se agotan créditos."""
+import re
+
+def _split_text_into_chunks(text: str, max_chars: int = 1400) -> List[str]:
+    """Divide texto en fragmentos respetando pausas de oraciones para no exceder el límite de 2000 chars de Speechify."""
+    clean = text.strip()
+    if len(clean) <= max_chars:
+        return [clean]
+    
+    sentences = re.split(r'(?<=[.!?;\n])\s+', clean)
+    chunks: List[str] = []
+    curr = ""
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        # Si una sola oración supera max_chars, dividir por comas o palabras
+        if len(s) > max_chars:
+            words = s.split()
+            sub_curr = ""
+            for w in words:
+                if len(sub_curr) + len(w) + 1 <= max_chars:
+                    sub_curr = f"{sub_curr} {w}".strip()
+                else:
+                    if sub_curr:
+                        chunks.append(sub_curr)
+                    sub_curr = w
+            if sub_curr:
+                curr = sub_curr
+            continue
+
+        if len(curr) + len(s) + 1 <= max_chars:
+            curr = f"{curr} {s}".strip()
+        else:
+            if curr:
+                chunks.append(curr)
+            curr = s
+    if curr:
+        chunks.append(curr)
+    return chunks or [clean]
+
+
+def _synthesize_single_chunk(text: str, voice_id: str) -> Optional[bytes]:
+    """Sintetiza un bloque individual <= 1500 chars usando Speechify probando la clave activa y conmutando si se agotan créditos."""
     global _active_key_index, _credits_available, _exhausted_keys
 
     clean_voice = voice_id.replace("speechify:", "").strip()
@@ -127,7 +168,7 @@ def synthesize_speechify(text: str, voice_id: str) -> Optional[bytes]:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=12) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 if resp.status == 200:
                     raw_data = resp.read()
                     if raw_data.startswith(b"{") and b"audio_data" in raw_data:
@@ -160,7 +201,6 @@ def synthesize_speechify(text: str, voice_id: str) -> Optional[bytes]:
                 _exhausted_keys.add(current_idx)
                 logger.error(f"[Speechify] Créditos agotados en clave #{current_idx + 1}. Conmutando...")
             else:
-                # Otro error puntual (ej. formato o voice_id)
                 pass
         except Exception as exc:
             logger.error(f"[Speechify] Excepción conectando a API: {exc}")
@@ -171,3 +211,26 @@ def synthesize_speechify(text: str, voice_id: str) -> Optional[bytes]:
         logger.critical("[Speechify] TODAS las claves de Speechify han agotado sus créditos. Bloqueando selección.")
 
     return None
+
+
+def synthesize_speechify(text: str, voice_id: str) -> Optional[bytes]:
+    """Sintetiza texto usando Speechify. Si el texto supera 1400 caracteres, lo segmenta y concatena limpiamente."""
+    if not text or not text.strip():
+        return None
+    
+    clean_voice = voice_id.replace("speechify:", "").strip()
+    chunks = _split_text_into_chunks(text, max_chars=1400)
+    
+    if len(chunks) == 1:
+        return _synthesize_single_chunk(chunks[0], clean_voice)
+    
+    audio_parts: List[bytes] = []
+    for c in chunks:
+        part = _synthesize_single_chunk(c, clean_voice)
+        if part and len(part) > 200:
+            audio_parts.append(part)
+        else:
+            logger.warning(f"[Speechify] Falló síntesis de fragmento ({len(c)} chars), abortando concatenación.")
+            return None
+            
+    return b"".join(audio_parts) if audio_parts else None

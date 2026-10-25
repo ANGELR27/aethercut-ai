@@ -6,8 +6,9 @@ Produce tarjetas Bento cuadradas y rectangulares de estándar profesional 2026.
 from __future__ import annotations
 
 import os
-import base64
 import subprocess
+import re
+import base64
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -21,13 +22,13 @@ HTML_FONTS = """
 # Paletas bicolor firma para la tipografía cinética viral (degradado de dos colores).
 KINETIC_DUOTONES = [
     ("#FFB703", "#FB8500"),  # Ámbar Eléctrico → Oro Solar (impacto de firma)
-    ("#00F5D4", "#7B2CBF"),  # Cyber Mint → Ultravioleta Neón
+    ("#FF9436", "#FFE500"),  # Ámbar Naranja → Oro Puro
     ("#FF007F", "#7928CA"),  # Magenta Neón → Violeta Profundo
-    ("#CCFF00", "#00E5FF"),  # Acid Lime → Cian Aqua Eléctrico
-    ("#E0AAFF", "#3A86FF"),  # Lavanda Holográfica → Azul Cobalto
+    ("#CCFF00", "#FF9436"),  # Acid Lime → Ámbar Vibrante
+    ("#FFD166", "#EF476F"),  # Oro Cálido → Coral Neón
     ("#FF4D00", "#FF0055"),  # Solar Flare → Carmesí Viral
-    ("#7DE3F4", "#A78BFA"),  # Tech Sky → Violeta Suave Editorial
-    ("#05FFA1", "#00B4D8"),  # Emerald Spark → Tropical Océano
+    ("#FFB703", "#FF5500"),  # Oro Brillante → Naranja Profundo
+    ("#05FFA1", "#10B981"),  # Emerald Spark → Esmeralda Profundo
 ]
 
 
@@ -872,7 +873,7 @@ class WebCardRenderer:
         tag_label = str(tag_label or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         kind_colors = {
             "stat": ("#f59e0b", "rgba(245, 158, 11, 0.15)", "rgba(245, 158, 11, 0.35)"),
-            "fact": ("#38bdf8", "rgba(56, 189, 248, 0.15)", "rgba(56, 189, 248, 0.35)"),
+            "fact": ("#ff9436", "rgba(255, 148, 54, 0.15)", "rgba(255, 148, 54, 0.35)"),
             "alert": ("#f43f5e", "rgba(244, 63, 94, 0.15)", "rgba(244, 63, 94, 0.35)"),
             "quote": ("#10b981", "rgba(16, 185, 129, 0.15)", "rgba(16, 185, 129, 0.35)"),
         }
@@ -1497,7 +1498,7 @@ class WebCardRenderer:
         tag: str = "",
         subtitle: str = "",
         highlight: str = "",
-        accent_color: str = "#38bdf8",
+        accent_color: str = "#ff9436",
     ) -> str:
         """
         Texto libre cinematográfico flotante (Kinetic Typography):
@@ -1619,7 +1620,7 @@ class WebCardRenderer:
         tag: str = "",
         subtitle: str = "",
         highlight: str = "",
-        accent_color: str = "#38bdf8",
+        accent_color: str = "#ff9436",
     ) -> Path:
         """Renderiza texto libre cinematográfico animable (sin card, 100% transparente)."""
         out_png = Path(out_png)
@@ -1931,7 +1932,7 @@ class WebCardRenderer:
         coordinates_str: str = "39.702° N, 44.299° E",
         notes: str = "Análisis topográfico y geológico en tiempo real.",
         badge: str = "SAT RECON // ORBITAL FEED",
-        accent_color: str = "#38bdf8",
+        accent_color: str = "#ff9436",
         lat: float = 39.702,
         lon: float = 44.299,
         zoom: float = 7.2,
@@ -2355,7 +2356,7 @@ class WebCardRenderer:
         coordinates_str: str = "",
         notes: str = "Análisis topográfico y teledetección en tiempo real.",
         badge: str = "SAT RECON // ORBITAL FEED",
-        accent_color: str = "#38bdf8",
+        accent_color: str = "#ff9436",
         **kwargs,
     ) -> Path:
         """Renderiza un mapa satelital hiperrealista con MapLibre GL JS (WebGL 3D orbital) y HUD de telemetría."""
