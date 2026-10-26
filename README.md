@@ -22,6 +22,11 @@ AetherCut AI es un estudio completo para preparar videos hablados y streams con 
 - Usa Gemini para analizar el contenido y proponer una línea de tiempo, momentos destacados y apoyos visuales. Cada edición usa un proyecto a la vez; solo cambia al siguiente si recibe una cuota, un permiso denegado, un error temporal o vence el límite de espera. Dentro del mismo proyecto prueba los modelos estables disponibles antes de cambiar de clave.
 - Detecta silencios con FFmpeg y elimina las pausas que superan el umbral configurado.
 - Puede buscar B-Roll y datos de contexto en la web. Las tarjetas pueden confirmar, refutar, aclarar o advertir que no hay evidencia suficiente, con las fuentes consultadas.
+- **Investigación con fact sheet**: descarga las fuentes completas (no solo snippets), extrae cifras y fechas, corrobora entre medios independientes y entrega al director un gancho recomendado. El guion solo puede usar esas cifras y las cards muestran su fuente real.
+- **Sincronización por palabra**: un alineador local (faster-whisper) marca el inicio y fin de cada palabra del audio y agenda cards, keywords, cortes y subtítulos en el instante exacto en que se pronuncian.
+- **Sistema editorial de tarjetas**: layouts sobrios (dato, cita, comparativa, cronología, paso, fuente) con jerarquía tipográfica fija, sin emojis ni estilos de "dashboard IA".
+- **Count-up animado**: las cifras protagonistas suben de 0 al valor real dentro de la propia tarjeta (video con alfa), solo cuando el número es inequívoco.
+- **Miniaturas y ganchos**: la miniatura 16:9 se construye con un fotograma real, el gancho del fact sheet, su fuente y la cifra protagonista; se generan 3 variantes de gancho para título/descripción.
 - Puede transcribir localmente con Whisper, quemar subtítulos y crear todos los Shorts verticales que el contenido justifique.
 - Construye una previsualización ligera y una línea de tiempo visible durante el trabajo: cortes, tarjetas, B-Rolls y Shorts aparecen cuando se detectan.
 - Analiza localmente cambios de plano con PySceneDetect y ubica las tarjetas automáticas fuera del hablante con OpenCV. No envía esos fotogramas a otro servicio.
@@ -97,11 +102,17 @@ La prueba crea un clip temporal, revisa el análisis de audio y de escena, gener
 - `core/gemini_analyzer.py` y `core/llm.py`: análisis con Gemini.
 - `core/silence_detector.py` y `core/timeline.py`: detección de silencios y sincronización de tiempos.
 - `core/asset_providers.py` y `core/fact_checker.py`: recursos visuales y verificación de datos.
+- `core/research_agent.py`: investigación con fuentes completas, fact sheet, corroboración y auditoría de cifras.
+- `core/word_aligner.py`: alineación por palabra del audio (timing exacto de overlays y subtítulos).
+- `core/editorial_cards.py`: sistema de tarjetas editoriales usado por el render.
+- `core/animated_stat_card.py`: count-up animado de cifras con alfa para el render.
+- `core/fact_thumbnail.py`: miniaturas editoriales 16:9/9:16 desde el fact sheet.
 - `core/render_engine.py`: cortes, subtítulos, overlays y exportación de Shorts con FFmpeg.
 - `web/`: interfaz, estilos y JavaScript del navegador.
+- `frontend/`: interfaz React + Vite (fuente en `frontend/src`, compilada en `frontend/dist`).
 - `api/`: API RESTful v1 pública, SSE y Webhooks para aplicaciones externas.
 - `API_DOCUMENTATION.md`: especificación técnica completa y ejemplos de integración.
-- `main_fase*_test.py`: demos manuales de fases; algunas pueden llamar servicios externos y necesitar archivos o claves.
+- `tests/`: pruebas automatizadas (`python -m pytest tests -q`).
 
 ## API RESTful v1 y Webhooks
 
@@ -109,7 +120,7 @@ AetherCut AI incluye una API RESTful completa bajo el prefijo `/api/v1` para con
 
 - **Portal para Desarrolladores**: [http://127.0.0.1:8000/api/v1/docs](http://127.0.0.1:8000/api/v1/docs)
 - **Documentación Interactiva Swagger**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **Especificación Técnica Completa**: consulta [API_DOCUMENTATION.md](file:///C:/Users/angel/.gemini/antigravity-ide/scratch/ai-video-editor/API_DOCUMENTATION.md)
+- **Especificación Técnica Completa**: consulta [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
 
 Permite ingesta por archivo o URL remota, generación autónoma de videos, consulta en tiempo real vía SSE, extracción de Shorts 9:16, síntesis de voz TTS, radar viral y descargas directas con notificaciones webhook automáticas.
 

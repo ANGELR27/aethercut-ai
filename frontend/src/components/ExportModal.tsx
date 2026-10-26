@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { IconDownload, IconCheck } from "./Icons";
 import { cn } from "@/utils/cn";
@@ -270,7 +270,7 @@ export function ExportModal({
             className="relative flex items-center gap-2 overflow-hidden rounded-xl border border-beam-400/40 bg-gradient-to-r from-beam-600 via-beam-500 to-indigo-600 px-5 py-2 text-xs font-semibold text-white shadow-[0_0_30px_rgba(79,123,255,0.45)] hover:from-beam-500 hover:to-indigo-500 transition-all duration-200"
           >
             <IconDownload className="h-4 w-4" />
-            <span>⚡ Descargar Video Máster</span>
+            <span>Descargar Video Máster</span>
           </button>
         </div>
       </div>

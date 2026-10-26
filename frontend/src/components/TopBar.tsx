@@ -7,7 +7,6 @@ import {
   IconDownload,
   IconRedo,
   IconUndo,
-  IconCheck,
   IconSparkle,
   IconMenu,
   IconClose,
@@ -19,6 +18,7 @@ import { ExportModal } from "./ExportModal";
 import { ProjectDetailsModal } from "./ProjectDetailsModal";
 import { ClipsModal } from "./ClipsModal";
 import { AutopilotModal } from "./AutopilotModal";
+import { MultiChannelPublishModal } from "./MultiChannelPublishModal";
 import { cn } from "@/utils/cn";
 
 function Mark() {
@@ -37,15 +37,12 @@ export function TopBar() {
   const {
     platform,
     setPlatform,
-    running,
-    score,
     projects,
     activeProjectId,
     activeProjectTitle,
     selectProject,
     exportMaster,
     exportProgress,
-    exportStatusText,
     duration,
     ratio,
     subtitleStyle,
@@ -54,7 +51,6 @@ export function TopBar() {
     setMobileMenuOpen,
     leftPanelCollapsed,
     toggleLeftPanel,
-    setShortcutsModalOpen,
     setImportModalOpen,
   } = useEditor();
   const [projectOpen, setProjectOpen] = useState(false);
@@ -64,6 +60,7 @@ export function TopBar() {
   const [clipsOpen, setClipsOpen] = useState(false);
   const [autopilotOpen, setAutopilotOpen] = useState(false);
   const [autopilotOn, setAutopilotOn] = useState(false);
+  const [multiChannelOpen, setMultiChannelOpen] = useState(false);
 
   // Indicador discreto de si el piloto automático está activo
   useEffect(() => {
@@ -370,15 +367,15 @@ export function TopBar() {
           <span className="hidden xl:inline">Piloto</span>
         </button>
 
-        {/* Shortcuts button */}
+        {/* Multi-Channel Distribution button (replaces shortcuts button as requested) */}
         <button
           type="button"
-          onClick={() => setShortcutsModalOpen(true)}
-          title="Atajos de teclado profesionales (Atajo: ?)"
-          className="relative hidden h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-white/10 bg-white/[0.04] px-2 text-[11px] font-medium text-white/60 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-white md:flex cursor-pointer"
+          onClick={() => setMultiChannelOpen(true)}
+          title="Difusión Multi-Canal: Publicar en Canales de YouTube y Páginas de Facebook"
+          className="relative flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-beam-400/40 bg-beam-500/10 px-2.5 text-[11px] font-medium text-beam-200 transition-all hover:border-beam-300 hover:bg-beam-500/20 hover:text-white cursor-pointer shadow-[0_0_15px_rgba(59,130,246,0.15)]"
         >
-          <span className="font-mono text-[11px]">⌨</span>
-          <span>Atajos</span>
+          <IconShare className="h-3.5 w-3.5 text-beam-300 shrink-0" />
+          <span>Publicar</span>
         </button>
 
         {/* Copilot Chat trigger */}
@@ -430,6 +427,16 @@ export function TopBar() {
 
       {/* Piloto automático */}
       <AutopilotModal isOpen={autopilotOpen} onClose={() => setAutopilotOpen(false)} />
+
+      {/* Difusión Multi-Canal & Páginas con Recomendación IA */}
+      <MultiChannelPublishModal
+        isOpen={multiChannelOpen}
+        onClose={() => setMultiChannelOpen(false)}
+        projectId={activeProjectId}
+        projectTitle={activeProjectTitle || "Video KAI"}
+        thumbnailUrl={projects.find((p) => p.id === activeProjectId)?.thumbnail_url || (activeProjectId ? `/media/${activeProjectId}_thumbnail.jpg` : null)}
+        durationSec={duration}
+      />
     </header>
   );
 }

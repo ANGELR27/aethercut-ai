@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { IconDownload, IconCheck, IconClose } from "./Icons";
+import { IconDownload, IconCheck, IconClose, IconCrop } from "./Icons";
 import { cn } from "@/utils/cn";
 
 export interface ProjectClip {

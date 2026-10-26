@@ -262,8 +262,12 @@ notebook = {
     "nbformat_minor": 0
 }
 
-out_path = Path(__file__).resolve().parent.parent / "AetherCut_AI_Colab.ipynb"
-with open(out_path, "w", encoding="utf-8") as f:
-    json.dump(notebook, f, indent=1, ensure_ascii=False)
+def main():
+    out_path = Path(__file__).resolve().parent.parent / "AetherCut_AI_Colab.ipynb"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(notebook, f, indent=1, ensure_ascii=False)
+    print(f"Generado exitosamente en: {out_path}")
 
-print(f"Generado exitosamente en: {out_path}")
+
+if __name__ == "__main__":
+    main()

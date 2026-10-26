@@ -29,3 +29,5 @@ remotion_studio/build/
 scratch/
 output/
 scratch_analysis/
+scratch_*.html
+scripts/status.txt

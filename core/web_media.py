@@ -170,9 +170,19 @@ class WikiMediaClient:
         if not pages:
             return None
         page = sorted(pages.values(), key=lambda p: p.get("index", 99))[0]
+        page_title = (page.get("title") or "").lower()
         extract = re.sub(r"\s+", " ", (page.get("extract") or "")).strip()
         if not extract:
             return None
+
+        # Descartar artículos de Wikipedia desconectados semánticamente del término buscado
+        substantive_tokens = {
+            w.lower() for w in re.findall(r"[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]{3,}", query)
+            if w.lower() not in {"building", "exterior", "foto", "photo", "image", "real", "4k", "the", "and", "del", "los", "las", "para", "con", "por", "sobre"}
+        }
+        if substantive_tokens and not any(t in page_title or t in extract.lower() for t in substantive_tokens):
+            return None
+
         return WikiResult(
             title=page.get("title", query),
             extract=extract,

@@ -430,8 +430,8 @@ body{{width:1500px;height:1000px;display:flex;align-items:center;justify-content
             ("regla de oro", "REGLA DE ORO", "editorial_punch"),
             ("secreto", "SECRETO", "editorial_punch"),
             ("exito", "CLAVE", "badge_glow"),
-            ("Ã©xito", "CLAVE", "badge_glow"),
-            ("resultados", "IMPACTO", "contrast_split"),
+            ("éxito", "CLAVE", "badge_glow"),
+            ("resultados oficiales", "IMPACTO", "contrast_split"),
         ]
         for term, tag, st in high_impact_concepts:
             for m in re.finditer(r"\b" + re.escape(term) + r"\b", text, re.IGNORECASE):

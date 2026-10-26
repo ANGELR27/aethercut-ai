@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { IconClose, IconCpu } from "./Icons";
+import { createPortal } from "react-dom";
+import { IconClose, IconCpu, IconSparkle } from "./Icons";
 
 interface AutopilotConfig {
   enabled: boolean;
@@ -140,8 +141,8 @@ export function AutopilotModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const selectCls =
     "rounded-lg border border-white/10 bg-black/60 px-2 py-1.5 text-[11px] text-white/80 focus:outline-none focus:border-white/25";
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+  const modalContent = (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative z-10 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/12 bg-ink-950/98 p-5 text-left shadow-[0_25px_80px_rgba(0,0,0,0.95)] backdrop-blur-2xl sm:p-6">
         {/* Header */}
@@ -301,7 +302,9 @@ export function AutopilotModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
                 <div className="space-y-1.5 rounded-lg border border-purple-500/25 bg-purple-950/20 p-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-purple-500/25 text-xs">⚡</span>
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-purple-500/25">
+                        <IconSparkle className="h-3 w-3 text-purple-300" />
+                      </span>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <p className="text-[11px] font-semibold text-white truncate">
@@ -486,4 +489,8 @@ export function AutopilotModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
       </div>
     </div>
   );
+
+  return typeof document !== "undefined"
+    ? createPortal(modalContent, document.body)
+    : modalContent;
 }

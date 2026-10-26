@@ -50,6 +50,53 @@ SUBTITLE_STYLES: Dict[str, str] = {
 }
 
 
+ASS_STYLE_SPECS: Dict[str, Dict[str, Any]] = {
+    "hormozi": {
+        "font": "Segoe UI Black",
+        "primary": "&H0000FFFF",  # Amarillo brillante (#FFFF00 en BGR)
+        "secondary": "&H00FFFFFF",
+        "outline_c": "&H00000000",
+        "back_c": "&H80000000",
+        "bold": -1,
+        "outline": 5,
+        "shadow": 2,
+        "uppercase": True,
+    },
+    "viral": {
+        "font": "Segoe UI Black",
+        "primary": "&H00D4F500",  # Lima/Cyan viral
+        "secondary": "&H00FFFFFF",
+        "outline_c": "&H00000000",
+        "back_c": "&H80000000",
+        "bold": -1,
+        "outline": 5,
+        "shadow": 2,
+        "uppercase": True,
+    },
+    "mrbeast": {
+        "font": "Segoe UI Black",
+        "primary": "&H0000FFFF",
+        "secondary": "&H0038BDF8",
+        "outline_c": "&H00000000",
+        "back_c": "&H80000000",
+        "bold": -1,
+        "outline": 6,
+        "shadow": 3,
+        "uppercase": True,
+    },
+    "classic": {
+        "font": "Segoe UI",
+        "primary": "&H00FFFFFF",
+        "secondary": "&H0000FFFF",
+        "outline_c": "&H00000000",
+        "back_c": "&H60000000",
+        "bold": -1,
+        "outline": 4,
+        "shadow": 2,
+        "uppercase": False,
+    },
+}
+
 def srt_time_to_ass(t_str: str) -> str:
     """Convierte timestamp de SRT ('00:00:01,461') a formato ASS ('0:00:01.46')."""
     t_str = t_str.strip().replace(",", ".")
@@ -74,52 +121,7 @@ def generate_ass_from_srt(
     margin_v: int = 380,
 ) -> Path:
     """Genera archivo ASS nativo con PlayResX y PlayResY calibrados para renderizado de subtítulos sin cortes ni desbordes."""
-    style_specs = {
-        "hormozi": {
-            "font": "Segoe UI Black",
-            "primary": "&H0000FFFF",  # Amarillo brillante (#FFFF00 en BGR)
-            "secondary": "&H00FFFFFF",
-            "outline_c": "&H00000000",
-            "back_c": "&H80000000",
-            "bold": -1,
-            "outline": 5,
-            "shadow": 2,
-            "uppercase": True,
-        },
-        "viral": {
-            "font": "Segoe UI Black",
-            "primary": "&H00D4F500",  # Lima/Cyan viral
-            "secondary": "&H00FFFFFF",
-            "outline_c": "&H00000000",
-            "back_c": "&H80000000",
-            "bold": -1,
-            "outline": 5,
-            "shadow": 2,
-            "uppercase": True,
-        },
-        "mrbeast": {
-            "font": "Segoe UI Black",
-            "primary": "&H0000FFFF",
-            "secondary": "&H0038BDF8",
-            "outline_c": "&H00000000",
-            "back_c": "&H80000000",
-            "bold": -1,
-            "outline": 6,
-            "shadow": 3,
-            "uppercase": True,
-        },
-        "classic": {
-            "font": "Segoe UI",
-            "primary": "&H00FFFFFF",
-            "secondary": "&H0000FFFF",
-            "outline_c": "&H00000000",
-            "back_c": "&H60000000",
-            "bold": -1,
-            "outline": 4,
-            "shadow": 2,
-            "uppercase": False,
-        },
-    }
+    style_specs = ASS_STYLE_SPECS
     spec = style_specs.get((sub_style or "").strip().lower(), style_specs["hormozi"])
     is_upper = spec.get("uppercase", False)
 
@@ -165,6 +167,101 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return ass_path
 
 
+def _sec_to_ass(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    cs = int(round((seconds - int(seconds)) * 100))
+    if cs >= 100:
+        s += 1
+        cs = 0
+    if s >= 60:
+        m += 1
+        s = 0
+    if m >= 60:
+        h += 1
+        m = 0
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def generate_karaoke_ass(
+    word_times: List[Dict[str, Any]],
+    ass_path: Path,
+    width: int,
+    height: int,
+    sub_style: str = "hormozi",
+    font_size: int = 52,
+    margin_v: int = 380,
+    chunk_size: int = 3,
+) -> Path:
+    """Genera subtítulos karaoke: cada palabra se ilumina al pronunciarse."""
+    spec = ASS_STYLE_SPECS.get((sub_style or "").strip().lower(), ASS_STYLE_SPECS["hormozi"])
+    is_upper = spec.get("uppercase", False)
+    header = f"""[Script Info]
+Title: Dynamic Karaoke Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+PlayResX: {width}
+PlayResY: {height}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{spec['font']},{font_size},{spec['primary']},{spec['secondary']},{spec['outline_c']},{spec['back_c']},{spec['bold']},0,0,0,100,100,0,0,1,{spec['outline']},{spec['shadow']},2,60,60,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    chunks: List[List[Dict[str, Any]]] = []
+    current: List[Dict[str, Any]] = []
+    for word in word_times or []:
+        if not isinstance(word, dict) or not str(word.get("word", "")).strip():
+            continue
+        current.append(word)
+        if len(current) >= chunk_size:
+            chunks.append(current)
+            current = []
+    if current:
+        chunks.append(current)
+
+    dialogues: List[str] = []
+    for chunk in chunks:
+        try:
+            start = float(chunk[0].get("start", 0.0))
+            end = float(chunk[-1].get("end", start))
+        except (TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        durations = []
+        for word in chunk:
+            try:
+                durations.append(max(0.05, float(word.get("end", 0)) - float(word.get("start", 0))))
+            except (TypeError, ValueError):
+                durations.append(0.1)
+        total = sum(durations) or 1.0
+        span = max(0.15, end - start)
+        parts = []
+        for word, duration in zip(chunk, durations):
+            cs = max(1, int(round((duration / total) * span * 100)))
+            text = str(word.get("word", "")).strip()
+            if not text:
+                continue
+            if is_upper:
+                text = text.upper()
+            parts.append(f"{{\\kf{cs}}}{text}")
+        if not parts:
+            continue
+        dialogues.append(
+            f"Dialogue: 0,{_sec_to_ass(start)},{_sec_to_ass(end + 0.08)},Default,,0,0,0,,{' '.join(parts)}"
+        )
+
+    ass_path.write_text(header + "\n".join(dialogues) + "\n", encoding="utf-8")
+    return ass_path
+
+
 def subtitle_force_style(sub_style: str, font_size: int, margin_v: int) -> str:
     """Devuelve el force_style de libass para el preset pedido (fallback: classic) con alineación centrada y márgenes seguros."""
     base = SUBTITLE_STYLES.get((sub_style or "classic").strip().lower(), SUBTITLE_STYLES["classic"])
@@ -186,6 +283,16 @@ EMOTION_VOICE_MODULATION: Dict[str, Tuple[str, str]] = {
     "podcast":   ("-3%",  "+0Hz"),    # Ritmo relajado, conversacional con pausas humanas
     "breaking":  ("+2%",  "+1Hz"),    # Noticioso ágil pero articulado y respirable (nunca acelerado)
 }
+
+# Cadena profesional de voz para TTS de estudio: quita retumbe, da presencia,
+# suaviza sibilancia y nivela la dinamica antes del loudnorm final.
+VOICE_PRO_CHAIN = (
+    "highpass=f=85,"
+    "equalizer=f=250:t=q:w=1:g=-2,"
+    "equalizer=f=3800:t=q:w=1:g=2.5,"
+    "deesser=i=0.3:m=0.5:f=0.5,"
+    "acompressor=threshold=-20dB:ratio=3:attack=15:release=180:makeup=1.5"
+)
 
 # Presets de color grading cinematico para FFmpeg eq+curves
 # IMPORTANTE: todos los valores de curvas deben estar en el rango [0.0, 1.0]
@@ -218,7 +325,7 @@ class SceneEngine:
         crf: int = 18,
         audio_normalize: bool = True,
         color_grade: str = "cinema",
-        bgm_volume: float = 0.06,
+        bgm_volume: float = 0.12,
         bgm_track: str = "default",
         style_spec: Optional[Dict[str, Any]] = None,
         topic: str = "",
@@ -378,7 +485,7 @@ class SceneEngine:
             if not thumb_path.exists():
                 try:
                     import subprocess
-                    subprocess.run([
+                    await asyncio.to_thread(subprocess.run, [
                         "ffmpeg", "-y", "-ss", "0.5", "-i", str(scene_out),
                         "-vframes", "1", "-q:v", "3", str(thumb_path)
                     ], capture_output=True, timeout=5)
@@ -409,7 +516,9 @@ class SceneEngine:
         audio_path = scene_dir / "voice.mp3"
 
         sentence_boundaries = []
+        word_times: List[Dict[str, Any]] = []
         audio_generated = False
+        document_assets: Set[str] = set()
 
         # 1. Síntesis neuronal de alta fidelidad con el narrador (Speechify / Gemini / Voz seleccionada por el usuario)
         try:
@@ -462,6 +571,30 @@ class SceneEngine:
 
         # Medir duración exacta del audio real de la escena generado limpiamente por el TTS neural
         tts_duration = self._get_audio_duration(audio_path)
+
+        # Alineación real a nivel palabra (Whisper) para que cada overlay caiga en la sílaba exacta.
+        # Funciona con cualquier motor de voz (Speechify/Gemini/Edge/gTTS), que no exponen timestamps.
+        try:
+            from core.word_aligner import align_audio_to_script
+            aligned_words, aligned_sentences = await asyncio.wait_for(
+                asyncio.to_thread(
+                    align_audio_to_script,
+                    audio_path,
+                    speech_text,
+                    tts_duration,
+                    scene_dir / "word_times.json",
+                    "es",
+                    self.cancel_event,
+                ),
+                timeout=180.0,
+            )
+            if aligned_words:
+                word_times = aligned_words
+            if aligned_sentences:
+                sentence_boundaries = aligned_sentences
+                safe_log(f"[SceneEngine] 🎯 {len(word_times)} palabras alineadas en escena {scene.scene_id} (sincronía exacta de overlays).")
+        except Exception as _align_err:
+            safe_log(f"[SceneEngine] Alineación de palabras omitida en escena {scene.scene_id}: {_align_err}")
 
         # Si sentence_boundaries no fue provisto por Edge-TTS, calcular boundaries de frases con la duración real del audio
         if not sentence_boundaries:
@@ -560,6 +693,25 @@ class SceneEngine:
 
         # Registro y Verificación de Procedencia del Material Visual
         media_prov = self._get_media_provenance(broll_img)
+        if media_prov:
+            try:
+                from core.licensing import classify_license
+                lic = classify_license(media_prov.get("source_url", ""))
+                media_prov["license_class"] = lic["class"]
+                media_prov["allowed"] = lic["allowed"]
+                media_prov["monetization_safe"] = lic["monetization_safe"]
+                if not lic["allowed"]:
+                    safe_log(
+                        f"[Licensing] AVISO escena {scene.scene_id}: material {lic['class']} "
+                        f"({lic['domain']}) no permitido como principal. {lic['note']}"
+                    )
+                elif not lic["monetization_safe"]:
+                    safe_log(
+                        f"[Licensing] Aviso escena {scene.scene_id}: {lic['class']} "
+                        f"({lic['domain']}). {lic['note']}"
+                    )
+            except Exception as _lic_err:
+                safe_log(f"[Licensing] Aviso clasificando licencia: {_lic_err}")
         provenance_chip_path = None
         if media_prov and media_prov.get("attribution_badge"):
             b_text = str(media_prov.get("attribution_badge", "")).strip()
@@ -578,6 +730,9 @@ class SceneEngine:
                 except Exception as _p_err:
                     safe_log(f"[SmartMediaCurator] Fallback en source chip: {_p_err}")
 
+        # Sin pastillas flotantes: la atribución va en el pie de la card editorial.
+        provenance_chip_path = None
+
         # 2b. Descargar clips secuenciales de referencia (visual_beats) o segundo clip complementario
         bg_clips: List[Tuple[Path, float]] = []
         if anime_precise_clips:
@@ -586,6 +741,9 @@ class SceneEngine:
             bg_clips.append((broll_img, 0.0))
             if hasattr(self, "used_clip_names"):
                 self.used_clip_names.add(broll_img.name)
+            if hasattr(self, "used_visual_paths"):
+                b_str = str(broll_img.resolve()) if hasattr(broll_img, "resolve") else str(broll_img)
+                self.used_visual_paths.add(b_str)
 
         def _is_distinct_clip(cand: Optional[Path], current_clips: List[Tuple[Path, float]]) -> bool:
             if not cand or not cand.exists():
@@ -626,7 +784,19 @@ class SceneEngine:
                 # Si beat tiene trigger literal, intentar ubicar el timestamp exacto en boundaries
                 b_time = round(b_idx * segment_step, 2)
                 b_trig = (beat.get("trigger") or "").lower().strip() if isinstance(beat, dict) else ""
-                if b_trig and sentence_boundaries:
+                hit = None
+                if b_trig and word_times:
+                    trig_tokens = [w for w in re.findall(r"\w+", b_trig) if len(w) >= 4][:3]
+                    for trig in trig_tokens:
+                        for wt in word_times:
+                            if trig in re.sub(r"\W+", "", str(wt.get("word", "")).lower()):
+                                hit = float(wt.get("start", 0.0))
+                                break
+                        if hit is not None:
+                            break
+                    if hit is not None:
+                        b_time = max(1.2, min(duration - 2.0, round(hit - 0.08, 2)))
+                if hit is None and b_trig and sentence_boundaries:
                     for s_st, _s_en, s_txt in sentence_boundaries:
                         if b_trig in s_txt.lower() or any(w in s_txt.lower() for w in b_trig.split()[:3]):
                             b_time = max(1.5, min(duration - 2.0, round(s_st, 2)))
@@ -704,22 +874,31 @@ class SceneEngine:
         #    - En escenas narrativas o de gancho: intervalo dinámico de 2.0s a 3.2s (máxima retención y variedad).
         should_anchor_evidence = is_exact_evidence and not is_hook_scene
 
+        # Evaluación dinámica de densidad informativa del contenido:
+        # Si la escena contiene datos, tablas, diagramas o documentos que requieren lectura:
+        has_dense_content = (
+            bool(document_assets)
+            or is_exact_evidence
+            or (getattr(scene, "card", None) is not None)
+            or scene.type in ("card_focus", "versus_split", "evidence_document")
+        )
+
         if self.is_anime:
-            # RITMO EDITORIAL DINÁMICO PARA ANIME RECAP (Cortes Estratégicos y Cambio de Planos):
-            # Cambios de cámara y cortes cada 3.2s a 4.0s para sincronía perfecta con la narración sin estancamientos.
             target_interval = 3.6
             max_allowed_gap = 4.2
             max_clips_limit = max(4, math.ceil(duration / 3.4))
-            safe_log(f"[SceneEngine] 🎬 Pacing ANIME DINÁMICO (Escena {scene.scene_id}): Cortes estratégicos cada {target_interval}s (máx {max_clips_limit} planos).")
-        elif should_anchor_evidence:
-            target_interval = 4.2  # Tiempo de lectura confortable pero seguro ante Content ID (< 5.5s)
-            max_allowed_gap = 5.0  # Máximo gap continuo permitido antes de obligar a un corte
-            max_clips_limit = max(2, math.ceil(duration / 3.8))
-            safe_log(f"[SceneEngine] 🎯 Visual Anchor ACTIVO (Escena {scene.scene_id}): Evidencia clave -> Intervalo de {target_interval}s para lectura (sin congelamiento ni riesgo Content ID).")
+            safe_log(f"[SceneEngine] 🎬 Pacing Dinámico (Escena {scene.scene_id}): Cortes estratégicos cada {target_interval}s.")
+        elif has_dense_content:
+            # Gráficas, tablas, documentos, tarjetas y métricas: permanencia amplia para lectura y comprensión
+            target_interval = max(5.0, min(8.0, duration / 2.0)) if duration >= 10.0 else max(4.5, duration - 0.8)
+            max_allowed_gap = max(6.5, target_interval + 1.5)
+            max_clips_limit = max(2, math.ceil(duration / target_interval))
+            safe_log(f"[SceneEngine] 📊 Contenido con datos densos (Escena {scene.scene_id}): Permanencia de lectura ({target_interval:.1f}s por plano).")
         else:
-            target_interval = 2.2 if is_hook_scene else 3.0
-            max_allowed_gap = 2.8 if is_hook_scene else 3.8
-            max_clips_limit = max(3, math.ceil(duration / (2.0 if is_hook_scene else 2.8)))
+            # Planos escénicos, B-Roll y narración fluida: ritmo cinematográfico natural
+            target_interval = 3.2 if is_hook_scene else 4.2
+            max_allowed_gap = 4.0 if is_hook_scene else 5.2
+            max_clips_limit = max(2, math.ceil(duration / (2.6 if is_hook_scene else 3.8)))
 
         if (not anime_precise_clips) and (scene.type != "avatar_cam" or is_hook_scene or should_anchor_evidence) and duration >= (3.6 if is_hook_scene else 4.6):
             existing_times = [t for _, t in bg_clips]
@@ -828,6 +1007,10 @@ class SceneEngine:
                                     bg_clips.append((borrowed, round(target_cut, 2)))
                                     existing_times.append(round(target_cut, 2))
                                     safe_log(f"[SceneEngine] 🎬 Reencuadre desde archivo oficial canónico existente: {borrowed.name} (t={target_cut:.1f}s)")
+                            elif bg_clips:
+                                # Sin metraje nuevo disponible: no duplicar artificialmente la misma imagen cada 2 segundos.
+                                # Se sostiene la toma existente con movimiento continuo de cámara sin saltos espurios.
+                                pass
                         except Exception as _esup:
                             safe_log(f"[SceneEngine] Fallback en B-Roll complementario: {_esup}")
                     target_cut += target_interval
@@ -840,6 +1023,42 @@ class SceneEngine:
             else:
                 safe_log(f"[SceneEngine] ⚠️ Descartando clip corrupto o sin frames decodificables: {p.name}")
         bg_clips = valid_bg_clips
+
+        # Auditoría de assets: clasificar cada imagen antes de usarla como fondo.
+        # Descarta anime/collages y detecta diagramas para mostrarlos completos (sin recorte).
+        document_assets.clear()
+        try:
+            from core.vision_qa import vision_qa
+            audited: List[Tuple[Path, float]] = []
+            _pairs = list(bg_clips)
+            _infos = await asyncio.gather(*[
+                asyncio.to_thread(vision_qa.classify_media, _p, speech_text) for _p, _ in _pairs
+            ])
+            for (_p, _t), _info in zip(_pairs, _infos):
+                _suffix = _p.suffix.lower()
+                _is_img = _suffix in (".jpg", ".jpeg", ".png", ".webp")
+                _is_vid = _suffix in (".mp4", ".mov", ".webm", ".mkv", ".m4v")
+                if _is_img or _is_vid:
+                    _kind = str(_info.get("kind", "")).lower()
+                    _dense = bool(_info.get("has_dense_text"))
+                    _watermark = bool(_info.get("has_watermark"))
+                    _doc_kind = _kind in ("diagram", "screenshot", "text_graphic")
+                    if _kind in ("anime", "collage", "logo", "watermark") or _watermark or not _info.get("coherent_with_scene", True):
+                        safe_log(f"[SceneEngine] 🚫 Asset descartado ({_kind or 'incoherente'}): {_p.name}")
+                        continue
+                    if _is_vid and (_doc_kind or _dense or not _info.get("use_as_background", True)):
+                        safe_log(f"[SceneEngine] 🚫 Clip con texto/diagrama descartado ({_kind}): {_p.name}")
+                        continue
+                    if _is_img and (_doc_kind or _dense):
+                        document_assets.add(str(_p))
+                        safe_log(f"[SceneEngine] 📄 Documento detectado ({_kind}): {_p.name}. Se mostrará completo, sin zoom ni card encima.")
+                audited.append((_p, _t))
+            bg_clips = audited
+            if document_assets and not self.is_anime:
+                target_interval = max(5.0, min(8.0, duration / 2.0)) if duration >= 10.0 else max(4.5, duration - 0.8)
+                max_allowed_gap = max(6.5, target_interval + 1.5)
+        except Exception as _qa_err:
+            safe_log(f"[SceneEngine] Aviso clasificando assets: {_qa_err}")
 
         # Si no se pudo obtener ningún B-Roll o falló la descarga, usar estudio ambiental
         if not bg_clips:
@@ -891,17 +1110,21 @@ class SceneEngine:
 
                 if seg_len > max_allowed_gap and seg_len >= 4.0:
                     is_img_seg = clip_p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
-                    sub_step = 2.6 if is_hook_scene else (3.2 if is_img_seg else 4.2)
-                    t_sub = round(t_start + sub_step, 2)
-                    alt_idx = 0
-                    while t_sub <= t_next - 1.2:
-                        if len(all_collected_media) > 1 and is_img_seg:
-                            next_media = all_collected_media[(idx_c + alt_idx + 1) % len(all_collected_media)]
-                        else:
-                            next_media = clip_p
-                        dense_clips.append((next_media, t_sub))
-                        alt_idx += 1
-                        t_sub = round(t_sub + sub_step, 2)
+                    if len(all_collected_media) <= 1:
+                        # Una sola imagen de fondo: dejar que fluya en Ken Burns suave continuo sin cortes artificiales sobre sí misma
+                        pass
+                    else:
+                        sub_step = 3.0 if is_hook_scene else (3.8 if is_img_seg else 4.6)
+                        t_sub = round(t_start + sub_step, 2)
+                        alt_idx = 0
+                        while t_sub <= t_next - 1.2:
+                            if len(all_collected_media) > 1 and is_img_seg:
+                                next_media = all_collected_media[(idx_c + alt_idx + 1) % len(all_collected_media)]
+                            else:
+                                next_media = clip_p
+                            dense_clips.append((next_media, t_sub))
+                            alt_idx += 1
+                            t_sub = round(t_sub + sub_step, 2)
 
             dense_clips.sort(key=lambda x: x[1])
             bg_clips = dense_clips
@@ -994,12 +1217,17 @@ class SceneEngine:
                 bg_clips.sort(key=lambda x: x[1])
             safe_log(f"[SceneEngine] 🎙️ Soundbite activo: reservando {soundbite_window:.2f}s para voz real del protagonista ({clip_audio_candidate.name}) con pausas estratégicas (pre={sb_pause_before}s, post={sb_pause_after}s). Duración escena: {duration:.2f}s")
 
-        # Generar clip de avatar con sincronización reactiva labial a la voz de la escena
-        is_scene_documentary = (
-            getattr(self, "origin", "") in ("geopolitics_nucleo", "the_deep_dife", "universal_tour_huellas", "documental")
-            or any(k in (getattr(self, "topic", "") or "").lower() for k in ("geopolitica", "geopolítica", "historia", "documental", "estrecho", "malaca", "guerra", "imperio", "misterio"))
+        # Decisión del Director sobre la presencia del presentador en la escena:
+        # Se activa si la escena fue diseñada con cámara de presentador (pip o avatar_cam),
+        # y se desactiva si el Director asignó voice_over para dar prioridad absoluta al material visual en pantalla completa.
+        cam_type = str(getattr(scene, "camera", "voice_over") or "voice_over").lower().strip()
+        sc_type = str(getattr(scene, "type", "voice_over") or "voice_over").lower().strip()
+        is_voice_over_only = (
+            cam_type in ("voice_over", "none", "hidden")
+            or sc_type in ("voice_over", "document_evidence", "evidence_document")
             or not getattr(self, "enable_avatar", True)
         )
+        is_scene_documentary = is_voice_over_only
         scene_avatar_clip = None if is_scene_documentary else (scene_dir / "kai_avatar_synced.mov")
         if not is_scene_documentary:
             try:
@@ -1048,6 +1276,9 @@ class SceneEngine:
                     motion_overlay_path = motion_assets.get("bg_overlay")
                     motion_badges = motion_assets.get("badges", [])
                     motion_stat = motion_assets.get("stat")
+                    # Sin insignias/píldoras flotantes: solo texto y cards editoriales.
+                    motion_badges = []
+                    motion_stat = None
                     if motion_overlay_path and motion_overlay_path.exists():
                         safe_log(f"[SceneEngine] ✓ Capa de motion graphics DeepSeek Flash lista para escena {scene.scene_id} ({len(motion_badges)} insignias escalonadas)")
                 except Exception as _me:
@@ -1058,6 +1289,7 @@ class SceneEngine:
 
         # 3. Preparar tarjeta Bento moderna o alternativa visual honesta
         card_img_path = None
+        animated_card_path = None
         card_visual_type = "bento"
         card_start_time = 0.5
         smart_card_dur = None
@@ -1116,7 +1348,7 @@ class SceneEngine:
         # Calcular temporización sincronizada para que aparezca cuando aporte contexto y se retire cuando deje de ser relevante
         if visual_intent:
             card_start_time, smart_card_dur = SmartMediaCurator.calculate_smart_timing(
-                visual_intent, sentence_boundaries, duration
+                visual_intent, sentence_boundaries, duration, word_times=word_times
             )
 
         # 3b. Remotion AI: Evaluación prioritaria para animaciones React (MetricCounter / VersusComparison)
@@ -1435,35 +1667,34 @@ class SceneEngine:
                         else:
                             card_img_path = None
 
-                # 2. Bento estándar (Fallback final)
+                # 2. Texto editorial (Fallback final, sin badges)
                 else:
-                    self.web_renderer.render_to_image(
-                        headline=c_headline,
+                    self.web_renderer.render_visual_template(
+                        template_name="text_card",
                         out_png=card_img_path,
-                        stat_value=c_stat or "",
-                        stat_label="Cifra Verificada" if c_stat else "",
-                        body=c_body,
-                        badge=c_badge or "INFO",
-                        source="Registro Oficial 2026",
-                        style="auto",
-                        image_path=broll_img,
+                        params={
+                            "headline": c_headline,
+                            "body": c_body,
+                            "source": c_params.get("source", ""),
+                        },
+                        variant=c_variant,
                     )
-                    card_visual_type = "bento"
-                    safe_log(f"[SceneEngine] 🎨 Tarjeta Bento moderna WebCardRenderer generada para escena {scene.scene_id}")
+                    card_visual_type = "text_card"
+                    safe_log(f"[SceneEngine] 📝 Tarjeta editorial generada para escena {scene.scene_id}")
             except Exception as _we:
-                safe_log(f"[SceneEngine] Fallback a WebCardRenderer simplificado: {_we}")
+                safe_log(f"[SceneEngine] Fallback a tarjeta editorial simplificada: {_we}")
                 try:
-                    self.web_renderer.render_to_image(
-                        headline=c_headline,
+                    self.web_renderer.render_visual_template(
+                        template_name="text_card",
                         out_png=card_img_path,
-                        stat_value=c_stat or "",
-                        stat_label="",
-                        body=c_body,
-                        badge=c_badge or "INFO",
-                        source="Registro Oficial 2026",
-                        style="auto",
-                        image_path=None,
+                        params={
+                            "headline": c_headline,
+                            "body": c_body,
+                            "source": c_params.get("source", ""),
+                        },
+                        variant=c_variant,
                     )
+                    card_visual_type = "text_card"
                 except Exception as _fe:
                     safe_log(f"[SceneEngine] Fallback final a CardRenderer: {_fe}")
                     card_obj = InfoCard(
@@ -1480,24 +1711,51 @@ class SceneEngine:
                     )
                     self.card_renderer.render(card_obj, card_img_path)
 
+            # Todas las cards usan el sistema editorial: sin badges, iconos ni pills.
+            try:
+                from core.editorial_cards import TEMPLATE_ALIASES as _EDIT_ALIASES
+                _edit_kind = _EDIT_ALIASES.get(c_template, "text_card")
+                if card_img_path and card_img_path.exists():
+                    card_visual_type = "stat_counter" if _edit_kind == "data_hero" else "text_card"
+            except Exception:
+                pass
+
+            # 2b. Count-up animado de la cifra principal (solo valores numéricos claros)
+            if card_visual_type == "stat_counter" and c_stat:
+                try:
+                    from core.animated_stat_card import create_animated_stat_card
+                    anim_out = scene_dir / f"card_{scene.scene_id}_anim.mov"
+                    c_source = str(c_params.get("source") or "")
+                    anim_res = await asyncio.to_thread(
+                        create_animated_stat_card,
+                        c_stat,
+                        anim_out,
+                        c_headline,
+                        c_body if c_body != c_headline else "",
+                        c_source,
+                        self.fps,
+                        0.9,
+                    )
+                    if anim_res:
+                        animated_card_path = anim_res[0]
+                        safe_log(f"[SceneEngine] 🔢 Count-up animado listo para escena {scene.scene_id}: {c_stat}")
+                except Exception as _anim_err:
+                    safe_log(f"[SceneEngine] Count-up omitido en escena {scene.scene_id}: {_anim_err}")
+
         # 3b. Preparar chips / pastillas referenciales dinámicas sincronizadas con el momento en que se mencionan
         chips_img_path = None
         chip_start_time = 0.8
         if getattr(scene, "chips", None) and scene.chips:
-            out_chip_path = scene_dir / f"chips_{scene.scene_id}.png"
-            chips_img_path = self._render_chips_overlay(scene.chips, out_chip_path)
-            if sentence_boundaries:
-                chip_keywords = [str(c).lower() for c in scene.chips]
-                for s_st, _s_en, s_txt in sentence_boundaries:
-                    low_txt = s_txt.lower()
-                    if any(kw in low_txt for kw in chip_keywords):
-                        chip_start_time = max(0.5, round(s_st, 2))
-                        break
+            # Chips/pastillas desactivados: solo se permiten cards y texto editorial.
+            chips_img_path = None
 
         # 3c. Preparar Pop-up reactivo sincronizado si la escena tiene popups definidos
         popup_img_path = None
         popup_start_time = 1.2
         popups_list = getattr(scene, "popups", []) or []
+        # Pop-ups tipo pastilla desactivados: el texto relevante ya lo aportan
+        # las cards editoriales, los títulos cinéticos y las fechas.
+        popups_list = []
         if popups_list and not card_img_path:
             p_data = popups_list[0] if isinstance(popups_list[0], dict) else {"text": str(popups_list[0])}
             p_txt = p_data.get("text", "").strip()
@@ -1534,11 +1792,11 @@ class SceneEngine:
             lt_sub = (scene.speech[:75].rsplit(" ", 1)[0] + "…") if len(scene.speech) > 75 else scene.speech
             out_lt_path = scene_dir / f"lower_third_{scene.scene_id}.png"
             try:
-                lower_third_img_path = self.web_renderer.render_lower_third_to_image(
-                    title=scene.name,
-                    subtitle=lt_sub,
+                lower_third_img_path = self.web_renderer.render_visual_template(
+                    template_name="lower_third",
                     out_png=out_lt_path,
-                    tag=lt_tag,
+                    params={"headline": scene.name, "body": lt_sub, "tag": lt_tag},
+                    variant="orange_noir",
                 )
                 safe_log(f"[SceneEngine] 📺 Rótulo Broadcast WebCardRenderer generado para escena {scene.scene_id}")
             except Exception as _wlt:
@@ -1710,7 +1968,7 @@ class SceneEngine:
                 except Exception as _re_err:
                     safe_log(f"[SceneEngine] Remotion AI overlay omitido: {_re_err}")
 
-        srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries)
+        srt_path = self._generate_scene_subtitles(speech_text, duration, scene_dir, sentence_boundaries, word_times)
 
         # 4b. Detección inteligente de personas/protagonistas mencionados para Spotlight con foto
         person_spotlight_overlays: List[Dict[str, Any]] = []
@@ -1762,6 +2020,11 @@ class SceneEngine:
         except Exception as _pe:
             safe_log(f"[SceneEngine] Aviso en detección de personas: {_pe}")
 
+        if document_assets and (card_img_path or animated_card_path):
+            card_img_path = None
+            animated_card_path = None
+            safe_log(f"[SceneEngine] 📄 Escena {scene.scene_id}: card suprimida para no tapar el documento.")
+
         # 5. Montar filtergraph de FFmpeg específico para el layout de la escena
         inputs: List[str] = []
         filter_parts: List[str] = []
@@ -1772,20 +2035,29 @@ class SceneEngine:
             if len(bg_clips) == 1:
                 first_bg_path, _ = bg_clips[0]
                 first_is_image = first_bg_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
-                if first_is_image:
-                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(first_bg_path)])
-                    kb_frames = max(1, int(float(dur_str) * 25))
-                    z_step = max(0.0003, round(0.14 / kb_frames, 5))
+                if first_is_image and str(first_bg_path) in document_assets:
+                    # Documento/diagrama: se ve completo sobre un fondo desenfocado (nunca recortado).
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(first_bg_path)])
+                    filter_parts.append(
+                        f"[0:v]split=2[dbg][dfg];"
+                        f"[dbg]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},boxblur=28:2[dbg2];"
+                        f"[dfg]scale={self.W}:{self.H}:force_original_aspect_ratio=decrease[dfg2];"
+                        f"[dbg2][dfg2]overlay=x=(W-w)/2:y=(H-h)/2,setsar=1,format=yuv420p[v_bg0]"
+                    )
+                elif first_is_image:
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(first_bg_path)])
+                    kb_frames = max(1, int(float(dur_str) * self.fps))
+                    z_step = max(0.0003, round(0.22 / kb_frames, 5))
                     pan_step = max(0.2, round(25.0 / kb_frames, 2))
                     kb_mode = int(scene.scene_id) % 4
                     if kb_mode == 0:
-                        kb_filter = f"zoompan=z='min(zoom+{z_step},1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps=25"
+                        kb_filter = f"zoompan=z='min(zoom+{z_step},1.22)':x='iw/2-(iw/zoom/2)+{max(1, int(self.W*0.02))}*on/{kb_frames}':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps={self.fps}"
                     elif kb_mode == 1:
-                        kb_filter = f"zoompan=z='if(lte(zoom,1.02),1.02,max(1.02,1.15-{z_step}*on))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps=25"
+                        kb_filter = f"zoompan=z='if(lte(zoom,1.02),1.02,max(1.02,1.22-{z_step}*on))':x='iw/2-(iw/zoom/2)-{max(1, int(self.W*0.02))}*on/{kb_frames}':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps={self.fps}"
                     elif kb_mode == 2:
-                        kb_filter = f"zoompan=z=1.08:x='min(x+{pan_step},iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps=25"
+                        kb_filter = f"zoompan=z=1.08:x='min(x+{pan_step},iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps={self.fps}"
                     else:
-                        kb_filter = f"zoompan=z=1.08:x='max(0,iw-iw/zoom-{pan_step}*on)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps=25"
+                        kb_filter = f"zoompan=z=1.08:x='max(0,iw-iw/zoom-{pan_step}*on)':y='ih/2-(ih/zoom/2)':d={kb_frames}:s={self.W}x{self.H}:fps={self.fps}"
                     filter_parts.append(
                         f"[0:v]scale={int(self.W * 1.14)}:{int(self.H * 1.14)}:force_original_aspect_ratio=increase,"
                         f"crop={int(self.W * 1.14)}:{int(self.H * 1.14)},"
@@ -1793,7 +2065,7 @@ class SceneEngine:
                         f"setsar=1[v_bg0]"
                     )
                 else:
-                    inputs.extend(["-t", dur_str, "-r", "25", "-i", str(first_bg_path)])
+                    inputs.extend(["-t", dur_str, "-r", str(self.fps), "-i", str(first_bg_path)])
                     cam_x = f"'(in_w-out_w)/2 + 35*(t/{dur_str})'"
                     cam_y = f"'(in_h-out_h)/2 + 18*(t/{dur_str})'"
                     filter_parts.append(
@@ -1820,26 +2092,35 @@ class SceneEngine:
                     seg_tags.append(f"[{seg_tag}]")
 
                     if is_img:
-                        inputs.extend(["-loop", "1", "-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
-                        kb_frames_sub = max(1, int(seg_dur * 25))
-                        z_step_sub = max(0.0003, round(0.14 / kb_frames_sub, 5))
-                        pan_step = max(0.2, round(25.0 / kb_frames_sub, 2))
-                        kb_mode = (int(scene.scene_id) + i) % 4
-                        if kb_mode == 0:
-                            kb_filter = f"zoompan=z='min(zoom+{z_step_sub},1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25"
-                        elif kb_mode == 1:
-                            kb_filter = f"zoompan=z='if(lte(zoom,1.02),1.02,max(1.02,1.15-{z_step_sub}*on))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25"
-                        elif kb_mode == 2:
-                            kb_filter = f"zoompan=z=1.08:x='min(x+{pan_step},iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25"
+                        inputs.extend(["-loop", "1", "-t", seg_dur_str, "-r", str(self.fps), "-i", str(clip_p)])
+                        if str(clip_p) in document_assets:
+                            filter_parts.append(
+                                f"[{clip_in_idx}:v]split=2[dbg{i}][dfg{i}];"
+                                f"[dbg{i}]scale={self.W}:{self.H}:force_original_aspect_ratio=increase,crop={self.W}:{self.H},boxblur=28:2[dbg2_{i}];"
+                                f"[dfg{i}]scale={self.W}:{self.H}:force_original_aspect_ratio=decrease[dfg2_{i}];"
+                                f"[dbg2_{i}][dfg2_{i}]overlay=x=(W-w)/2:y=(H-h)/2,setsar=1,format=yuv420p,"
+                                f"trim=duration={seg_dur_str},setpts=PTS-STARTPTS[{seg_tag}]"
+                            )
                         else:
-                            kb_filter = f"zoompan=z=1.08:x='max(0,iw-iw/zoom-{pan_step}*on)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps=25"
+                            kb_frames_sub = max(1, int(seg_dur * self.fps))
+                            z_step_sub = max(0.0003, round(0.22 / kb_frames_sub, 5))
+                            pan_step = max(0.2, round(25.0 / kb_frames_sub, 2))
+                            kb_mode = (int(scene.scene_id) + i) % 4
+                            if kb_mode == 0:
+                                kb_filter = f"zoompan=z='min(zoom+{z_step_sub},1.22)':x='iw/2-(iw/zoom/2)+{max(1, int(self.W*0.02))}*on/{kb_frames_sub}':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps={self.fps}"
+                            elif kb_mode == 1:
+                                kb_filter = f"zoompan=z='if(lte(zoom,1.02),1.02,max(1.02,1.22-{z_step_sub}*on))':x='iw/2-(iw/zoom/2)-{max(1, int(self.W*0.02))}*on/{kb_frames_sub}':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps={self.fps}"
+                            elif kb_mode == 2:
+                                kb_filter = f"zoompan=z=1.08:x='min(x+{pan_step},iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps={self.fps}"
+                            else:
+                                kb_filter = f"zoompan=z=1.08:x='max(0,iw-iw/zoom-{pan_step}*on)':y='ih/2-(ih/zoom/2)':d={kb_frames_sub}:s={self.W}x{self.H}:fps={self.fps}"
 
-                        filter_parts.append(
-                            f"[{clip_in_idx}:v]scale={int(self.W * 1.14)}:{int(self.H * 1.14)}:force_original_aspect_ratio=increase,"
-                            f"crop={int(self.W * 1.14)}:{int(self.H * 1.14)},"
-                            f"{kb_filter},"
-                            f"setsar=1,trim=duration={seg_dur_str},setpts=PTS-STARTPTS[{seg_tag}]"
-                        )
+                            filter_parts.append(
+                                f"[{clip_in_idx}:v]scale={int(self.W * 1.14)}:{int(self.H * 1.14)}:force_original_aspect_ratio=increase,"
+                                f"crop={int(self.W * 1.14)}:{int(self.H * 1.14)},"
+                                f"{kb_filter},"
+                                f"setsar=1,trim=duration={seg_dur_str},setpts=PTS-STARTPTS[{seg_tag}]"
+                            )
                     else:
                         is_soundbite_seg = (
                             is_soundbite_scene
@@ -1852,11 +2133,11 @@ class SceneEngine:
                         same_file_prev = (i > 0 and bg_clips[i - 1][0] == clip_p)
                         v_offset = (i * 4.5) if (same_file_prev and not is_soundbite_seg) else 0.0
                         if is_soundbite_seg:
-                            inputs.extend(["-ss", f"{soundbite_offset:.3f}", "-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
+                            inputs.extend(["-ss", f"{soundbite_offset:.3f}", "-t", seg_dur_str, "-r", str(self.fps), "-i", str(clip_p)])
                         elif v_offset > 0.1:
-                            inputs.extend(["-ss", f"{v_offset:.2f}", "-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
+                            inputs.extend(["-ss", f"{v_offset:.2f}", "-t", seg_dur_str, "-r", str(self.fps), "-i", str(clip_p)])
                         else:
-                            inputs.extend(["-t", seg_dur_str, "-r", "25", "-i", str(clip_p)])
+                            inputs.extend(["-t", seg_dur_str, "-r", str(self.fps), "-i", str(clip_p)])
 
                         # Movimiento cinemático continuo y alternancia de cámaras para cada plano:
                         cam_mode = i % 4
@@ -1877,7 +2158,9 @@ class SceneEngine:
                             cam_x = f"'(in_w-out_w)/2 + 15*(t/{seg_dur_str})'"
                             cam_y = f"'(in_h-out_h)/2 + 20*(t/{seg_dur_str})'"
 
-                        trans_fade = ",fade=t=in:st=0:d=0.18:color=black" if i > 0 else ""
+                        # Corte seco profesional: el cambio de camara/encuadre ya da el golpe
+                        # visual. Fundir a negro en cada corte apaga la energia del montaje.
+                        trans_fade = ""
                         filter_parts.append(
                             f"[{clip_in_idx}:v]scale={int(self.W * scale_factor)}:{int(self.H * scale_factor)}:force_original_aspect_ratio=increase,"
                             f"crop={self.W}:{self.H}:x={cam_x}:y={cam_y},setsar=1{trans_fade},"
@@ -1894,7 +2177,7 @@ class SceneEngine:
 
         # Superposicion sutil de microelementos cineticos de fondo (particulas y acentos HUD)
         if motion_overlay_path and motion_overlay_path.exists():
-            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(motion_overlay_path)])
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(motion_overlay_path)])
             m_idx = num_in
             num_in += 1
             filter_parts.append(
@@ -2009,15 +2292,17 @@ class SceneEngine:
                 av_x_pip = int(self.W - av_w_pip - (40 if not self.is_vertical else 26))
                 av_y_pip = int(self.H - av_w_pip - (40 if not self.is_vertical else 96))
 
-            is_documentary = (
-                getattr(self, "origin", "") in ("geopolitics_nucleo", "the_deep_dife", "universal_tour_huellas", "documental")
-                or any(k in (getattr(self, "topic", "") or "").lower() for k in ("geopolitica", "geopolítica", "historia", "documental", "estrecho", "malaca", "guerra", "imperio", "misterio"))
+            cam_type = str(getattr(scene, "camera", "voice_over") or "voice_over").lower().strip()
+            sc_type = str(getattr(scene, "type", "voice_over") or "voice_over").lower().strip()
+            is_voice_over_scene = (
+                cam_type in ("voice_over", "none", "hidden")
+                or sc_type in ("voice_over", "document_evidence", "evidence_document")
                 or not getattr(self, "enable_avatar", True)
             )
 
-            if is_documentary or cam in ("voice_over", "none", "hidden") or sc_type == "voice_over":
-                # Escena puramente visual o documental: el avatar NO se superpone, pantalla completa limpia para metraje 4K
-                safe_log(f"[SceneEngine] 🎙️ Escena {scene.scene_id}: Modo cinematográfico documental, pantalla completa para metraje de archivo (cero avatar).")
+            if is_voice_over_scene:
+                # Escena puramente visual: el avatar NO se superpone, pantalla completa limpia para el metraje/datos
+                safe_log(f"[SceneEngine] 🎙️ Escena {scene.scene_id}: Foco visual completo ('{cam_type}'). Pantalla limpia sin avatar.")
 
             elif self.is_anime:
                 # En anime: el avatar SIEMPRE sale pequeño abajo en esquina PIP discreta, jamás tapando el centro
@@ -2111,7 +2396,7 @@ class SceneEngine:
             ft_start = 0.4
             ft_end = min(duration - 0.3, ft_start + (n_words - 1) * stagger + 1.7)
             for i_w, word_path in enumerate(kinetic_word_paths):
-                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(word_path)])
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(word_path)])
                 w_idx = num_in
                 num_in += 1
                 st = ft_start + i_w * stagger
@@ -2139,7 +2424,7 @@ class SceneEngine:
                 cur_v = f"v_kw{i_w}"
 
         elif free_title_img_path and free_title_img_path.exists():
-            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(free_title_img_path)])
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(free_title_img_path)])
             ft_idx = num_in
             num_in += 1
             ft_end = 0.4 + free_title_dur
@@ -2156,8 +2441,11 @@ class SceneEngine:
             )
             cur_v = "v_ft"
 
-        elif card_img_path and card_img_path.exists():
-            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(card_img_path)])
+        elif (card_img_path and card_img_path.exists()) or animated_card_path:
+            if animated_card_path:
+                inputs.extend(["-i", str(animated_card_path)])
+            else:
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(card_img_path)])
             c_idx = num_in
             num_in += 1
             card_end = card_start_time + card_duration
@@ -2172,7 +2460,7 @@ class SceneEngine:
                     f"[{c_idx}:v]scale=eval=frame:w='{scale_expr}':h=-2,format=rgba,"
                     f"fade=t=in:st={card_start_time:.2f}:d=0.18:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
                 )
-                ease_y = f"((H-h)/2) - 40 + 5*sin(t*2.8)"
+                ease_y = f"((H-h)/2) - 40"
                 filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
                 cur_v = "v_card"
 
@@ -2181,7 +2469,7 @@ class SceneEngine:
                 top_y = int(self.H * 0.16) if self.is_vertical else int(self.H * 0.12)
                 slide_dist = 28
                 slide_calc = f"min(max((t-{card_start_time:.2f})/0.32\\,0)\\,1)"
-                ease_y = f"{top_y} - {slide_dist}*(1-pow({slide_calc}\\,3)) + 4*sin(t*2.4)"
+                ease_y = f"{top_y} - {slide_dist}*(1-pow({slide_calc}\\,3))"
                 filter_parts.append(
                     f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.25:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
                 )
@@ -2213,14 +2501,33 @@ class SceneEngine:
                 cur_v = "v_card"
 
             elif card_visual_type == "stat_counter":
-                # Métrica gigante: Escala suave y elevación centrada con micro-flotación
-                slide_dist = 22
-                slide_calc = f"min(max((t-{card_start_time:.2f})/0.32\\,0)\\,1)"
-                ease_y = f"((H-h)/2) + {slide_dist}*(1-pow({slide_calc}\\,3)) + 3*sin(t*2.2)"
-                filter_parts.append(
-                    f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.25:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
-                )
-                filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
+                # En vertical la cifra se ancla arriba para dejar libre la zona de subtítulos.
+                card_top = int(self.H * 0.14) if self.is_vertical else None
+                card_y = f"{card_top}" if card_top is not None else "(H-h)/2"
+                if animated_card_path:
+                    hold = max(0.2, card_duration)
+                    fade_out = max(0.1, hold - 0.30)
+                    filter_parts.append(
+                        f"[{c_idx}:v]format=rgba,"
+                        f"tpad=stop_mode=clone:stop_duration={hold:.2f},"
+                        f"trim=duration={hold:.2f},setpts=PTS-STARTPTS,"
+                        f"fade=t=in:st=0:d=0.18:alpha=1,"
+                        f"fade=t=out:st={fade_out:.2f}:d=0.30:alpha=1,"
+                        f"setpts=PTS+{card_start_time:.2f}/TB[card_animated]"
+                    )
+                    filter_parts.append(
+                        f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{card_y}':eof_action=pass:"
+                        f"enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]"
+                    )
+                else:
+                    # Métrica gigante: entrada suave
+                    slide_dist = 22
+                    slide_calc = f"min(max((t-{card_start_time:.2f})/0.32\\,0)\\,1)"
+                    ease_y = f"{card_y} + {slide_dist}*(1-pow({slide_calc}\\,3))"
+                    filter_parts.append(
+                        f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.25:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
+                    )
+                    filter_parts.append(f"[{cur_v}][card_animated]overlay=x='(W-w)/2':y='{ease_y}':enable='between(t,{card_start_time:.2f},{card_end:.2f})'[v_card]")
                 cur_v = "v_card"
 
             elif card_visual_type == "document_evidence_split":
@@ -2239,7 +2546,9 @@ class SceneEngine:
                 slide_dist = 26
                 slide_calc = f"min(max((t-{card_start_time:.2f})/0.35\\,0)\\,1)"
                 card_base_x = "((W-w)/2)"
-                ease_y = f"((H-h)/2)+{slide_dist}*(1-pow({slide_calc}\\,3)) + 3*sin(t*2.0)"
+                top_y = int(self.H * 0.16) if self.is_vertical else None
+                base_y = f"{top_y}" if top_y is not None else "((H-h)/2)"
+                ease_y = f"{base_y}+{slide_dist}*(1-pow({slide_calc}\\,3))"
                 filter_parts.append(
                     f"[{c_idx}:v]format=rgba,fade=t=in:st={card_start_time:.2f}:d=0.35:alpha=1,fade=t=out:st={fo_start:.2f}:d=0.35:alpha=1[card_animated]"
                 )
@@ -2249,7 +2558,7 @@ class SceneEngine:
 
         elif popup_img_path and popup_img_path.exists():
             # Pop-up informativo HUD animado con entrada suave y salida centrada
-            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(popup_img_path)])
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(popup_img_path)])
             pop_idx = num_in
             num_in += 1
             pop_start = popup_start_time
@@ -2269,7 +2578,7 @@ class SceneEngine:
 
         elif lower_third_img_path and lower_third_img_path.exists():
             # Rótulo Broadcast Lower Third con entrada en el segundo 0.8 hasta el 4.8
-            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(lower_third_img_path)])
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(lower_third_img_path)])
             lt_idx = num_in
             num_in += 1
             lt_start = 0.8
@@ -2287,7 +2596,7 @@ class SceneEngine:
             cur_v = "v_lt"
 
         elif scene.type == "chat_debate" and chat_overlay_path and chat_overlay_path.exists():
-            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(chat_overlay_path)])
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(chat_overlay_path)])
             ch_idx = num_in
             num_in += 1
             cx = 60 if not self.is_vertical else 30
@@ -2320,7 +2629,7 @@ class SceneEngine:
                     if not _res:
                         continue
                     _ypath = _res[0]
-                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(_ypath)])
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(_ypath)])
                     _y_idx = num_in
                     num_in += 1
                     _t_end = _t + _yd
@@ -2344,7 +2653,7 @@ class SceneEngine:
 
         # Overlay de chips / pastillas referenciales dinámicas sincronizadas con la locución (popup de 3.5s a 4.5s)
         if chips_img_path and chips_img_path.exists():
-            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(chips_img_path)])
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(chips_img_path)])
             chp_idx = num_in
             num_in += 1
             # Posición FIJA y predecible (regla broadcast): abajo-izquierda dentro
@@ -2366,7 +2675,7 @@ class SceneEngine:
 
         # Overlay de Pastilla de Atribución y Proveniencia Verificada (Source / Transparency Chip)
         if provenance_chip_path and provenance_chip_path.exists():
-            inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(provenance_chip_path)])
+            inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(provenance_chip_path)])
             prv_idx = num_in
             num_in += 1
             prv_start = 0.6
@@ -2399,7 +2708,7 @@ class SceneEngine:
                 b_st = float(b_meta.get("delay_sec", 1.0 + bi * 1.2))
                 b_end = min(duration - 0.3, max(b_st + 3.2, duration - 0.4))
                 b_fo = max(b_st + 0.3, b_end - 0.35)
-                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(b_path)])
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(b_path)])
                 b_idx = num_in
                 num_in += 1
                 b_w = b_meta.get("width", 220)
@@ -2420,7 +2729,7 @@ class SceneEngine:
                 s_st = float(motion_stat.get("delay_sec", 1.4))
                 s_end = min(duration - 0.3, max(s_st + 3.8, duration - 0.4))
                 s_fo = max(s_st + 0.3, s_end - 0.35)
-                inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(s_path)])
+                inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(s_path)])
                 s_idx = num_in
                 num_in += 1
                 stat_y = int(self.H * 0.32) if not self.is_vertical else int(self.H * 0.28)
@@ -2471,7 +2780,7 @@ class SceneEngine:
 
                 kw_end = min(duration - 0.2, kw_start + kw_dur)
                 if kw_end - kw_start >= 1.2:
-                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(k_path)])
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(k_path)])
                     kw_in_idx = num_in
                     num_in += 1
                     fo_st = max(kw_start + 0.2, kw_end - 0.28)
@@ -2479,7 +2788,11 @@ class SceneEngine:
                         f"[{kw_in_idx}:v]format=rgba,fade=t=in:st={kw_start:.2f}:d=0.22:alpha=1,fade=t=out:st={fo_st:.2f}:d=0.28:alpha=1[kwo_{k_i}]"
                     )
                     kw_slide = f"min(max((t-{kw_start:.2f})/0.25\\,0)\\,1)"
-                    kw_y_expr = f"((H-h)/2)+24*(1-pow({kw_slide}\\,3))"
+                    if not self.is_vertical:
+                        kw_y_base = int(self.H * 0.72)
+                        kw_y_expr = f"{kw_y_base} + 16*(1-pow({kw_slide}\\,3))"
+                    else:
+                        kw_y_expr = f"((H-h)/2)+24*(1-pow({kw_slide}\\,3))"
                     filter_parts.append(
                         f"[{cur_v}][kwo_{k_i}]overlay=x='(W-w)/2':y='{kw_y_expr}':enable='between(t,{kw_start:.2f},{kw_end:.2f})'[v_kwo_{k_i}]"
                     )
@@ -2488,7 +2801,7 @@ class SceneEngine:
         # Superposición de Overlay Cinemático Remotion (React + Alpha ProRes)
         # Exclusión mutua estricta: asegurar que nunca se superponga sobre una tarjeta existente
         if remo_active:
-            inputs.extend(["-t", dur_str, "-r", "25", "-i", str(ai_remotion_mov)])
+            inputs.extend(["-t", dur_str, "-r", str(self.fps), "-i", str(ai_remotion_mov)])
             remo_idx = num_in
             num_in += 1
             # setpts desplaza el overlay al instante inteligente; eof_action=pass + enable
@@ -2506,7 +2819,7 @@ class SceneEngine:
             for ps_idx, ps in enumerate(person_spotlight_overlays):
                 ps_png = ps["png_path"]
                 if ps_png.exists():
-                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", "25", "-i", str(ps_png)])
+                    inputs.extend(["-loop", "1", "-t", dur_str, "-r", str(self.fps), "-i", str(ps_png)])
                     ps_idx_in = num_in
                     num_in += 1
                     ps_st = ps["start_time"]
@@ -2538,19 +2851,31 @@ class SceneEngine:
         if srt_path and srt_path.exists() and should_burn_subs:
             ass_path = srt_path.with_suffix(".ass")
             sub_size = 32 if not self.is_vertical else 54
-            margin_v = 45 if not self.is_vertical else 380
+            margin_v = 64 if not self.is_vertical else 420
             st_style = self.sub_style
             if self.is_vertical and st_style in ("classic", "default", ""):
                 st_style = "hormozi"
-            generate_ass_from_srt(
-                srt_path,
-                ass_path,
-                width=self.W,
-                height=self.H,
-                sub_style=st_style,
-                font_size=sub_size,
-                margin_v=margin_v,
-            )
+            if word_times:
+                generate_karaoke_ass(
+                    word_times,
+                    ass_path,
+                    width=self.W,
+                    height=self.H,
+                    sub_style=st_style,
+                    font_size=sub_size,
+                    margin_v=margin_v,
+                    chunk_size=3 if self.is_vertical else 4,
+                )
+            else:
+                generate_ass_from_srt(
+                    srt_path,
+                    ass_path,
+                    width=self.W,
+                    height=self.H,
+                    sub_style=st_style,
+                    font_size=sub_size,
+                    margin_v=margin_v,
+                )
             esc_ass = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
             filter_parts.append(
                 f"[{cur_v}]ass='{esc_ass}'[v_sub]"
@@ -2561,9 +2886,10 @@ class SceneEngine:
         # En videos verticales 9:16 (Shorts/Reels) o documentales cinematográficos, CERO banners tipo debug
         # con nombres de escena internos ni marcas toscas. 100% metraje limpio.
         show_hud = (
-            getattr(self, "show_hud_header", True)
+            getattr(self, "show_hud_header", False)
             and not self.is_vertical
             and not is_scene_documentary
+            and getattr(self, "style", "") in ("streamer", "vtuber", "reaccion")
         )
         if show_hud:
             font_p = FileManager.get_system_font_path()
@@ -2594,9 +2920,9 @@ class SceneEngine:
         # Audio profesional: loudnorm EBU R128 para broadcast (-16 LUFS target)
         has_bgm = bool(bgm_path and bgm_path.exists())
         if self.audio_normalize:
-            v_prep = f"[{voice_in_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,loudnorm=I=-16:TP=-1.5:LRA=11,apad=whole_dur={dur_str}"
+            v_prep = f"[{voice_in_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,{VOICE_PRO_CHAIN},loudnorm=I=-16:TP=-1.5:LRA=11,apad=whole_dur={dur_str}"
         else:
-            v_prep = f"[{voice_in_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,apad=whole_dur={dur_str}"
+            v_prep = f"[{voice_in_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,{VOICE_PRO_CHAIN},apad=whole_dur={dur_str}"
 
         # Control de sidechain para BGM
         if has_bgm:
@@ -2615,18 +2941,19 @@ class SceneEngine:
             inputs.extend(["-t", dur_str, "-stream_loop", "-1", "-i", str(bgm_path)])
             bgm_idx = num_in
             num_in += 1
-            bgm_vol = getattr(self, 'bgm_volume', 0.08)
-            # Durante la voz de KAI: sidechain ducking normal (-14dB).
-            # Durante el soundbite del protagonista (t >= soundbite_start - 0.15): BGM baja a cama sutil (0.035) para que la persona se escuche perfecta.
+            bgm_vol = getattr(self, 'bgm_volume', 0.12)
+            # La musica debe sentirse: cama audible bajo la voz (-18/-20 dB utiles)
+            # con ducking moderado, y aun mas baja durante el soundbite del protagonista.
             if has_clip_audio:
                 sb_duck_start = max(0.0, soundbite_start - 0.20)
                 sb_duck_end = round(soundbite_start + soundbite_window + 0.25, 2)
-                bgm_vol_expr = f"volume='if(between(t,{sb_duck_start:.2f},{sb_duck_end:.2f}),0.035,{bgm_vol:.3f})':eval=frame"
+                sb_bed_vol = max(0.06, round(bgm_vol * 0.55, 3))
+                bgm_vol_expr = f"volume='if(between(t,{sb_duck_start:.2f},{sb_duck_end:.2f}),{sb_bed_vol},{bgm_vol:.3f})':eval=frame"
             else:
                 bgm_vol_expr = f"volume={bgm_vol:.3f}"
             audio_filter_parts.append(
                 f"[{bgm_idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,{bgm_vol_expr}[a_bgm_raw];"
-                f"[a_bgm_raw][a_voice_ctrl_bgm]sidechaincompress=threshold=0.06:ratio=4:attack=50:release=350[a_bgm]"
+                f"[a_bgm_raw][a_voice_ctrl_bgm]sidechaincompress=threshold=0.08:ratio=2.5:attack=40:release=320[a_bgm]"
             )
             audio_mix_inputs.append("[a_bgm]")
 
@@ -2907,7 +3234,7 @@ class SceneEngine:
         thumb_path = scene_dir / "scene_thumb.jpg"
         try:
             import subprocess
-            subprocess.run([
+            await asyncio.to_thread(subprocess.run, [
                 "ffmpeg", "-y", "-ss", "1.8", "-i", str(scene_out),
                 "-vframes", "1", "-q:v", "3", str(thumb_path)
             ], capture_output=True, timeout=5)
@@ -3003,6 +3330,41 @@ class SceneEngine:
                         bgm_path=bgm_path,
                         chat_overlay_path=chat_overlay_path,
                     )
+
+                # QA del plano renderizado (3 fotogramas): texto cortado, collage, marcas de agua, incoherencia.
+                try:
+                    from core.vision_qa import vision_qa
+                    audit = await asyncio.to_thread(
+                        vision_qa.audit_video,
+                        video_path=sc_path,
+                        expected_niche=self.brand_watermark,
+                        forbidden_elements=[
+                            "anime", "caricaturas", "collage", "texto cortado",
+                            "marcas de agua", "elementos incoherentes",
+                        ],
+                        channel_name=self.brand_watermark,
+                    )
+                    if not audit.get("approved", True):
+                        safe_log(
+                            f"[VisionQA] Escena {sc.scene_id} rechazada: "
+                            f"{audit.get('forbidden_found')} {audit.get('critique')}"
+                        )
+                        import shutil as _shutil
+                        _shutil.rmtree(self.workdir / f"scene_{sc.scene_id}", ignore_errors=True)
+                        sc.card = None
+                        sc.visual_beats = []
+                        sc.visual_query = "modern studio background clean minimal real photo"
+                        sc.visual_query2 = ""
+                        sc_path = await self.render_scene(
+                            scene=sc,
+                            avatar_clip=avatar_clip,
+                            avatar_webm=avatar_webm,
+                            bgm_path=bgm_path,
+                            chat_overlay_path=chat_overlay_path,
+                        )
+                        safe_log(f"[VisionQA] Escena {sc.scene_id} re-renderizada con fondo seguro y sin card.")
+                except Exception as _qa_err:
+                    safe_log(f"[VisionQA] Aviso auditando escena {sc.scene_id}: {_qa_err}")
 
                 completed_count += 1
                 pct = 70.0 + (float(completed_count) / max(1, total_scenes)) * 18.0
@@ -3418,6 +3780,12 @@ class SceneEngine:
                         if p_alt_str not in self.used_visual_paths:
                             p = p_alt
                             p_str = p_alt_str
+                # Registrar de forma estricta en used_visual_paths y used_clip_names para que ninguna escena futura repita esta imagen
+                if hasattr(self, "used_visual_paths"):
+                    self.used_visual_paths.add(p_str)
+                if hasattr(self, "used_clip_names"):
+                    self.used_clip_names.add(p.name)
+
                 # Copiar sidecar de procedencia al directorio de la escena si existe
                 prov_file = self.orchestrator.target_dir / f"{cue_id}_provenance.json"
                 if prov_file.exists():
@@ -3624,7 +3992,8 @@ class SceneEngine:
         speech: str,
         duration: float,
         scene_dir: Path,
-        boundaries: Optional[List[tuple]] = None
+        boundaries: Optional[List[tuple]] = None,
+        word_times: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Path]:
         srt_path = scene_dir / "scene_subtitles.srt"
         srt_lines = []
@@ -3663,6 +4032,42 @@ class SceneEngine:
             return chunks
 
         # 1. Si tenemos timestamps precisos de Edge TTS por oración
+        # 0. Maxima precision: palabras alineadas con el audio real (Whisper).
+        #    Cada bloque de 3-4 palabras usa el inicio real de su primera palabra y
+        #    el fin real de la ultima, asi el subtitulo cambia exactamente al hablar.
+        if word_times:
+            word_chunks: List[List[Dict[str, Any]]] = []
+            cur_w: List[Dict[str, Any]] = []
+            for i, wt in enumerate(word_times):
+                cur_w.append(wt)
+                remaining = len(word_times) - (i + 1)
+                has_punct = bool(re.search(r"[.,!?;:]$", str(wt.get("word", ""))))
+                if len(cur_w) >= 4 or (len(cur_w) >= 3 and remaining >= 2) or (has_punct and len(cur_w) >= 2 and remaining >= 2):
+                    word_chunks.append(cur_w)
+                    cur_w = []
+            if cur_w:
+                if len(cur_w) <= 2 and word_chunks:
+                    word_chunks[-1].extend(cur_w)
+                else:
+                    word_chunks.append(cur_w)
+
+            idx = 1
+            for ci, chunk in enumerate(word_chunks):
+                st = float(chunk[0]["start"])
+                en = float(chunk[-1]["end"]) + 0.10
+                if ci + 1 < len(word_chunks):
+                    en = min(en, float(word_chunks[ci + 1][0]["start"]) - 0.02)
+                if en <= st:
+                    en = st + 0.35
+                clean_txt = " ".join(str(w.get("word", "")) for w in chunk).strip().replace(":", "")
+                if not clean_txt:
+                    continue
+                srt_lines.append(f"{idx}\n{_fmt_srt(st)} --> {_fmt_srt(en)}\n{clean_txt}\n")
+                idx += 1
+            if srt_lines:
+                srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
+                return srt_path
+
         if boundaries and len(boundaries) > 0:
             idx = 1
             for st, en, text in boundaries:

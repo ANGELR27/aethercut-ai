@@ -74,8 +74,11 @@ class SupervisorEditor:
     """Editor supervisor y red-teamer independiente para control de calidad antes de producción."""
 
     def __init__(self):
-        self.deepseek_key = getattr(settings, "DEEPSEEK_API_KEY", "") or "sk-e7b162ddb166482da39e847310b8c9dc"
-        self.deepseek_model = getattr(settings, "DEEPSEEK_MODEL", "deepseek-flash")
+        self.deepseek_key = getattr(settings, "DEEPSEEK_API_KEY", "") or ""
+        _model = (getattr(settings, "DEEPSEEK_MODEL", "") or "").strip()
+        # El modelo estable devuelve JSON completo; "flash" puede gastar los
+        # tokens en razonamiento y dejar el contenido vacío.
+        self.deepseek_model = _model if _model and _model != "deepseek-flash" else "deepseek-chat"
 
     def audit_and_refine(self, topic: str, scenes: List[Dict[str, Any]], source_context: Optional[str] = None) -> Dict[str, Any]:
         """Ejecuta la auditoría supervisada sobre el guión de escenas."""

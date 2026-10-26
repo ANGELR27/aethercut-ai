@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { IconCheck, IconClose, IconCopy, IconShare } from "./Icons";
 import {
   Privacy,
@@ -219,8 +220,8 @@ export function ProjectDetailsModal({
       : `${Math.round(durationSec)}s`
     : null;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+  const modalContent = (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
       {/* Backdrop */}
       <div className="absolute inset-0" onClick={onClose} />
 
@@ -593,4 +594,8 @@ export function ProjectDetailsModal({
       </div>
     </div>
   );
+
+  return typeof document !== "undefined"
+    ? createPortal(modalContent, document.body)
+    : modalContent;
 }

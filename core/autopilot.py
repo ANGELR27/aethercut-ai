@@ -49,6 +49,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "review_lead_minutes": 10,
     # Generar miniatura mejorada también para Shorts (usa fotogramas del video).
     "thumbnail_for_shorts": True,
+    "require_manual_approval": True,
 }
 
 # Horas locales estratégicas (mañana, mediodía, tarde y noche) según cuántas toquen al día.
@@ -501,12 +502,43 @@ def _produce(job: Dict[str, Any], cfg: Dict[str, Any], account: Dict[str, Any]) 
     description = "\n\n".join(p for p in [info.get("description"), info.get("hashtags_str")] if p)
     tags = info.get("tags") or []
 
+    # Puerta de calidad visual antes de publicar: el autopilot no debe subir
+    # planos incoherentes, collages, texto cortado o anime.
+    try:
+        from core.vision_qa import vision_qa
+        video_path = Path(info.get("video_path") or info.get("output_file") or (settings.OUTPUTS_DIR / f"{project_id}_master.mp4"))
+        qa = vision_qa.audit_video(
+            video_path=video_path,
+            expected_niche=job.get("channel_tag") or job.get("channel_title") or "divulgación profesional",
+            forbidden_elements=[
+                "anime", "caricaturas", "collage", "texto cortado",
+                "elementos incoherentes", "marcas de agua",
+            ],
+            channel_name=job.get("channel_title") or "Autopilot",
+        )
+        if not qa.get("approved", True):
+            critique = qa.get("critique") or "Composición no aprobada"
+            _update_job(
+                job_id,
+                status="failed",
+                message=f"Rechazado por QA visual: {critique}",
+                error=critique,
+                log="QA visual rechazó el video; no se publica.",
+            )
+            return
+    except Exception as qa_err:
+        _update_job(job_id, log=f"QA visual no disponible: {str(qa_err)[:100]}")
+
     # Miniaturas: se generan para todos los tipos (shorts y largos)
     # Para Shorts se usa estilo viral/neón con fotograma del video
     # Para largos se usa estilo cinemático con fotograma del video
     thumbnail_url = None
+    existing_thumb = settings.OUTPUTS_DIR / f"{project_id}_thumbnail.jpg"
+    if existing_thumb.exists():
+        thumbnail_url = f"/media/{existing_thumb.name}"
+        _update_job(job_id, log=f"Miniatura editorial del proyecto: {thumbnail_url}")
     wants_thumb = kind == "long" or cfg.get("thumbnail_for_shorts", True)
-    if wants_thumb:
+    if wants_thumb and not thumbnail_url:
         thumb_style = "viral" if kind == "short" else "cinematic"
         try:
             prep = _http_post("/api/publish/prepare", {"project_id": project_id}, timeout=120)
@@ -531,7 +563,11 @@ def _produce(job: Dict[str, Any], cfg: Dict[str, Any], account: Dict[str, Any]) 
     review_lead = int(cfg.get("review_lead_minutes", 10))
     publish_at = None
     privacy = "private"
-    if cfg.get("publish_mode") == "public":
+    if cfg.get("require_manual_approval", True):
+        # Modo seguro: subir privado, sin programar. Se publica solo tras aprobación.
+        privacy = "private"
+        publish_at = None
+    elif cfg.get("publish_mode") == "public":
         privacy = "public"
         publish_at = None
     elif cfg.get("publish_mode") == "schedule":
@@ -669,12 +705,24 @@ def _server_ready() -> bool:
 
 def _worker_loop() -> None:
     safe_log("[Autopilot] Motor iniciado.")
-    # Tras un reinicio, lo que estaba en curso vuelve a la cola.
+    # Tras un reinicio, lo que estaba en curso vuelve a la cola, salvo ranuras vencidas.
     with _lock:
         jobs = _load_jobs()
+        cutoff = _now() - timedelta(hours=2)
         for job in jobs:
             if job.get("status") in ACTIVE_STATES:
-                job["status"] = "planned"
+                try:
+                    slot = _parse(job.get("slot_at", ""))
+                except Exception:
+                    slot = None
+                if slot is not None and slot < cutoff:
+                    job["status"] = "cancelled"
+                    job["message"] = "Cancelado: ranura vencida; no se publica tarde."
+                    job.setdefault("log", []).append(
+                        {"at": _iso(_now()), "msg": "Cancelado por ranura vencida."}
+                    )
+                else:
+                    job["status"] = "planned"
         _save_jobs(jobs)
     while True:
         try:

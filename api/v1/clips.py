@@ -14,6 +14,7 @@ from config.settings import settings
 from api.schemas import ApiResponse, ClipExtractRequest, ClipSummary
 from api.security import verify_api_key
 from core.project_store import ProjectStore
+from core.llm import safe_log
 from utils.file_manager import FileManager
 
 router = APIRouter(prefix="/clips", tags=["Shorts & Viral Clips Studio"])
@@ -69,7 +70,8 @@ async def extract_clip_from_project(
     # Duración total con ffprobe
     total_dur = 60.0
     try:
-        p_res = subprocess.run(
+        p_res = await asyncio.to_thread(
+            subprocess.run,
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(master_file)],
             capture_output=True, text=True, check=True
         )
@@ -109,7 +111,14 @@ async def extract_clip_from_project(
         subprocess.run(cmd, capture_output=True, check=True)
 
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, _render_vertical_clip)
+    future = loop.run_in_executor(None, _render_vertical_clip)
+
+    def _log_render_error(fut):
+        exc = fut.exception()
+        if exc:
+            safe_log(f"[API Clips] Fallo renderizando {out_filename}: {exc}")
+
+    future.add_done_callback(_log_render_error)
 
     return ApiResponse(
         success=True,

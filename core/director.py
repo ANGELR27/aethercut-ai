@@ -544,6 +544,11 @@ REGLAS DE SELECCIÓN VISUAL (MÁXIMA RELEVANCIA Y MULTI-VIDEO POR ESCENA):
 - EXCLUSIÓN TOTAL DE MARCAS DE AGUA Y SELLOS: NUNCA busques marcas de stock comercial con sellos (Shutterstock, Alamy, iStock, Adobe Stock).
 - ANCLAJE A LA ENTIDAD REAL DEL CASO: cuando la transmisión trate un caso, lugar, persona, objeto o evento ESPECÍFICO, el "visual_query" y los "query" de los beats DEBEN nombrar esa entidad exacta (ej: 'Dyatlov Pass tent 1959 expedition photograph', 'Nazca lines hummingbird geoglyph aerial', 'Monte Ararat Durupinar formation satellite') y NUNCA su equivalente genérico ('snowy mountain', 'ancient lines', 'rocky mountain'). Una montaña cualquiera cuando se habla de UNA montaña concreta es una mentira visual que rompe la credibilidad.
 - PRIORIZACIÓN ABSOLUTA DE LA PERSONA Y DECLARACIÓN REAL: Si la escena habla de una persona o mandatario (ej: un presidente, ministro, líder, CEO, científico, deportista o celebridad), el "visual_query" y "visual_beats" DEBEN buscar OBLIGATORIAMENTE a esa persona real hablando o en acción (ej: 'Pedro Sanchez rueda de prensa declaraciones', 'Javier Milei discurso asamblea ONU', 'Claudia Sheinbaum conferencia', 'Elon Musk interview announcement'). ESTRICTAMENTE PROHIBIDO sustituir a la persona por metáforas abstractas de stock (como billetes de dinero, maquetas, martillos de juez, carreteras o edificios genéricos vacíos). La audiencia quiere ver a la persona concreta de la que se habla.
+- PRINCIPIO RECTOR: COHERENCIA VISUAL, RITMO Y DEFINICIÓN INTELIGENTE (EL MODELO DETERMINA SEGÚN EL TEMA):
+  * COHERENCIA DIRECTA Y ANCLAJE: El contenido visual ("visual_query" y "visual_beats") debe representar exactamente lo que se narra en la escena. Si se habla de una tecnología o nuevo modelo, busca sus interfaces, benchmarks, tablas y pruebas reales; si se habla de astronomía o el universo, busca metraje astronómico real; si se habla de geopolítica o historia, busca líderes, documentos y archivos reales. NUNCA introduzcas recursos desconectados del tema (ej: no busques el Sol o espacio si hablas de software, ni oficinas genéricas si hablas de una expedición).
+  * TONO ADAPTATIVO AL GÉNERO: Determina el tono con inteligencia: si el video es un análisis o lanzamiento actual, utiliza un tono dinámico, riguroso y contemporáneo (sin recurrir a frases como "en este documental"); si es una crónica histórica o misterio, adopta un tono narrativo de investigación.
+  * PERMANENCIA VISUAL SEGÚN LA DENSIDAD DEL DATO: Evalúa la carga cognitiva del plano. Cuando se expongan tablas comparativas, métricas, documentos o benchmarks, la escena debe dar permanencia suficiente para que la audiencia pueda leer y analizar los datos con claridad antes de cambiar de plano.
+  * ELECCIÓN CONSCIENTE DE CÁMARA: Define escena por escena si la presencia del presentador ("avatar_cam" o "pip_corner") aporta dinamismo (en ganchos, reacciones directas y cierres) o si la evidencia, gráfico o metraje debe ocupar el 100% de la pantalla en modo cinematográfico limpio ("voice_over").
 - ESCENAS DE REACCIÓN CON SOUNDBITE Y AUDIO REAL (CORTES DE DECLARACIÓN): En escenas de tipo "video_reaction" o cuando se introduzca una frase clave o declaración de un protagonista (ej: presidentes, líderes, científicos, figuras públicas):
   * Redacta una locución de KAI concisa y dinámica (de 10 a 18 palabras) que dé paso directo al corte de video (ej: "Miren lo que afirmó textualmente ante los micrófonos:", "Sus declaraciones ante la prensa fueron tajantes:", "Atención a sus propias palabras:").
   * El motor audiovisual le da prioridad al corte de video: silencia el audio mientras KAI habla para que no haya murmullos compitiendo detrás, y luego activa automáticamente la voz REAL del protagonista a volumen completo en primer plano para que se escuche clara y nítida.
@@ -685,16 +690,12 @@ class AIDirector:
         case_soundbites: declaraciones estratégicas reales con audio y video
         del protagonista analizadas en el video completo.
         """
-        # Normalización inteligente de unidad de tiempo: si el llamador envía minutos (<= 40)
+        # duration_target está SIEMPRE en segundos (el nombre del campo es explícito).
         try:
             dur_int = int(duration_target) if duration_target is not None else 45
         except (ValueError, TypeError):
             dur_int = 45
-        if 0 < dur_int <= 40:
-            dur = dur_int * 60
-        else:
-            dur = dur_int
-        dur = max(20, min(2400, dur))
+        dur = max(20, min(2400, dur_int))
 
         safe_log(f"[AIDirector] Planificando y dirigiendo transmisión para: «{topic}» ({dur}s / {dur // 60 if dur >= 60 else dur}{'m' if dur >= 60 else 's'})")
 
@@ -1029,7 +1030,7 @@ REGLA EDITORIAL SUPREMA: ANIME RECAP PROFESIONAL ({ep_tag or 'Arco Actual'}):
         if total_words >= min_acceptable_words:
             for s in scenes:
                 word_cnt = len(s.speech.split())
-                s.duration_est = max(8.0, round(word_cnt / 1.85, 1))
+                s.duration_est = max(3.0, round(word_cnt / 1.75, 1))
             return scenes
 
         safe_log(
@@ -1101,67 +1102,18 @@ REGLA EDITORIAL SUPREMA: ANIME RECAP PROFESIONAL ({ep_tag or 'Arco Actual'}):
         self,
         scenes: List[DirectorScene],
         topic: str,
-        target_words_per_scene: int
+        target_words_per_scene: int,
     ) -> List[DirectorScene]:
-        """Añade párrafos analíticos y datos de contexto para garantizar que cada escena cubra el tiempo asignado."""
+        """Normaliza la locución de cada escena respetando el guión original del tema sin inyectar textos genéricos o descontextualizados."""
         from utils.speech_normalizer import normalize_speech_for_tts
 
-        thematic_enrichments = [
-            (
-                f"Para comprender la verdadera dimensión de {topic}, es fundamental detenerse en los hechos documentados que casi nadie analiza a fondo. "
-                f"A menudo se repiten titulares superficiales que omiten las causas originales, pero cuando examinamos los registros históricos y técnicos paso a paso, "
-                f"emerge un panorama mucho más revelador y lleno de sorpresas que desafían lo que la mayoría daba por sentado. "
-            ),
-            (
-                f"Al rastrear el origen de este acontecimiento, los investigadores encontraron un antecedente clave que cambió todo el curso de los hechos. "
-                f"No fue una simple casualidad ni un evento aislado: existieron decisiones previas y factores estructurales que prepararon el terreno de forma silenciosa, "
-                f"demostrando que detrás de cada gran suceso hay detalles que pasan desapercibidos a primera vista pero resultan determinantes. "
-            ),
-            (
-                f"Las pruebas materiales y los datos recopilados aportan una claridad contundente: al cruzar los testimonios directos con los informes periciales, "
-                f"quedan al descubierto diferencias evidentes frente al relato común. Cada cifra contrastada y cada testimonio verificado permite reconstruir "
-                f"la cronología exacta, desarmando hipótesis apresuradas con evidencia concreta y tangible. "
-            ),
-            (
-                f"Aquí es donde la historia da un giro inesperado y plantea el mayor enigma para los expertos: cuando parecía haber una explicación sencilla, "
-                f"surgió una contradicción flagrante que obligó a reabrir las preguntas fundamentales. ¿Por qué ocurrió de esta forma precisa y qué intereses influyeron en el desenlace? "
-                f"La respuesta involucra nombres, decisiones bajo presión y registros que tardaron años en salir a la luz pública. "
-            ),
-            (
-                f"Al desglosar el funcionamiento técnico y las consecuencias directas sobre el terreno, los números hablan por sí solos. "
-                f"Estamos ante un impacto medible que transformó la forma de entender este campo, sentando precedentes que hasta hoy en día continúan estudiándose "
-                f"por su relevancia directa en nuestro presente y su capacidad de anticipar situaciones similares en el futuro. "
-            ),
-            (
-                f"Existen dos posturas claramente enfrentadas respecto a este punto crucial: por un lado, quienes defienden la interpretación tradicional, y por el otro, "
-                f"quienes demuestran con documentos en mano que la realidad fue sustancialmente distinta. Este contraste de perspectivas es el que hace que el tema siga fascinando "
-                f"y generando un debate tan apasionado entre especialistas y aficionados de todo el mundo. "
-            ),
-            (
-                f"Los archivos desclasificados y las auditorías independientes terminaron por confirmar lo que muchos sospechaban: "
-                f"hubo advertencias previas que fueron desestimadas y testimonios que no recibieron la atención debida en su momento. "
-                f"Analizar estos documentos con mirada crítica nos permite entender la cadena de acontecimientos sin mitos ni distorsiones. "
-            ),
-            (
-                f"Al poner todas las piezas sobre la mesa, la lección principal que nos deja este caso trasciende la anécdota y nos invita a reflexionar profundamente. "
-                f"Comprender {topic} con datos rigurosos y sin simplificaciones nos demuestra una vez más que la realidad siempre es mucho más intrigante que la ficción. "
-                f"Cuéntenme en los comentarios qué opinan sobre estas revelaciones y no olviden suscribirse para seguir descubriendo historias con evidencia real. "
-            ),
-        ]
-
         for idx, sc in enumerate(scenes):
-            words = sc.speech.split()
-            if len(words) < target_words_per_scene:
-                pool_idx = idx % len(thematic_enrichments)
-                enrichment = thematic_enrichments[pool_idx]
-                combined = sc.speech.strip() + " " + enrichment.strip()
-
-                while len(combined.split()) < target_words_per_scene - 10:
-                    pool_idx = (pool_idx + 1) % len(thematic_enrichments)
-                    combined += " " + thematic_enrichments[pool_idx].strip()
-
-                is_last = (idx == len(scenes) - 1)
-                sc.speech = normalize_speech_for_tts(combined, is_final_scene=is_last)
+            is_last = (idx == len(scenes) - 1)
+            # Normalizar dicción para TTS sin alterar el contenido temático del guión
+            sc.speech = normalize_speech_for_tts(sc.speech, is_final_scene=is_last)
+            word_count = len(sc.speech.split())
+            # Cadencia de locución broadcast realista (1.75 palabras por segundo)
+            sc.duration_est = max(4.0, round(word_count / 1.75, 1))
 
         return scenes
 

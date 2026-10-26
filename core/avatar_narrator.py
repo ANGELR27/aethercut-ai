@@ -291,7 +291,9 @@ REGLAS ESTRICTAS:
                             "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
                             "-i", "pipe:0", "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", str(out_path)
                         ]
-                        proc = subprocess.run(cmd, input=pcm, capture_output=True)
+                        proc = await asyncio.to_thread(
+                            subprocess.run, cmd, input=pcm, capture_output=True
+                        )
                         if proc.returncode == 0 and out_path.exists() and out_path.stat().st_size > 500:
                             generated = True
             except Exception:

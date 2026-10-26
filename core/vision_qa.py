@@ -10,6 +10,7 @@ garantizando:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
@@ -81,6 +82,182 @@ class VideoVisionQA:
                 safe_log(f"[VisionQA] Aviso extrayendo frame {i+1}: {exc}")
 
         return extracted
+
+    def _gemini_client(self):
+        api_key = (settings.GEMINI_API_KEY or "").split(",")[0].strip()
+        if not api_key or api_key == "your_gemini_api_key_here":
+            return None
+        from google import genai
+        return genai.Client(api_key=api_key)
+
+    @staticmethod
+    def _json_dict(data: Any) -> Dict[str, Any]:
+        if isinstance(data, list):
+            data = next((item for item in data if isinstance(item, dict)), {})
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _frames_for_asset(media_path: Path, count: int = 3) -> List[Path]:
+        if media_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+            return [media_path]
+
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(media_path)],
+                capture_output=True, text=True, timeout=15,
+            )
+            duration = float((probe.stdout or "").strip() or 0)
+        except Exception:
+            duration = 0.0
+
+        times = [duration * 0.15, duration * 0.5, duration * 0.85] if duration > 1 else [1.0]
+        out_dir = settings.STORAGE_DIR / "temp" / "qa_frames"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        frames: List[Path] = []
+        for index, ts in enumerate(times[:count]):
+            out = out_dir / f"asset_{media_path.stem}_{index}.jpg"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-ss", f"{max(0.0, ts):.2f}", "-i", str(media_path),
+                     "-frames:v", "1", "-q:v", "3", str(out)],
+                    capture_output=True, timeout=20,
+                )
+            except Exception:
+                continue
+            if out.exists() and out.stat().st_size > 1000:
+                frames.append(out)
+        return frames
+
+    def classify_media(self, media_path: Path, scene_text: str = "") -> Dict[str, Any]:
+        """Clasifica un asset antes de usarlo como fondo (diagrama, foto, anime, watermark...)."""
+        media_path = Path(media_path)
+        default = {
+            "kind": "photo",
+            "use_as_background": True,
+            "has_dense_text": False,
+            "has_watermark": False,
+            "composition": "clean",
+            "coherent_with_scene": True,
+            "reason": "Sin auditoría",
+        }
+        if not media_path.exists():
+            return default
+
+        cache_dir = settings.STORAGE_DIR / "cache" / "media_qa"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha1(
+            f"{media_path.name}|{media_path.stat().st_size}|{int(media_path.stat().st_mtime)}".encode()
+        ).hexdigest()
+        cache_file = cache_dir / f"{key}.json"
+        if cache_file.exists():
+            try:
+                cached = self._json_dict(json.loads(cache_file.read_text(encoding="utf-8")))
+                if cached:
+                    return {**default, **cached}
+            except Exception:
+                pass
+
+        frames = self._frames_for_asset(media_path)
+        client = self._gemini_client()
+        if not frames or client is None:
+            return default
+
+        is_video = media_path.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp")
+        try:
+            from google.genai import types
+            images = []
+            for frame in frames:
+                try:
+                    images.append(Image.open(frame))
+                except Exception:
+                    pass
+            if not images:
+                return default
+            prompt = (
+                "Evalúa la calidad y relevancia de este recurso visual para un video profesional.\n"
+                f"Narración / contexto de la escena: {scene_text[:500]}\n\n"
+                "Determina con rigor:\n"
+                "1. 'coherent_with_scene': ¿El contenido visual representa o se relaciona directamente con lo que se narra en la escena? (true/false). Si la narración trata de un tema y la imagen muestra algo completamente desconectado (por ejemplo, el sol o espacio cuando se habla de software o chips, o una oficina genérica cuando se habla de una batalla naval), responde false. Si muestra la entidad, persona, documento, gráfico o entorno del que se habla, responde true.\n"
+                "2. 'kind': 'photo' | 'video_frame' | 'diagram' | 'chart_or_table' | 'document' | 'screenshot' | 'illustration' | 'anime' | 'watermark'\n"
+                "3. 'has_dense_data': true si contiene gráficos, números, tablas, código o datos que requieren tiempo de lectura pausada.\n"
+                "4. 'use_as_background': true si tiene calidad visual nítida para mostrarse en pantalla (sin marcas de agua comerciales invasivas tipo Shutterstock o Getty).\n"
+                "5. 'has_watermark': true si tiene marcas de agua comerciales.\n"
+                "6. 'recommended_dwell_sec': tiempo estimado recomendado en pantalla (ej: 3.5s a 8.0s) según su complejidad para que el espectador pueda apreciarlo y procesarlo con claridad.\n"
+                "7. 'reason': explicación breve (1 frase).\n\n"
+                "Responde JSON estricto:\n"
+                "{\n"
+                '  "coherent_with_scene": true/false,\n'
+                '  "kind": "photo|video_frame|diagram|chart_or_table|document|screenshot|illustration|anime|watermark",\n'
+                '  "has_dense_data": true/false,\n'
+                '  "has_watermark": true/false,\n'
+                '  "use_as_background": true/false,\n'
+                '  "recommended_dwell_sec": 5.0,\n'
+                '  "reason": "1 frase"\n'
+                "}\n"
+            )
+            response = client.models.generate_content(
+                model="gemini-flash-lite-latest",
+                contents=images + [prompt],
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
+            data = self._json_dict(json.loads(response.text or "{}"))
+            info = {**default, **{k: data.get(k, default[k]) for k in default}}
+            try:
+                cache_file.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                pass
+            return info
+        except Exception as exc:
+            safe_log(f"[VisionQA] classify_media falló para {media_path.name}: {exc}")
+            return default
+        finally:
+            if is_video:
+                for frame in frames:
+                    try:
+                        frame.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+    def audit_scene_image(self, frame_path: Path, scene_text: str, channel_name: str = "General") -> Dict[str, Any]:
+        """Audita la composición de un plano ya renderizado (card + fondo + subtítulos)."""
+        frame_path = Path(frame_path)
+        if not frame_path.exists():
+            return {"approved": True, "issues": [], "critique": "Sin frame"}
+        client = self._gemini_client()
+        if client is None:
+            return {"approved": True, "issues": [], "critique": "Sin API key"}
+        try:
+            from google.genai import types
+            image = Image.open(frame_path)
+            prompt = (
+                "Eres editor jefe de un canal de divulgación. Audita este fotograma de un video vertical.\n"
+                f"Canal: {channel_name}\n"
+                f"Lo que se narra en la escena: {scene_text[:500]}\n\n"
+                "Rechaza (approved=false) si encuentras CUALQUIERA de estos defectos:\n"
+                "- Texto cortado, palabras incompletas o diagramas recortados por el encuadre.\n"
+                "- Una tarjeta/panel tapando texto importante del fondo o saliéndose del cuadro.\n"
+                "- Collage, varias interfaces mezcladas o elementos que no se entienden.\n"
+                "- Imagen incoherente con lo narrado o que parece un error de montaje.\n"
+                "- Anime, caricaturas o logos de watermark.\n"
+                "Aprueba solo si el plano es legible, coherente y se entiende de un vistazo.\n"
+                "Nota: los subtítulos grandes en la parte inferior son parte normal del formato y NO son un defecto.\n\n"
+                "Responde JSON: {\"approved\":true/false,\"issues\":[\"...\"],\"critique\":\"1-2 frases\"}"
+            )
+            response = client.models.generate_content(
+                model="gemini-flash-lite-latest",
+                contents=[image, prompt],
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
+            data = json.loads(response.text or "{}")
+            return {
+                "approved": bool(data.get("approved", True)),
+                "issues": data.get("issues", []) if isinstance(data.get("issues"), list) else [],
+                "critique": str(data.get("critique", "")),
+            }
+        except Exception as exc:
+            safe_log(f"[VisionQA] audit_scene_image falló: {exc}")
+            return {"approved": True, "issues": [], "critique": str(exc)}
 
     def audit_video(
         self,

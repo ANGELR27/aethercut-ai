@@ -95,6 +95,7 @@ class TechAIProducer:
             "duration_sec": 50,
             "aspect_ratio": "9:16",
             "voice": "speechify:alejandro",
+            "bgm_track": "upbeat",
             "flash_audit": True,
             "origin": "tech_contrapunto",
             "auto_publish": False,

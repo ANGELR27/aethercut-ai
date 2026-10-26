@@ -47,6 +47,7 @@ export function Timeline() {
     addClip,
     duplicateClip,
     splitClipAtPlayhead,
+    saveTimeline,
     setSilenceModalOpen,
     setShortcutsModalOpen,
     pxPerSec,
@@ -326,7 +327,7 @@ export function Timeline() {
                 className="flex items-center gap-1 px-2 h-full text-[10px] font-medium text-white/70 hover:text-white hover:bg-white/[0.08] transition-all cursor-pointer whitespace-nowrap"
                 title="Auto-JumpCut: Escanear y recortar silencios"
               >
-                <span className="text-beam-300 text-[10px] leading-none">⚡</span>
+                <IconSparkle className="h-2.5 w-2.5 text-beam-300" />
                 <span>Silencios</span>
               </button>
 
@@ -346,6 +347,16 @@ export function Timeline() {
                 <span>Clip</span>
               </button>
             </div>
+
+            {/* Guardar cambios del timeline en el proyecto */}
+            <button
+              type="button"
+              onClick={saveTimeline}
+              className="flex h-6 items-center gap-1 rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-500/25 transition-all cursor-pointer whitespace-nowrap"
+              title="Guardar posiciones y duraciones de cards y B-Roll"
+            >
+              <span>Guardar</span>
+            </button>
 
             {/* 4. Opciones */}
             <div className="relative shrink-0">

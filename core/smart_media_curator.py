@@ -580,8 +580,8 @@ class SmartMediaCurator:
                 recommended_nature=VisualNature.DOCUMENTAL_REAL,
             )
 
-        # 4. Detectar Acontecimiento histórico con año concreto en la locución (ej. 1959, 1969, 2020)
-        year_match = re.search(r"\b(18\d\d|19\d\d|20[0-2]\d)\b", clean_text)
+        # 4. Detectar Acontecimiento histórico con año concreto en el pasado (ej. 1959, 1969, 2018)
+        year_match = re.search(r"\b(1[7-9]\d\d|20[0-1]\d)\b", clean_text)
         if year_match:
             year_int = int(year_match.group(1))
             # Verificar si además se menciona un lugar geográfico en la narración
@@ -700,8 +700,11 @@ class SmartMediaCurator:
                 loc_part = f" {intent.location}" if intent.location.lower() not in clean_topic.lower() else ""
                 return f"{clean_topic}{loc_part} geography authentic landscape documentary footage 4k"
 
-            if intent.intent_type == VisualIntentType.STAT_NUMBER and intent.stat_value:
-                return f"{clean_topic} documentary footage 4k"
+            if intent.intent_type == VisualIntentType.VERSUS_COMPARISON:
+                return f"{clean_topic} comparison chart table results"
+
+            if intent.intent_type == VisualIntentType.STAT_NUMBER:
+                return f"{clean_topic} graph chart data report"
 
             is_news = any(k in clean_topic.lower() for k in ("news", "breaking", "actualidad", "noticia", "report", "crisis", "debate", "speech", "rueda de prensa"))
             if is_news:
@@ -1002,17 +1005,33 @@ class SmartMediaCurator:
         intent: VisualIntent,
         sentence_boundaries: List[Tuple[float, float, str]],
         scene_duration: float,
+        word_times: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[float, float]:
         """
         Calcula el momento exacto en que la afirmación se pronuncia (start_time)
         y la duración idónea para que el elemento se retire cuando deja de ser relevante:
         - Mínimo 2.5s, máximo 4.5s (nunca se congela toda la escena).
         - Sale suavemente antes de que acabe la escena.
+        - Si hay alineación por palabra, el elemento entra en la palabra disparadora exacta.
         """
         start_t = 0.5
         found = False
+        exact = False
 
-        if sentence_boundaries and intent.trigger_words:
+        # 1. Máxima precisión: palabra exacta de la locución alineada con Whisper.
+        if word_times and intent.trigger_words:
+            trig_words = [w.lower() for w in intent.trigger_words if len(w) >= 2]
+            for wt in word_times:
+                token = re.sub(r"\W+", "", str(wt.get("word", "")).lower())
+                if token and any(tw in token or token in tw for tw in trig_words):
+                    # Si el disparador cae al final de la escena, se muestra igual (aunque
+                    # sea breve): la sincronía exacta manda sobre la duración mínima.
+                    start_t = max(0.3, min(scene_duration - 0.9, round(float(wt.get("start", 0.0)) - 0.06, 2)))
+                    found = True
+                    exact = True
+                    break
+
+        if not found and sentence_boundaries and intent.trigger_words:
             trig_words = [w.lower() for w in intent.trigger_words if len(w) >= 2]
             for s_start, _s_end, s_txt in sentence_boundaries:
                 low_s = s_txt.lower()
@@ -1045,8 +1064,12 @@ class SmartMediaCurator:
         ):
             ideal_dur = min(8.8, max(ideal_dur, round(scene_duration * 0.35, 1)))
 
-        # Garantizar que el elemento se retire al menos 0.7s antes de que termine la escena
-        max_allowed_dur = max(2.5, scene_duration - start_t - 0.7)
+        # Garantizar que el elemento se retire antes de que termine la escena.
+        # Con timing por palabra puede ser un popup breve pero exacto.
+        if exact:
+            max_allowed_dur = max(0.9, scene_duration - start_t - 0.25)
+        else:
+            max_allowed_dur = max(2.5, scene_duration - start_t - 0.7)
         display_dur = min(ideal_dur, max_allowed_dur)
 
         return round(start_t, 2), round(display_dur, 2)

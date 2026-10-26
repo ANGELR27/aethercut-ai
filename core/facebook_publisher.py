@@ -408,7 +408,25 @@ def auto_cross_post_for_channel(channel_id: str, video_path: Path, title: str, d
         return None
 
     try:
+        safe_log(
+            f"[FacebookPublisher] Ruteo por tema: canal '{ch_info.get('channel_title') or channel_id}' "
+            f"({ch_info.get('channel_tag', 'sin nicho')}) → página '{fb.get('page_name')}' ({fb.get('page_id')})"
+        )
         safe_log(f"[FacebookPublisher] Iniciando cross-posting para página hermana «{fb.get('page_name')}»...")
+        try:
+            from core.page_registry import validate_channel_page
+            route = validate_channel_page(channel_id, str(fb.get("page_id", "")))
+            if route.get("mapped"):
+                safe_log(
+                    f"[FacebookPublisher] Tema de la página: {route.get('theme')} "
+                    f"| productor: {route.get('producer')}"
+                )
+                for warning in route.get("warnings", []):
+                    safe_log(f"[FacebookPublisher] AVISO de ruteo: {warning}")
+            else:
+                safe_log("[FacebookPublisher] AVISO: página sin mapear en page_registry.json")
+        except Exception as _route_err:
+            safe_log(f"[FacebookPublisher] Aviso validando ruteo: {_route_err}")
         result = publish_video_to_facebook(
             video_path=video_path,
             title=title,

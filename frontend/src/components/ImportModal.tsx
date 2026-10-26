@@ -184,7 +184,7 @@ export function ImportModal({ isOpen, onClose }: Props) {
             </div>
 
             <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-3 text-[10.5px] text-white/50 leading-relaxed">
-              💡 El motor de LUMEN descargará el video en streaming en máxima calidad y lo colocará de inmediato en la línea de tiempo para comenzar a editar.
+              Nota: El motor de LUMEN descargará el video en streaming en máxima calidad y lo colocará de inmediato en la línea de tiempo para comenzar a editar.
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">

@@ -1,6 +1,9 @@
 import os
 import re
+import asyncio
 import abc
+import json
+import shutil
 import aiohttp
 import aiofiles
 from pathlib import Path
@@ -9,6 +12,7 @@ from config.settings import settings
 from core.models import BRollCue
 from core.llm import safe_log
 
+
 class AssetProvider(abc.ABC):
     """Interfaz base para proveedores de recursos multimedia (B-Roll)."""
 
@@ -16,6 +20,196 @@ class AssetProvider(abc.ABC):
     async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
         """Busca el activo más relevante y lo descarga de forma asíncrona en target_dir."""
         pass
+
+
+class LocalOriginalAssetProvider(AssetProvider):
+    """Biblioteca de material ORIGINAL del canal (assets/broll).
+
+    Sin stock ni bancos genéricos: solo metraje/fotos propios, de archivo del
+    canal o material oficial que el usuario haya depositado aquí.
+    """
+
+    MEDIA_SUFFIXES = (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".jpg", ".jpeg", ".png", ".webp")
+
+    def __init__(self):
+        self.root = settings.BASE_DIR / "assets" / "broll"
+
+    async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
+        if not self.root.exists():
+            return None
+        query = cue.search_query_en or cue.concept or ""
+        tokens = [t for t in re.findall(r"[a-z0-9áéíóúñ]{3,}", query.lower()) if len(t) >= 3]
+        if not tokens:
+            return None
+
+        best_path = None
+        best_score = 0
+        for path in self.root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in self.MEDIA_SUFFIXES:
+                continue
+            rel = str(path.relative_to(self.root)).lower()
+            score = sum(1 for token in tokens if token in rel)
+            if score > best_score:
+                best_score = score
+                best_path = path
+
+        if not best_path or best_score <= 0:
+            return None
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        out_path = target_dir / f"{cue.cue_id}{best_path.suffix.lower()}"
+        try:
+            shutil.copy2(best_path, out_path)
+        except Exception as exc:
+            safe_log(f"[LocalOriginal] No se pudo copiar {best_path.name}: {exc}")
+            return None
+
+        prov = {
+            "source_url": str(best_path),
+            "source_name": "Biblioteca original del canal",
+            "license": "Material propio / original",
+            "artist": "Canal",
+            "date": "",
+            "visual_nature": "documental_real",
+            "attribution_badge": "MATERIAL PROPIO",
+            "context_note": str(best_path.relative_to(self.root)),
+        }
+        try:
+            (target_dir / f"{cue.cue_id}_provenance.json").write_text(
+                json.dumps(prov, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
+        safe_log(f"[LocalOriginal] Usando material propio: {best_path.name} (score={best_score})")
+        return out_path
+
+
+
+class OriginalSourceAssetProvider(AssetProvider):
+    """Material original/oficial en fuentes permitidas: Wikimedia, Archive, NASA,
+    gobiernos, universidades y salas de prensa de empresas tecnológicas.
+
+    Sin stock genérico. La consulta la sigue escribiendo la IA (Gemini/DeepSeek)
+    desde el plan; este proveedor la dirige a fuentes originales y archiva la
+    procedencia/licencia.
+    """
+
+    def __init__(self):
+        self.used_urls: set = set()
+
+    async def search_and_download(self, cue: BRollCue, target_dir: Path) -> Optional[Path]:
+        query = cue.search_query_en or cue.concept
+        if not query:
+            return None
+
+        def _search() -> list:
+            try:
+                from ddgs import DDGS
+                from core.licensing import classify_license
+            except Exception:
+                return []
+
+            clean_q = re.sub(r"\b(4k|hd|footage|futuristic|screen|real footage|documentary|abstract|animation|broll)\b", "", query, flags=re.I).strip()
+            clean_q = " ".join(dict.fromkeys(clean_q.split()))
+
+            # Búsquedas orgánicas directas basadas en el concepto visual diseñado por el Director
+            queries = [
+                clean_q,
+                f"{clean_q} official archive",
+                f"{clean_q} high resolution",
+            ]
+            candidates = []
+            try:
+                # Palabras clave sustantivas del tema para verificar correspondencia temática real
+                query_tokens = {
+                    w.lower() for w in re.findall(r"[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]{3,}", clean_q)
+                    if w.lower() not in {
+                        "foto", "photo", "image", "imagen", "video", "real", "official",
+                        "archive", "high", "resolution", "4k", "footage", "documentary",
+                        "photograph", "historical", "original", "evidence", "screen", "wallpaper"
+                    }
+                }
+                with DDGS(timeout=6) as ddgs:
+                    for q in queries:
+                        try:
+                            batch = list(ddgs.images(q, max_results=8))
+                        except Exception:
+                            continue
+                        for item in batch:
+                            image_url = item.get("image") or ""
+                            page_url = item.get("url") or ""
+                            title = (item.get("title") or "").lower()
+                            if not image_url.startswith("http") or image_url in self.used_urls:
+                                continue
+                            
+                            # Filtro dinámico de correspondencia: si el buscador devolvió un resultado
+                            # sin relación con los términos de búsqueda (fallback espurio), descartarlo
+                            candidate_text = f"{title} {page_url.lower()} {image_url.lower()}"
+                            if query_tokens and not any(t in candidate_text for t in query_tokens):
+                                continue
+
+                            lic = classify_license(page_url or image_url)
+                            if not lic.get("allowed"):
+                                continue
+                            candidates.append((image_url, page_url, lic))
+                            if len(candidates) >= 10:
+                                break
+                        if len(candidates) >= 10:
+                            break
+            except Exception as exc:
+                safe_log(f"[OriginalSource] Búsqueda falló: {exc}")
+            return candidates
+
+        candidates = await asyncio.to_thread(_search)
+        if not candidates:
+            return None
+
+        from PIL import Image
+        from core.web_media import WikiMediaClient
+        client = WikiMediaClient()
+
+        min_w = 700
+        min_h = 380
+
+        for index, (image_url, page_url, lic) in enumerate(candidates):
+            out_path = target_dir / f"{cue.cue_id}_orig{index}.jpg"
+            self.used_urls.add(image_url)
+            if not await client.download_image(image_url, out_path):
+                continue
+            try:
+                with Image.open(out_path) as im:
+                    if im.size[0] < min_w or im.size[1] < min_h:
+                        out_path.unlink(missing_ok=True)
+                        continue
+                    width, height = im.size
+            except Exception:
+                out_path.unlink(missing_ok=True)
+                continue
+
+            prov = {
+                "source_url": page_url or image_url,
+                "source_name": f"Fuente original/oficial ({lic.get('domain', 'archivo')})",
+                "license": lic.get("class", "licensed_or_public"),
+                "artist": lic.get("domain", ""),
+                "date": "",
+                "visual_nature": "documental_real",
+                "attribution_badge": "ARCHIVO ORIGINAL",
+                "context_note": query,
+                "monetization_safe": bool(lic.get("monetization_safe")),
+                "license_note": lic.get("note", ""),
+            }
+            try:
+                (target_dir / f"{cue.cue_id}_provenance.json").write_text(
+                    json.dumps(prov, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            except OSError:
+                pass
+            safe_log(
+                f"[OriginalSource] Usando {lic.get('domain')} ({lic.get('class')}) "
+                f"para '{query}' -> {out_path.name} ({width}x{height})"
+            )
+            return out_path
+        return None
 
 
 class PixabayAssetProvider(AssetProvider):
@@ -278,6 +472,13 @@ class WebPhotoAssetProvider(AssetProvider):
     )
     WATERMARK_DOMAINS = STOCK_AND_WATERMARK_DOMAINS
 
+    ANIME_AND_WALLPAPER_TERMS = (
+        "anime", "manga", "otaku", "waifu", "shonen", "fanart", "moewalls",
+        "pixiv", "danbooru", "gelbooru", "konachan", "zerochan", "deviantart",
+        "black clover", "naruto", "one piece", "dragon ball", "demon slayer",
+        "jujutsu kaisen", "live wallpaper", "wallpaper anime", "wallpaper",
+    )
+
     def __init__(self):
         self.used_urls = set()
 
@@ -308,6 +509,14 @@ class WebPhotoAssetProvider(AssetProvider):
             "oficial", "documento", "reforma", "seguridad", "cifra", "alcalde", "ministro", "fiscal"
         ))
 
+        is_tech_benchmark = any(w in q_lower for w in (
+            "benchmark", "benchmarks", "ia", "ai", "llm", "modelo", "model", "kimi", "deepseek",
+            "openai", "chatgpt", "gpt", "claude", "gemini", "anthropic", "meta", "llama", "token",
+            "tokens", "contexto", "rendimiento", "evaluacion", "evaluación", "comparativa",
+            "versus", "chart", "grafico", "gráfico", "tabla", "mmlu", "gsm8k", "arena", "lmsys",
+            "score", "test", "gpu", "nvidia", "hardware", "chip", "chips", "tpu", "procesador", "paper", "arxiv"
+        ))
+
         def search() -> list:
             try:
                 from ddgs import DDGS
@@ -319,31 +528,54 @@ class WebPhotoAssetProvider(AssetProvider):
                     elif is_historical_geopolitics:
                         # Para PixelGrama / Historia: Fotografía documental y pinturas de época auténticas
                         search_term = f"{clean_q} fotografia documental pintura historica archivo siglo hd -stock -vector -clipart"
+                    elif is_tech_benchmark:
+                        # Para tecnología e Inteligencia Artificial: Gráficos de benchmark, tablas comparativas y publicaciones reales
+                        search_term = f"{clean_q} benchmark comparison chart graph table results -stock -clipart -illustration"
                     elif is_spanish:
                         search_term = f"{clean_q} noticia prensa periodico fotografia real -stock -vector -clipart"
                     else:
                         search_term = f"{clean_q} press news photograph documentary -stock -vector -clipart"
 
-                    try:
-                        res = list(ddgs.images(search_term, size="Wallpaper", max_results=15))
-                    except Exception:
-                        pass
-                    if not res:
+                    # Exclusiones duras: nunca anime/manga/wallpapers/ilustración.
+                    search_term = f"{search_term} -anime -manga -illustration -wallpaper -fanart"
+
+                    if is_tech_benchmark:
                         try:
-                            res = list(ddgs.images(search_term, size="Large", max_results=15))
+                            res = list(ddgs.images(search_term, size="Large", max_results=16))
                         except Exception:
                             pass
-                    if not res:
-                        # Fallback a documentos, informes o publicaciones oficiales
-                        alt_term = f"{clean_q} documento publicacion prensa informe -stock" if is_spanish else f"{clean_q} official publication press report document -stock"
+                        if not res:
+                            try:
+                                res = list(ddgs.images(search_term, size="Medium", max_results=16))
+                            except Exception:
+                                pass
+                        if not res:
+                            alt_term = f"{clean_q} benchmark test results leaderboard research -stock"
+                            try:
+                                res = list(ddgs.images(alt_term, max_results=16))
+                            except Exception:
+                                pass
+                    else:
                         try:
-                            res = list(ddgs.images(alt_term, size="Large", max_results=15))
+                            res = list(ddgs.images(search_term, size="Wallpaper", max_results=15))
                         except Exception:
                             pass
-                    if not res:
-                        res = list(ddgs.images(f"{clean_q} real photograph -stock -vector -clipart", size="Large", max_results=15))
-                    if not res:
-                        res = list(ddgs.images(f"{clean_q} -stock -vector -clipart", max_results=15))
+                        if not res:
+                            try:
+                                res = list(ddgs.images(search_term, size="Large", max_results=15))
+                            except Exception:
+                                pass
+                        if not res:
+                            # Fallback a documentos, informes o publicaciones oficiales
+                            alt_term = f"{clean_q} documento publicacion prensa informe -stock" if is_spanish else f"{clean_q} official publication press report document -stock"
+                            try:
+                                res = list(ddgs.images(alt_term, size="Large", max_results=15))
+                            except Exception:
+                                pass
+                        if not res:
+                            res = list(ddgs.images(f"{clean_q} real photograph -stock -vector -clipart", size="Large", max_results=15))
+                        if not res:
+                            res = list(ddgs.images(f"{clean_q} -stock -vector -clipart", max_results=15))
 
                 clean_items = []
                 for r in res:
@@ -356,12 +588,16 @@ class WebPhotoAssetProvider(AssetProvider):
                     # Descarte total de dominios de stock comercial
                     if any(bad in img_lower or bad in page_lower or bad in title_lower for bad in self.STOCK_AND_WATERMARK_DOMAINS):
                         continue
+                    if any(bad in img_lower or bad in page_lower or bad in title_lower for bad in self.ANIME_AND_WALLPAPER_TERMS):
+                        continue
                     w = int(r.get("width") or 0)
                     h = int(r.get("height") or 0)
                     # Exigir alta definición mínima (HD real) y evitar banners deformes
-                    if (w >= 1280 and h >= 720) or (w >= 1000 and 1.2 <= (w / max(1, h)) <= 2.2):
+                    if is_tech_benchmark and (w >= 750 and h >= 400 and 0.8 <= (w / max(1, h)) <= 2.6):
                         clean_items.append(r)
-                    elif not clean_items and min(w, h) >= 800:
+                    elif (w >= 1280 and h >= 720) or (w >= 1000 and 1.2 <= (w / max(1, h)) <= 2.2):
+                        clean_items.append(r)
+                    elif not clean_items and min(w, h) >= 700:
                         clean_items.append(r)
                 return clean_items
             except Exception as exc:
@@ -383,11 +619,25 @@ class WebPhotoAssetProvider(AssetProvider):
                 with Image.open(dest) as im:
                     im.verify()
                 with Image.open(dest) as im:
-                    # Filtro de calidad estricto: mínimo 900x500 y no cuadrado ni hiper-alargado
                     aspect = im.size[0] / max(1, im.size[1])
-                    if im.size[0] >= 900 and im.size[1] >= 500 and 1.1 <= aspect <= 2.4:
+                    if is_tech_benchmark and im.size[0] >= 700 and im.size[1] >= 380 and 0.8 <= aspect <= 2.6:
                         self.used_urls.add(url)
-                        # Guardar proveniencia registrada
+                        prov = {
+                            "source_url": item.get("url") or url,
+                            "source_name": "Publicación Técnica / Benchmark",
+                            "license": "Uso Editorial / Divulgación Técnica",
+                            "artist": item.get("source", "Technical Report"),
+                            "date": "",
+                            "visual_nature": "documental_real",
+                            "attribution_badge": "BENCHMARK TÉCNICO",
+                            "context_note": item.get("title", query),
+                        }
+                        prov_path = target_dir / f"{cue.cue_id}_provenance.json"
+                        prov_path.write_text(json.dumps(prov, ensure_ascii=False, indent=2), encoding="utf-8")
+                        print(f"[WebPhotoProvider] Benchmark / Publicación HD descargada: {dest.name} ({im.size})")
+                        return dest
+                    elif im.size[0] >= 900 and im.size[1] >= 500 and 1.1 <= aspect <= 2.4:
+                        self.used_urls.add(url)
                         prov = {
                             "source_url": item.get("url") or url,
                             "source_name": "Archivo Web Editorial",
@@ -598,6 +848,8 @@ class YouTubeReactionAssetProvider(AssetProvider):
             return None
 
         query = cue.search_query_en or cue.concept
+        # YouTube no entiende las exclusiones tipo "-anime"; se quitan para no ensuciar la búsqueda.
+        query = re.split(r"\s-(?:anime|manga|illustration|cartoon|wallpaper|fanart|stock|vector|clipart)", query)[0].strip()
         print(f"[YouTubeReactionProvider] Buscando clip de video para '{query}'...", flush=True)
 
         def _fetch_slice() -> Optional[Path]:
@@ -856,18 +1108,21 @@ class AssetProviderFactory:
     @staticmethod
     def get_providers(allow_stock: bool = False):
         providers = []
-        # 1. Videos reales y reacciones de fuentes dinámicas (YouTube noticias, ruedas de prensa, archivos)
-        providers.append(YouTubeReactionAssetProvider())
-        # 2. Fotografías reales de prensa, artículos científicos, foros y web editorial (cero stock)
-        providers.append(WebPhotoAssetProvider())
-        # 3. Archivo enciclopédico de alta resolución (Wikimedia Commons)
+        # 0. Material ORIGINAL del canal (assets/broll): máxima prioridad.
+        providers.append(LocalOriginalAssetProvider())
+        # 1. Fuentes originales/oficiales (prensa, archivo, gobiernos, empresas).
+        providers.append(OriginalSourceAssetProvider())
+        # 2. Archivo enciclopédico con licencia/atribución (Wikimedia Commons).
         providers.append(OpenStockAssetProvider())
-        # 4. Proveedores de stock genérico (Pexels / Pixabay):
-        # Desactivados por regla editorial estricta ("CERO IMÁGENES DE STOCK NI METRAJE GENÉRICO").
-        # Solo se activan si allow_stock=True expresamente.
+        # 2. Stock genérico: desactivado por política editorial (cero stock).
+        #    Solo se activa si allow_stock=True de forma explícita.
         if allow_stock:
             if settings.PEXELS_API_KEY:
                 providers.append(PexelsAssetProvider())
             if settings.PIXABAY_API_KEY:
                 providers.append(PixabayAssetProvider())
+        # 3. Fotografía editorial/periodística real (requiere revisión de derechos).
+        providers.append(WebPhotoAssetProvider())
+        # 4. Metraje real de YouTube (último recurso; revisar derechos).
+        providers.append(YouTubeReactionAssetProvider())
         return providers

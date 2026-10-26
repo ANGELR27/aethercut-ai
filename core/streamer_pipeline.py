@@ -161,11 +161,12 @@ class StreamerOptions:
     color_grade: str = "cinema"    # raw | cinema | broadcast | neon | warm | cool
     fps: int = 30                  # 24 (cine) | 30 (web/YT) | 60 (gaming)
     crf: int = 18                  # Calidad H.264: 16=máxima, 18=alta, 20=buena, 23=media
-    bgm_volume: float = 0.06       # Volumen de música de fondo (0.0 = sin BGM, 0.12 = notable)
+    bgm_volume: float = 0.12       # Volumen de música de fondo (0.0 = sin BGM, 0.12 = audible)
     intro_style: str = "kai"       # none | kai | minimal | broadcast
     outro_enabled: bool = True     # Agregar segmento de cierre con pantalla de like/sub
     bgm_track: str = "default"     # default | tension | upbeat | ambient | silent
     auto_publish: bool = False     # Publicar automáticamente en YouTube al finalizar renderizado
+    origin: str = ""               # Origen del proyecto (tech_contrapunto, geopolitics_nucleo, etc.)
 
 
 def build_creative_hints(options: "StreamerOptions") -> str:
@@ -226,6 +227,15 @@ class StreamerPipeline:
         self.workdir = self.project_store.workdir
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.llm = LLMClient()
+        self.deepseek = None
+        try:
+            from core.deepseek_client import DeepSeekClient
+            _ds = DeepSeekClient()
+            if _ds.available:
+                self.deepseek = _ds
+                safe_log(f"[Streamer] DeepSeek activo ({_ds.model}) para ganchos, reparación de datos y auditoría.")
+        except Exception as _ds_err:
+            safe_log(f"[Streamer] Aviso inicializando DeepSeek: {_ds_err}")
         self.narrator = AvatarNarrator(voice=options.voice)
         self.avatar_rnd = AvatarRenderer(badge_size=360)
 
@@ -293,6 +303,40 @@ class StreamerPipeline:
             except Exception as _rev_err:
                 safe_log(f"[Streamer] Aviso en auditoría DeepSeek Flash: {_rev_err}")
 
+        # Fuentes reales en las cards + auditoría y reparación de cifras inventadas
+        fact_sheet = getattr(self, "_fact_sheet", None)
+        if fact_sheet and fact_sheet.get("facts"):
+            try:
+                from core.research_agent import (
+                    attach_sources_to_plan,
+                    audit_plan_numbers,
+                    repair_unsupported_numbers,
+                )
+                attached = attach_sources_to_plan(plan, fact_sheet)
+                audit = audit_plan_numbers(plan, fact_sheet)
+                fixed = 0
+                if audit.get("unsupported") and getattr(self.options, "flash_audit", True):
+                    fixed = repair_unsupported_numbers(plan, fact_sheet, self.deepseek or self.llm)
+                    if fixed:
+                        audit = audit_plan_numbers(plan, fact_sheet)
+                safe_log(
+                    f"[Streamer] Fuentes adjuntadas a {attached} cards; "
+                    f"cifras sin respaldo: {audit.get('count', 0)} (corregidas: {fixed})."
+                )
+                if audit.get("unsupported"):
+                    safe_log(f"[Streamer] Revisar cifras no sustentadas: {audit['unsupported'][:5]}")
+                if self.project_store:
+                    try:
+                        self._fact_audit = audit
+                        doc = self.project_store.read()
+                        doc["fact_sheet"] = fact_sheet
+                        doc["fact_audit"] = audit
+                        self.project_store.write(doc)
+                    except Exception:
+                        pass
+            except Exception as _fs_err:
+                safe_log(f"[Streamer] Aviso adjuntando fact sheet: {_fs_err}")
+
         # Optimizar y corregir el título para YouTube (alta curiosidad, sin faltas ortográficas, <= 95 caracteres)
         try:
             from core.youtube_title_optimizer import optimize_youtube_title
@@ -305,7 +349,13 @@ class StreamerPipeline:
             if optimized_title:
                 plan.title = optimized_title
                 if self.project_store:
-                    self.project_store.write({"title": optimized_title, "original_name": optimized_title})
+                    try:
+                        doc = self.project_store.read()
+                        doc["title"] = optimized_title
+                        doc["original_name"] = optimized_title
+                        self.project_store.write(doc)
+                    except Exception:
+                        pass
                 self._state("script", 35.0, f"Título de YouTube optimizado: «{optimized_title}»", title=optimized_title, file_name=optimized_title)
                 safe_log(f"[Streamer] 🏷️ Título de YouTube perfeccionado: «{optimized_title}»")
         except Exception as _t_err:
@@ -322,13 +372,15 @@ class StreamerPipeline:
         if self.cancel_event.is_set():
             raise asyncio.CancelledError()
 
-        # 3. Renderizado del Avatar Animado (Loop dinámico fluido con transparencia alfa perfecta)
-        is_documentary = (
-            getattr(self.options, "origin", "") in ("geopolitics_nucleo", "the_deep_dife", "universal_tour_huellas", "documental")
-            or not getattr(self.options, "enable_avatar", True)
+        # 3. Renderizado del Avatar Animado: solo si el usuario lo tiene habilitado
+        # Y si el plan del Director realmente incluye escenas con cámara de presentador (pip o avatar)
+        has_presenter_scene = any(
+            str(getattr(sc, "camera", "voice_over")).lower() in ("avatar_cam", "pip_corner", "pip_delayed")
+            for sc in getattr(plan, "scenes", [])
         )
+        should_render_avatar = getattr(self.options, "enable_avatar", True) and has_presenter_scene
         avatar_clip = self.workdir / "kai_avatar.mov"
-        if not is_documentary:
+        if should_render_avatar:
             if not (avatar_clip.exists() and avatar_clip.stat().st_size > 50000):
                 self._state("avatar", 45.0, "Animando expresiones, respiración y lip-sync de KAI...")
                 await asyncio.to_thread(
@@ -346,6 +398,29 @@ class StreamerPipeline:
             raise asyncio.CancelledError()
 
         # 4. Motor de Escenas: Modulación emocional, composición reactiva y masterización
+        # Aislamiento temático: ninguna consulta visual puede traer anime/wallpapers
+        try:
+            from core.visual_sanitizer import sanitize_plan_visuals
+            fixed_queries = sanitize_plan_visuals(
+                plan,
+                topic=self.options.topic,
+                origin=getattr(self.options, "origin", ""),
+            )
+            if fixed_queries:
+                safe_log(f"[Streamer] {fixed_queries} consultas visuales saneadas (aislamiento temático).")
+        except Exception as _vs_err:
+            safe_log(f"[Streamer] Aviso saneando consultas visuales: {_vs_err}")
+
+        # Línea de tiempo visual auditable (escenas, cortes, cards y fuentes)
+        try:
+            from core.render_timeline import build_visual_timeline
+            if self.project_store:
+                doc = self.project_store.read()
+                doc["visual_timeline"] = build_visual_timeline(plan)
+                self.project_store.write(doc)
+        except Exception as _tl_err:
+            safe_log(f"[Streamer] Aviso construyendo timeline visual: {_tl_err}")
+
         scenes_preview_data = [
             {
                 "scene_id": sc.scene_id,
@@ -404,7 +479,7 @@ class StreamerPipeline:
             crf=getattr(self.options, 'crf', 18),
             audio_normalize=getattr(self.options, 'audio_normalize', True),
             color_grade=getattr(self.options, 'color_grade', 'cinema'),
-            bgm_volume=getattr(self.options, 'bgm_volume', 0.06),
+            bgm_volume=getattr(self.options, 'bgm_volume', 0.12),
             bgm_track=chosen_bgm,
             style_spec=theme_spec,
             topic=getattr(self.options, 'topic', ''),
@@ -442,84 +517,86 @@ class StreamerPipeline:
         # 5. Generar YouTube Cover Thumbnail (1280x720) y Short 9:16 Viral automáticamente
         thumb_output = settings.OUTPUTS_DIR / f"{self.task_id}_thumbnail.jpg"
         short_output = settings.OUTPUTS_DIR / f"{self.task_id}_short.mp4"
+        hook_variants: list = []
         try:
-            # 5a. Crear YouTube Thumbnail de alta conversión
-            from PIL import Image, ImageDraw, ImageFont, ImageFilter
-            base_bg = None
+            # 5a. Miniatura editorial construida desde el fact sheet (o el título del plan)
+            from core.fact_thumbnail import build_thumbnail, extract_frame
+            from core.research_agent import generate_hook_variants
+            sheet = getattr(self, "_fact_sheet", None) or {}
+            hook_fact = sheet.get("hook") or next(iter(sheet.get("facts") or []), None) or {}
+            hook_variants = generate_hook_variants(self.options.topic, sheet, self.deepseek or self.llm)
+            if hook_variants:
+                hook_text = hook_variants[0]["text"]
+                source_text = hook_variants[0].get("source") or hook_fact.get("source") or "AetherCut"
+            else:
+                hook_text = hook_fact.get("claim") or plan.title or self.options.topic
+                source_text = hook_fact.get("source") or "AetherCut"
+            numbers = hook_fact.get("numbers") or []
+            stat_text = numbers[0] if numbers else ""
+            if not stat_text:
+                stat_text = next((sc.card.stat for sc in plan.scenes if sc.card and sc.card.stat), "") or ""
+            frame = None
+            try:
+                from core.vision_qa import vision_qa as _vqa
+                candidates = sorted(
+                    [p for p in (self.workdir / "assets").glob("scene_cue_*.jpg") if p.stat().st_size > 80000],
+                    key=lambda p: p.stat().st_size,
+                    reverse=True,
+                )
+                for _candidate in candidates[:6]:
+                    _info = _vqa.classify_media(_candidate, hook_text)
+                    if (
+                        _info.get("use_as_background", True)
+                        and str(_info.get("kind", "")).lower() in ("photo", "video_frame")
+                    ):
+                        frame = _candidate
+                        break
+            except Exception:
+                frame = None
+            if not frame:
+                frame = extract_frame(output_file, self.workdir / "thumb_frame.jpg", 2.0)
+            fallback = None
             for sc in plan.scenes:
                 sc_thumb = self.workdir / f"scene_{sc.scene_id}" / "scene_thumb.jpg"
                 if sc_thumb.exists():
-                    base_bg = sc_thumb
+                    fallback = sc_thumb
                     break
-            
-            tb_im = Image.open(base_bg) if (base_bg and base_bg.exists()) else Image.open("assets/streamer_studio_room.jpg")
-            tb_im = tb_im.resize((1280, 720), Image.Resampling.LANCZOS)
-            tb_draw = ImageDraw.Draw(tb_im)
-            
-            # Velo oscuro con viñeta para contraste cinematográfico
-            overlay_grad = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
-            og_draw = ImageDraw.Draw(overlay_grad)
-            og_draw.rectangle([0, 0, 800, 720], fill=(5, 8, 14, 210))
-            tb_im.paste(overlay_grad, (0, 0), overlay_grad)
-            tb_draw = ImageDraw.Draw(tb_im)
+            build_thumbnail(
+                frame,
+                hook_text,
+                source_text,
+                stat_text,
+                thumb_output,
+                vertical=False,
+                fallback_image=fallback,
+            )
+            if not thumb_output.exists():
+                raise RuntimeError("No se pudo generar la miniatura editorial.")
 
-            # Titular épico en alto contraste
-            f_title = None
-            f_badge = None
-            for fn in ["segoeuib.ttf", "arialbd.ttf"]:
-                p = Path("C:/Windows/Fonts") / fn
-                if p.exists():
-                    try:
-                        f_title = ImageFont.truetype(str(p), 48)
-                        f_badge = ImageFont.truetype(str(p), 20)
-                        break
-                    except Exception:
-                        pass
-            if not f_title:
-                f_title = ImageFont.load_default()
-                f_badge = ImageFont.load_default()
+            if hook_variants and self.project_store:
+                try:
+                    doc = self.project_store.read()
+                    doc["hook_variants"] = hook_variants
+                    doc["fact_sheet"] = sheet
+                    doc["fact_audit"] = getattr(self, "_fact_audit", {})
+                    self.project_store.write(doc)
+                except Exception:
+                    pass
 
-            # Pastilla superior
-            tb_draw.rounded_rectangle((50, 60, 240, 98), radius=8, fill=(239, 68, 68, 240))
-            tb_draw.text((70, 68), "🔴 BROADCAST", font=f_badge, fill=(255, 255, 255))
-
-            # Dividir título en 3 líneas
-            words = (plan.title or self.options.topic).split()
-            lines = []
-            curr = ""
-            for w in words:
-                cand = (curr + " " + w).strip()
-                if len(cand) <= 24:
-                    curr = cand
-                else:
-                    if curr: lines.append(curr)
-                    curr = w
-            if curr: lines.append(curr)
-
-            y_txt = 130
-            for idx_l, line_str in enumerate(lines[:3]):
-                col = (255, 255, 255) if idx_l == 0 else ((56, 189, 248) if idx_l == 1 else (251, 191, 36))
-                tb_draw.text((50, y_txt), line_str.upper(), font=f_title, fill=col)
-                y_txt += 62
-
-            # Badge de dato clave si existe
-            best_stat = next((sc.card.stat for sc in plan.scenes if sc.card and sc.card.stat), None)
-            if best_stat:
-                tb_draw.rounded_rectangle((50, 560, 380, 640), radius=14, fill=(15, 23, 42, 230), outline=(56, 189, 248), width=2)
-                tb_draw.text((70, 574), f"★ {best_stat}", font=f_title, fill=(56, 189, 248))
-
-            tb_im.save(thumb_output, "JPEG", quality=95)
-
-            # 5b. Generar Short 9:16 vertical re-encuadrado a partir de la escena 2 o 3 (12-25s)
+            # 5b. Short 9:16 de muestra desde la mejor escena disponible
             candidate_scene = None
             for sc in plan.scenes:
                 sc_f = self.workdir / f"scene_{sc.scene_id}" / f"scene_{sc.scene_id}.mp4"
                 if sc_f.exists() and sc.type in ("card_focus", "video_reaction"):
                     candidate_scene = sc_f
                     break
-            if not candidate_scene and plan.scenes:
-                candidate_scene = self.workdir / "scene_1" / "scene_1.mp4"
-
+            if not candidate_scene:
+                for sc in plan.scenes:
+                    sc_f = self.workdir / f"scene_{sc.scene_id}" / f"scene_{sc.scene_id}.mp4"
+                    if sc_f.exists():
+                        candidate_scene = sc_f
+                        break
+            if candidate_scene and candidate_scene.exists():
                 import subprocess
                 subprocess.run([
                     "ffmpeg", "-y", "-i", str(candidate_scene),
@@ -528,7 +605,7 @@ class StreamerPipeline:
                     "-threads", "2",
                     "-max_muxing_queue_size", "1024",
                     "-c:a", "aac", "-b:a", "192k", str(short_output)
-                ], capture_output=True, timeout=30)
+                ], capture_output=True, timeout=60)
         except Exception as exc:
             safe_log(f"[StreamerPipeline] Generación de thumbnail/short opcional: {exc}")
 
@@ -661,6 +738,7 @@ class StreamerPipeline:
             "time_saved_sec": 0.0,
             "thumbnail_url": f"/media/{thumb_output.name}" if thumb_output.exists() else None,
             "short_video_url": f"/media/{short_output.name}" if short_output.exists() else None,
+            "hook_variants": hook_variants,
         }
 
         # 7. Publicación automática desatendida o preparación autónoma multi-canal
@@ -721,6 +799,18 @@ class StreamerPipeline:
 
     async def _gather_web_facts(self, topic: str) -> str:
         """Busca noticias y datos reales con DuckDuckGo (priorizando noticias frescas y cobertura reciente)."""
+        # 1. Investigación estructurada: fuentes completas, cifras y corroboración.
+        try:
+            from core.research_agent import research_topic
+            sheet = await asyncio.wait_for(asyncio.to_thread(research_topic, topic), timeout=35.0)
+            setattr(self, "_fact_sheet", sheet)
+            if sheet and sheet.get("facts") and sheet.get("brief"):
+                safe_log(f"[Streamer] Fact sheet listo: {len(sheet['facts'])} datos verificados de fuentes reales.")
+                return sheet["brief"]
+        except Exception as exc:
+            safe_log(f"[Streamer] Investigación estructurada no disponible ({exc}); se usan snippets.")
+
+        # 2. Fallback clásico: snippets de DDGS.
         try:
             from ddgs import DDGS
             def search_ddg():

@@ -22,6 +22,11 @@ def _model(size: str = "base"):
         return _MODEL
 
 
+def get_whisper_model(size: str = "base"):
+    """Modelo compartido (singleton) para transcripción y alineación de palabras."""
+    return _model(size)
+
+
 class WhisperTranscriber:
     """
     Transcripción local con faster-whisper y marcas de tiempo POR PALABRA.

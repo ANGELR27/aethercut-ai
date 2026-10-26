@@ -16,10 +16,12 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("speechify_tts")
 
-SPEECHIFY_API_KEYS = [
-    "sk_0chj8g0ja0w5y3ex117x3q24749wctcdeq0sxnfvck7",
-    "sk_eza006vswwwqe6fye7qrxkm55knrq2cx6dpyt9qakbt",
-]
+_raw_speechify_keys = (
+    os.getenv("SPEECHIFY_API_KEYS")
+    or os.getenv("SPEECHIFY_API_KEY")
+    or ""
+).replace("\n", ",").replace(";", ",")
+SPEECHIFY_API_KEYS = [key.strip() for key in _raw_speechify_keys.split(",") if key.strip()]
 
 _active_key_index: int = 0
 _credits_available: bool = True

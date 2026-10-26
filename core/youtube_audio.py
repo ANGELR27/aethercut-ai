@@ -36,6 +36,8 @@ YOUTUBE_LIBRARY_DIR = settings.BASE_DIR / "assets" / "audio" / "youtube_library"
 LIB_DIR = YOUTUBE_LIBRARY_DIR
 YOUTUBE_BGM_DIR = YOUTUBE_LIBRARY_DIR / "bgm"
 YOUTUBE_SFX_DIR = YOUTUBE_LIBRARY_DIR / "sfx"
+ORIGINAL_AUDIO_DIR = settings.BASE_DIR / "assets" / "audio" / "original"
+ORIGINAL_BGM_DIR = ORIGINAL_AUDIO_DIR / "bgm"
 
 # Mapeo de sinónimos de moods/categorías de YouTube Studio
 MOOD_ALIASES: Dict[str, List[str]] = {
@@ -62,6 +64,32 @@ SFX_CATEGORY_MAP: Dict[str, List[str]] = {
 }
 
 
+def _search_original_bgm(key: str) -> Optional[Path]:
+    """Busca música ORIGINAL del canal en assets/audio/original/bgm."""
+    if not ORIGINAL_BGM_DIR.exists():
+        return None
+    for ext in AUDIO_EXTENSIONS:
+        direct = ORIGINAL_BGM_DIR / f"{key}{ext}"
+        if direct.is_file():
+            return direct
+    target_dirs = [key]
+    for canon, aliases in MOOD_ALIASES.items():
+        if key == canon or key in aliases:
+            target_dirs.extend([canon, *aliases])
+    for dir_name in dict.fromkeys(target_dirs):
+        sub = ORIGINAL_BGM_DIR / dir_name
+        if sub.is_dir():
+            candidates = sorted(
+                p for p in sub.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
+            )
+            if candidates:
+                return candidates[0]
+    for p in ORIGINAL_BGM_DIR.rglob("*"):
+        if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS and key in p.stem.lower():
+            return p
+    return None
+
+
 def get_youtube_bgm_track(mood_or_name: str) -> Optional[Path]:
     """Busca una pista BGM de la Biblioteca de YouTube según el estado de ánimo o nombre.
     
@@ -78,6 +106,11 @@ def get_youtube_bgm_track(mood_or_name: str) -> Optional[Path]:
     
     if key in ("silent", "none", ""):
         return None
+
+    original = _search_original_bgm(key)
+    if original:
+        safe_log(f"[OriginalAudio] Pista original seleccionada: {original.name}")
+        return original
 
     if not YOUTUBE_BGM_DIR.exists():
         return None

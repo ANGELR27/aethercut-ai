@@ -128,7 +128,7 @@ type Ctx = {
   setIsAuditingTopic: React.Dispatch<React.SetStateAction<boolean>>;
   metricsPanelCollapsed: boolean;
   setMetricsPanelCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  auditAndEnrichTopic: (topic: string, format?: "reel" | "long") => Promise<ProducerPlan | null>;
+  auditAndEnrichTopic: (topic: string, format?: "reel" | "long", durationSec?: number) => Promise<ProducerPlan | null>;
 
   /* channel intelligence */
   activeChannelId: string;
@@ -156,6 +156,7 @@ type Ctx = {
   importVideo: (file: File) => Promise<void>;
   importVideoUrl: (url: string, title?: string) => Promise<void>;
   splitClipAtPlayhead: () => void;
+  saveTimeline: () => Promise<void>;
   applyJumpCutSilences: (silences: { start: number; end: number; duration: number }[]) => void;
   insertTtsClip: (text: string, voice?: string) => Promise<void>;
   createVideo: (topic: string, opts?: { duration?: number; style?: string; aspect_ratio?: Ratio }) => Promise<string | null>;
@@ -214,10 +215,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     setFitMode((m) => (m === "cover" ? "contain" : "cover"));
   }, []);
   const [overlays, setOverlays] = useState<Record<string, boolean>>({
-    safe: true,
+    safe: false,
     captions: true,
     grid: false,
-    tracking: true,
+    tracking: false,
     scopes: false,
   });
 
@@ -1180,6 +1181,33 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     });
   }, [time, selected, flash]);
 
+  const saveTimeline = useCallback(async () => {
+    if (!activeProjectId) {
+      flash("Abre un proyecto para guardar el timeline");
+      return;
+    }
+    const cards = clips
+      .filter((c) => c.id.startsWith("card-"))
+      .map((c) => ({ id: c.id, start: c.start, duration: c.duration, enabled: true }));
+    const brolls = clips
+      .filter((c) => c.id.startsWith("broll-"))
+      .map((c) => ({ id: c.id, start: c.start, end: c.start + c.duration, enabled: true }));
+    try {
+      const res = await fetch(`/api/projects/${activeProjectId}/timeline`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cards, brolls }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || "No se pudo guardar el timeline");
+      flash("Timeline guardado");
+      pushLog("Cambios del timeline guardados", "ai");
+    } catch (err: any) {
+      flash(`Error al guardar timeline: ${err.message}`);
+      pushLog(`Error guardando timeline: ${err.message}`, "warn");
+    }
+  }, [activeProjectId, clips, flash, pushLog]);
+
   const applyJumpCutSilences = useCallback(
     (silences: { start: number; end: number; duration: number }[]) => {
       if (!silences || silences.length === 0) {
@@ -1405,7 +1433,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   );
 
   const auditAndEnrichTopic = useCallback(
-    async (topic: string, format: "reel" | "long" = "reel") => {
+    async (topic: string, format: "reel" | "long" = "reel", durationSec?: number) => {
       const rawTopic = topic.trim();
       if (!rawTopic) {
         flash("Escribe primero un tema o idea para auditar y fundamentar con datos");
@@ -1414,13 +1442,15 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       try {
         setIsAuditingTopic(true);
         setMetricsPanelCollapsed(false);
-        flash("Productor IA: Investigando datos reales y retención en la web...");
+        const durDisplay = durationSec ? (durationSec >= 60 ? `${Math.round(durationSec / 60)}m` : `${durationSec}s`) : (format === "reel" ? "60s" : "5m");
+        flash(`Productor IA: Investigando datos reales y retención (${format === "reel" ? "Reel 9:16" : "16:9"} · ${durDisplay})...`);
         const res = await fetch("/api/ai-producer/enrich-and-audit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             topic: rawTopic,
             format: format,
+            duration_sec: durationSec,
             channel_id: activeChannelId,
           }),
         });
@@ -1603,6 +1633,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     importVideo,
     importVideoUrl,
     splitClipAtPlayhead,
+    saveTimeline,
     applyJumpCutSilences,
     insertTtsClip,
     createVideo,

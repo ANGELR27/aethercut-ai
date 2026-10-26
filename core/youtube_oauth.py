@@ -36,6 +36,8 @@ THUMBNAIL_ENDPOINT = "https://www.googleapis.com/upload/youtube/v3/thumbnails/se
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
+    # Permite gestionar (hacer privados/cancelar/eliminar) los videos propios.
+    "https://www.googleapis.com/auth/youtube",
 ]
 
 UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB por petición del protocolo resumable

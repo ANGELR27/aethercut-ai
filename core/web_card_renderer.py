@@ -2561,6 +2561,24 @@ class WebCardRenderer:
     ) -> Optional[Path]:
         """Renderiza cualquier plantilla de la librería VisualTemplatesLibrary."""
         try:
+            from core.editorial_cards import render_editorial
+            editorial = render_editorial(
+                template_name=template_name,
+                out_png=Path(out_png),
+                params=params or {},
+                variant=variant,
+                vertical=True,
+                browser_bin=self.browser_bin,
+            )
+            if editorial is not None:
+                return editorial
+        except Exception as exc:
+            import logging
+            logging.getLogger("aethercut.web_renderer").warning(
+                f"Editorial template '{template_name}' no disponible: {exc}"
+            )
+
+        try:
             from core.visual_templates import VisualTemplatesLibrary
             lib = VisualTemplatesLibrary(browser_bin=self.browser_bin)
             return lib.render_template_to_image(

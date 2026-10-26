@@ -158,7 +158,7 @@ export function SilenceModal({ isOpen, onClose }: Props) {
           </div>
 
           <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-3 text-[11px] text-white/50 leading-relaxed">
-            ⚡ Los cortes aplican <strong>Ripple Edit</strong>: recortan los huecos vacíos y desplazan automáticamente los clips siguientes para mantener el timeline perfectamente sincronizado y continuo.
+            Los cortes aplican <strong>Ripple Edit</strong>: recortan los huecos vacíos y desplazan automáticamente los clips siguientes para mantener el timeline perfectamente sincronizado y continuo.
           </div>
 
           {/* Resultado de análisis si existe */}

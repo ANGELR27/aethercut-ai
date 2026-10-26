@@ -18,16 +18,35 @@ class AIProducerEngine:
     """Motor que investiga, audita, fundamenta y pule propuestas de video."""
 
     def __init__(self):
-        self.llm = LLMClient()
+        self._llm: Optional[LLMClient] = None
 
-    def enrich_and_audit(self, topic: str, format_mode: str = "reel", channel_id: Optional[str] = None) -> Dict[str, Any]:
+    @property
+    def llm(self) -> LLMClient:
+        if self._llm is None:
+            self._llm = LLMClient()
+        return self._llm
+
+    def enrich_and_audit(
+        self,
+        topic: str,
+        format_mode: str = "reel",
+        duration_sec: Optional[int] = None,
+        channel_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Investiga fuentes reales en la web, audita el gancho y pule la propuesta con datos y aprendizaje del canal."""
         clean_topic = topic.strip()
         if not clean_topic:
             return {"error": "El tema no puede estar vacío"}
 
         t0 = time.time()
-        safe_log(f"[AIProducer] 🔍 Investigando en la web y auditando con inteligencia de canal: «{clean_topic[:60]}...»")
+        is_reel = format_mode.lower() in ("reel", "short", "shorts", "9:16")
+        if duration_sec and int(duration_sec) > 0:
+            target_dur = max(15, min(3600, int(duration_sec)))
+        else:
+            target_dur = 60 if is_reel else 300
+
+        dur_display = f"{target_dur}s" if target_dur < 60 else f"{target_dur // 60}m"
+        safe_log(f"[AIProducer] 🔍 Investigando en la web y auditando ({'Reel 9:16' if is_reel else '16:9'} · {dur_display}): «{clean_topic[:60]}...»")
 
         # 1. Recuperar inteligencia y patrones ganadores del canal
         channel_context_str = ""
@@ -60,7 +79,7 @@ class AIProducerEngine:
         context_str = "\n".join([f"- {f['title']}: {f['snippet']}" for f in web_findings]) if web_findings else "Datos históricos y contextuales generales del tema."
 
         # 3. Análisis con Gemini: Investigación, Auditoría y Adaptación al Canal
-        is_reel = format_mode.lower() in ("reel", "short", "shorts", "9:16")
+        format_label = f"Reel Vertical 9:16 ({target_dur} segundos)" if is_reel else f"Video Documental Panorámico 16:9 ({target_dur // 60 if target_dur >= 60 else target_dur}{' minutos' if target_dur >= 60 else ' segundos'})"
 
         system_prompt = f"""Actúa como el Equipo de Producción Ejecutiva de élite de YouTube & TikTok (Director de Contenidos, Auditor de Retención e Investigador Senior).
 Tu objetivo NO es dar respuestas genéricas ni complacientes. Tu misión es transformar esta idea en un contenido viral imbatible, blindado con datos reales y diseñado para retener al 70%+ de la audiencia en este canal específico.
@@ -71,12 +90,12 @@ IDEA EN BRUTO DEL USUARIO:
 HALLAZGOS Y DATOS REALES DE LA WEB:
 {context_str}
 
-FORMATO SOLICITADO: {'Reel Vertical 9:16 (30 a 60s)' if is_reel else 'Video Documental Panorámico 16:9 (15 min)'}
+FORMATO Y DURACIÓN SOLICITADOS: {format_label}
 
 {channel_context_str}
 
 TAREAS DE PRODUCCIÓN:
-1. ADAPTACIÓN AL CANAL: Ajusta la estructura y el ritmo basándote en el historial de rendimiento de este canal.
+1. ADAPTACIÓN AL CANAL Y DURACIÓN: Ajusta la estructura, ritmo y densidad de palabras para cubrir EXACTAMENTE la duración solicitada ({target_dur} segundos). Si es un Reel breve (ej: 30-60s), el guión debe ser dinámico y directo sin rodeos. Si es largo, desarrolla profundidad causal con capítulos.
 2. AUDITAR EL GANCHO: Aplica el tipo de gancho con mayor retención comprobada en este canal para los primeros 3 segundos.
 3. TRES DATOS DUROS QUE AVALAN EL VIDEO: Extrae o formula 3 datos fácticos, estadísticas, estudios, fechas o versículos/citas textuales con fuente real o histórica para que el locutor los cite textualmente.
 4. DIRECCIÓN DE ARTE: Recomienda atmósfera visual de fondo (ej: iluminación, velocidad, locación) y el tipo de música BGM más potente.
@@ -107,7 +126,7 @@ DEBES RESPONDER EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EX
   "visual_atmosphere": "Descripción visual cinematográfica sugerida para los fondos (B-Roll)",
   "recommended_bgm": "Estilo de banda sonora sugerida (ej: Piano celestial / Orquesta épica / Dark Synth)",
   "recommended_format": "{'reel' if is_reel else 'long'}",
-  "recommended_duration_sec": {60 if is_reel else 900},
+  "recommended_duration_sec": {target_dur},
   "polished_prompt": "El prompt final perfeccionado y enriquecido con el gancho y los datos, listo para crear el video."
 }}"""
 
@@ -135,7 +154,7 @@ DEBES RESPONDER EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EX
                     "visual_atmosphere": "Cine 35mm con iluminación dramática y textura analógica.",
                     "recommended_bgm": "Orquesta épica emotiva.",
                     "recommended_format": "reel" if is_reel else "long",
-                    "recommended_duration_sec": 60 if is_reel else 900,
+                    "recommended_duration_sec": target_dur,
                     "polished_prompt": f"{clean_topic}. Con datos verificados y gancho viral de alta retención adaptado al canal.",
                 }
 

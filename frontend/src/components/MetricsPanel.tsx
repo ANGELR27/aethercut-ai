@@ -18,10 +18,15 @@ import {
   IconCheck,
   IconClock,
   IconComment,
+  IconCopy,
   IconEye,
   IconFlame,
+  IconLock,
+  IconPlay,
+  IconScissors,
   IconSend,
   IconSparkle,
+  IconTrash,
 } from "./Icons";
 
 function IconRefresh({ className }: { className?: string }) {
@@ -49,6 +54,22 @@ function IconBrain({ className }: { className?: string }) {
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z" />
       <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z" />
+    </svg>
+  );
+}
+
+function IconYouTube({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+    </svg>
+  );
+}
+
+function IconFacebook({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
     </svg>
   );
 }
@@ -492,32 +513,40 @@ function ProducerPlanSection() {
   const { producerPlan, setProducerPlan, createVideo, setRatio, flash } = useEditor();
   if (!producerPlan) return null;
 
+  const [selectedFormat, setSelectedFormat] = useState<"reel" | "long">(
+    producerPlan.recommended_format || "long",
+  );
+  const [selectedDuration, setSelectedDuration] = useState<number>(
+    producerPlan.recommended_duration_sec || (producerPlan.recommended_format === "reel" ? 60 : 300),
+  );
+
+  useEffect(() => {
+    if (producerPlan) {
+      setSelectedFormat(producerPlan.recommended_format || "long");
+      setSelectedDuration(
+        producerPlan.recommended_duration_sec ||
+          (producerPlan.recommended_format === "reel" ? 60 : 300),
+      );
+    }
+  }, [producerPlan]);
+
   const handleApply = (autoCreate: boolean = true) => {
-    if (producerPlan.recommended_format === "reel") {
-      setRatio("9:16");
-      const dur = producerPlan.recommended_duration_sec || 60;
-      if (autoCreate) {
-        createVideo(producerPlan.polished_prompt, {
-          duration: dur,
-          style: "shorts",
-          aspect_ratio: "9:16",
-        });
-        flash(`Creando Reel 9:16 (${dur}s) con datos verificados...`);
-      }
-    } else {
-      setRatio("16:9");
-      const dur = producerPlan.recommended_duration_sec || 900;
-      const durMin = Math.round(dur / 60);
-      if (autoCreate) {
-        createVideo(producerPlan.polished_prompt, {
-          duration: dur,
-          style: "divulgacion",
-          aspect_ratio: "16:9",
-        });
-        flash(`Creando documental 16:9 (${durMin}m) con datos reales...`);
-      }
+    const isReel = selectedFormat === "reel";
+    setRatio(isReel ? "9:16" : "16:9");
+    const dur = selectedDuration;
+    const durLabel = dur >= 60 ? `${Math.round(dur / 60)}m` : `${dur}s`;
+
+    if (autoCreate) {
+      createVideo(producerPlan.polished_prompt, {
+        duration: dur,
+        style: isReel ? "shorts" : "divulgacion",
+        aspect_ratio: isReel ? "9:16" : "16:9",
+      });
+      flash(`Creando video ${isReel ? "Reel 9:16" : "16:9"} (${durLabel}) con datos reales...`);
     }
   };
+
+  const durDisplay = selectedDuration >= 60 ? `${Math.round(selectedDuration / 60)}m` : `${selectedDuration}s`;
 
   return (
     <div className="space-y-3 pb-6 animate-in fade-in duration-300">
@@ -551,7 +580,7 @@ function ProducerPlanSection() {
             </div>
           </div>
           <div className="rounded-lg border border-white/[0.08] bg-black p-2">
-            <span className="micro-sm text-white/35">Duración óptima</span>
+            <span className="micro-sm text-white/35">Duración sugerida</span>
             <div className="mt-1 font-semibold text-white/90">
               {producerPlan.recommended_duration_sec} segundos
             </div>
@@ -559,14 +588,7 @@ function ProducerPlanSection() {
         </div>
       </Collapsible>
 
-      {/* 2. Diagnóstico & Estrategia Anti-Abandono */}
-      <Collapsible title="Diagnóstico de Retención" defaultOpen={true}>
-        <div className="rounded-xl border border-white/[0.08] bg-black/60 p-3 text-[10.5px] leading-relaxed text-white/70">
-          <p>{producerPlan.original_critique}</p>
-        </div>
-      </Collapsible>
-
-      {/* 3. Gancho 3 Segundos */}
+      {/* 2. Gancho 3 Segundos */}
       <Collapsible title="Gancho Inicial (3s)" defaultOpen={true}>
         <div className="rounded-xl border border-white/[0.08] bg-black/50 p-3">
           <div className="micro-sm text-white/35 mb-1.5 flex items-center gap-1.5">
@@ -579,8 +601,128 @@ function ProducerPlanSection() {
         </div>
       </Collapsible>
 
-      {/* 4. 3 Datos Avalados por la Web */}
-      <Collapsible title={`Datos Avalados (${producerPlan.supporting_facts?.length || 0})`} defaultOpen={true}>
+      {/* 3. AJUSTE PERSONALIZADO DE FORMATO Y DURACIÓN ANTES DE CREAR */}
+      <div className="rounded-xl border border-white/[0.1] bg-white/[0.02] p-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10.5px] font-semibold text-white/80 uppercase tracking-wider">
+            Ajustar Formato y Tiempo
+          </span>
+          <span className="font-mono text-[10px] text-beam-300 bg-beam-500/15 border border-beam-400/25 px-1.5 py-0.5 rounded">
+            {selectedFormat === "reel" ? "Reel 9:16" : "Largo 16:9"} · {durDisplay}
+          </span>
+        </div>
+
+        {/* Switch Formato */}
+        <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/[0.08] bg-white/[0.02] p-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedFormat("reel");
+              if (selectedDuration > 180) setSelectedDuration(60);
+            }}
+            className={cn(
+              "py-1 text-[10px] font-medium rounded-md transition-all text-center cursor-pointer",
+              selectedFormat === "reel"
+                ? "bg-beam-500/20 text-beam-200 border border-beam-400/35 shadow-sm"
+                : "text-white/45 hover:text-white",
+            )}
+          >
+            Reel 9:16 (Short)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedFormat("long");
+              if (selectedDuration < 120) setSelectedDuration(480);
+            }}
+            className={cn(
+              "py-1 text-[10px] font-medium rounded-md transition-all text-center cursor-pointer",
+              selectedFormat === "long"
+                ? "bg-beam-500/20 text-beam-200 border border-beam-400/35 shadow-sm"
+                : "text-white/45 hover:text-white",
+            )}
+          >
+            Largo 16:9 (Docu)
+          </button>
+        </div>
+
+        {/* Presets Rápidos de Tiempo */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px] text-white/35 shrink-0">Tiempo:</span>
+          {selectedFormat === "reel" ? (
+            <div className="flex items-center gap-1 flex-1">
+              {[30, 45, 60, 90].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setSelectedDuration(s)}
+                  className={cn(
+                    "flex-1 py-0.5 rounded text-[9.5px] font-mono transition-all text-center cursor-pointer border",
+                    selectedDuration === s
+                      ? "border-beam-400/40 bg-beam-500/20 text-beam-200 font-semibold"
+                      : "border-white/[0.06] bg-white/[0.015] text-white/45 hover:text-white/80",
+                  )}
+                >
+                  {s}s
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 flex-1">
+              {[
+                { label: "3m", sec: 180 },
+                { label: "5m", sec: 300 },
+                { label: "8m", sec: 480 },
+                { label: "10m", sec: 600 },
+                { label: "15m", sec: 900 },
+              ].map((item) => (
+                <button
+                  key={item.sec}
+                  type="button"
+                  onClick={() => setSelectedDuration(item.sec)}
+                  className={cn(
+                    "flex-1 py-0.5 rounded text-[9.5px] font-mono transition-all text-center cursor-pointer border",
+                    selectedDuration === item.sec
+                      ? "border-beam-400/40 bg-beam-500/20 text-beam-200 font-semibold"
+                      : "border-white/[0.06] bg-white/[0.015] text-white/45 hover:text-white/80",
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 4. Barra de Acciones del Productor */}
+      <div className="pt-1 flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={() => handleApply(true)}
+          className="w-full flex items-center justify-center gap-2 rounded-xl border border-beam-400/40 bg-gradient-to-r from-beam-600 to-indigo-600 hover:from-beam-500 hover:to-indigo-500 py-2.5 text-[11px] font-semibold text-white shadow-[0_0_20px_rgba(79,123,255,0.35)] transition-all active:scale-98 cursor-pointer"
+        >
+          <IconSparkle className="h-3.5 w-3.5 text-white" />
+          <span>Crear video ({selectedFormat === "reel" ? "Reel 9:16" : "16:9"} · {durDisplay})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setProducerPlan(null)}
+          className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] py-1 text-[10px] font-medium text-white/45 hover:text-white/80 transition-all text-center cursor-pointer"
+        >
+          Cerrar auditoría
+        </button>
+      </div>
+
+      {/* 5. Diagnóstico & Estrategia Anti-Abandono */}
+      <Collapsible title="Diagnóstico de Retención" defaultOpen={false}>
+        <div className="rounded-xl border border-white/[0.08] bg-black/60 p-3 text-[10.5px] leading-relaxed text-white/70">
+          <p>{producerPlan.original_critique}</p>
+        </div>
+      </Collapsible>
+
+      {/* 6. 3 Datos Avalados por la Web */}
+      <Collapsible title={`Datos Avalados (${producerPlan.supporting_facts?.length || 0})`} defaultOpen={false}>
         <div className="space-y-2">
           {producerPlan.supporting_facts?.map((f, idx) => (
             <div key={idx} className="rounded-xl border border-white/[0.08] bg-black p-2.5 text-[10.5px] leading-relaxed">
@@ -594,7 +736,7 @@ function ProducerPlanSection() {
         </div>
       </Collapsible>
 
-      {/* 5. Dirección Artística */}
+      {/* 7. Dirección Artística */}
       <Collapsible title="Dirección de Arte y Música" defaultOpen={false}>
         <div className="space-y-2 text-[10px]">
           <div className="rounded-xl border border-white/[0.08] bg-black p-2.5">
@@ -608,29 +750,392 @@ function ProducerPlanSection() {
         </div>
       </Collapsible>
 
-      {/* 6. Guión Maestro Pulido */}
+      {/* 8. Guión Maestro Pulido */}
       <Collapsible title="Guión Maestro Pulido" defaultOpen={false}>
         <div className="rounded-xl border border-white/[0.08] bg-black p-3 text-[10.5px] text-white/80 leading-relaxed font-mono">
           {producerPlan.polished_prompt}
         </div>
       </Collapsible>
+    </div>
+  );
+}
 
-      {/* 7. Barra de Acciones del Productor */}
-      <div className="pt-2 flex flex-col gap-2">
+/* ---------- inspector contextual ---------- */
+function InspectorSection({ onGoToAnalytics }: { onGoToAnalytics: () => void }) {
+  const {
+    clips,
+    selected,
+    updateClip,
+    removeClip,
+    duplicateClip,
+    splitClipAtPlayhead,
+    seek,
+    duration,
+    activeProjectTitle,
+    ratio,
+    fitMode,
+    toggleFitMode,
+    subtitleStyle,
+  } = useEditor();
+
+  const selectedClip = useMemo(() => clips.find((c) => c.id === selected), [clips, selected]);
+
+  if (!selectedClip) {
+    const v1Count = clips.filter((c) => c.track === "v1").length;
+    const v2Count = clips.filter((c) => c.track === "v2").length;
+    const txCount = clips.filter((c) => c.track === "t1").length;
+    const a1Count = clips.filter((c) => c.track === "a1").length;
+
+    return (
+      <div className="space-y-4">
+        {/* Cabecera Master */}
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
+              Video Master
+            </span>
+            <span className="rounded-full bg-beam-500/10 border border-beam-400/20 px-2 py-0.5 text-[9px] font-mono text-beam-300">
+              24 fps
+            </span>
+          </div>
+
+          <div>
+            <h4 className="text-[12.5px] font-medium text-white/95 truncate" title={activeProjectTitle || "Proyecto de video KAI"}>
+              {activeProjectTitle || "Proyecto de video KAI"}
+            </h4>
+            <div className="flex items-center gap-2 mt-1 text-[10px] text-white/40">
+              <span>Formato {ratio}</span>
+              <span>•</span>
+              <span>Duración {Math.round(duration || 32)}s</span>
+              <span>•</span>
+              <span>{clips.length} clips</span>
+            </div>
+          </div>
+
+          {/* Desglose de pistas */}
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/[0.06]">
+            <div className="rounded-xl border border-white/[0.06] bg-black/40 p-2 flex items-center justify-between">
+              <span className="text-[10px] text-white/40">Video (V1)</span>
+              <span className="text-[11px] font-mono font-medium text-white/80">{v1Count}</span>
+            </div>
+            <div className="rounded-xl border border-white/[0.06] bg-black/40 p-2 flex items-center justify-between">
+              <span className="text-[10px] text-white/40">B-Roll (V2)</span>
+              <span className="text-[11px] font-mono font-medium text-beam-300">{v2Count}</span>
+            </div>
+            <div className="rounded-xl border border-white/[0.06] bg-black/40 p-2 flex items-center justify-between">
+              <span className="text-[10px] text-white/40">Subtítulos (TX)</span>
+              <span className="text-[11px] font-mono font-medium text-emerald-300">{txCount}</span>
+            </div>
+            <div className="rounded-xl border border-white/[0.06] bg-black/40 p-2 flex items-center justify-between">
+              <span className="text-[10px] text-white/40">Audio (A1)</span>
+              <span className="text-[11px] font-mono font-medium text-amber-300">{a1Count}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Llamada a la acción contextual */}
+        <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.015] p-5 text-center space-y-2.5">
+          <div className="h-8 w-8 mx-auto grid place-items-center rounded-xl bg-white/[0.04] border border-white/10 text-white/40">
+            <IconScissors className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-[11.5px] font-medium text-white/80">Propiedades del elemento</p>
+            <p className="text-[10px] text-white/40 mt-1 leading-relaxed max-w-[240px] mx-auto">
+              Haz clic en cualquier clip de la línea de tiempo para ajustar duración, recorte, pista, volumen o subtítulos.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onGoToAnalytics}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.05] text-[10.5px] font-medium text-white/70 hover:text-white hover:bg-white/[0.1] transition-all cursor-pointer"
+          >
+            <span>Ver Canales y Analítica</span>
+            <span>→</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Cuando HAY un clip seleccionado: Inspector completo
+  const kindLabels: Record<string, { name: string; color: string; border: string; bg: string }> = {
+    v2: { name: "B-ROLL · APOYO", color: "text-beam-300", border: "border-beam-400/30", bg: "bg-beam-500/10" },
+    v1: { name: "VIDEO PRINCIPAL", color: "text-white/80", border: "border-white/20", bg: "bg-white/[0.06]" },
+    t1: { name: "SUBTÍTULOS Y TEXTO", color: "text-emerald-300", border: "border-emerald-400/30", bg: "bg-emerald-500/10" },
+    a1: { name: "AUDIO Y LOCUCIÓN", color: "text-amber-300", border: "border-amber-400/30", bg: "bg-amber-500/10" },
+  };
+
+  const badge = kindLabels[selectedClip.track] || {
+    name: selectedClip.kind.toUpperCase(),
+    color: "text-white/70",
+    border: "border-white/10",
+    bg: "bg-white/[0.04]",
+  };
+
+  const startSec = Math.round(selectedClip.start * 100) / 100;
+  const durSec = Math.round(selectedClip.duration * 100) / 100;
+  const endSec = Math.round((startSec + durSec) * 100) / 100;
+
+  return (
+    <div className="space-y-3.5 select-none">
+      {/* Cabecera del Inspector */}
+      <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className={cn("rounded-md border px-2 py-0.5 text-[9px] font-semibold tracking-wider", badge.border, badge.bg, badge.color)}>
+            {badge.name}
+          </span>
+          <span className="text-[9.5px] font-mono text-white/30 truncate max-w-[120px]">
+            #{selectedClip.id}
+          </span>
+        </div>
+
+        {/* Acciones principales en grupo estilizado */}
+        <div className="flex items-center justify-between pt-1 border-t border-white/[0.06]">
+          <button
+            type="button"
+            onClick={() => seek(selectedClip.start)}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] text-white/60 hover:text-white hover:bg-white/[0.06] transition-all cursor-pointer"
+            title="Mover cabezal al inicio de este clip"
+          >
+            <IconPlay className="h-2.5 w-2.5" />
+            <span>Ir al inicio</span>
+          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => duplicateClip(selectedClip.id)}
+              className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/[0.06] transition-all cursor-pointer"
+              title="Duplicar clip"
+            >
+              <IconCopy className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => splitClipAtPlayhead()}
+              className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/[0.06] transition-all cursor-pointer"
+              title="Dividir clip en el cabezal"
+            >
+              <IconScissors className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => removeClip(selectedClip.id)}
+              className="p-1.5 rounded-md text-white/40 hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
+              title="Eliminar clip (Supr)"
+            >
+              <IconTrash className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 1. Nombre / Etiqueta del clip */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-medium text-white/40 uppercase tracking-wider block">
+          Nombre de la pista
+        </label>
+        <input
+          type="text"
+          value={selectedClip.label}
+          onChange={(e) => updateClip(selectedClip.id, { label: e.target.value })}
+          className="w-full rounded-xl border border-white/[0.09] bg-white/[0.02] px-3 py-1.5 text-[11.5px] text-white/90 outline-none focus:border-beam-400/50 focus:bg-black transition-all"
+          placeholder="Nombre del clip..."
+        />
+      </div>
+
+      {/* 2. Pista Asignada */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-medium text-white/40 uppercase tracking-wider block">
+          Pista de la línea de tiempo
+        </label>
+        <div className="grid grid-cols-4 gap-1 p-0.5 rounded-xl border border-white/[0.08] bg-white/[0.02]">
+          {[
+            { id: "v2", label: "V2 B-Roll" },
+            { id: "v1", label: "V1 Video" },
+            { id: "t1", label: "TX Texto" },
+            { id: "a1", label: "A1 Audio" },
+          ].map((trk) => {
+            const isTrk = selectedClip.track === trk.id;
+            return (
+              <button
+                key={trk.id}
+                type="button"
+                onClick={() => {
+                  const kindMap: Record<string, any> = { v2: "broll", v1: "scene", t1: "caption", a1: "voice" };
+                  updateClip(selectedClip.id, { track: trk.id as any, kind: kindMap[trk.id] });
+                }}
+                className={cn(
+                  "py-1 rounded-lg text-[9.5px] font-medium transition-all text-center cursor-pointer",
+                  isTrk
+                    ? "bg-white/[0.12] text-white font-semibold shadow-sm"
+                    : "text-white/40 hover:text-white/80 hover:bg-white/[0.03]",
+                )}
+              >
+                {trk.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. Tiempos y Recorte (Inicio, Duración, Fin) */}
+      <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-3">
+        <span className="text-[10px] font-medium text-white/40 uppercase tracking-wider block">
+          Tiempos y Recorte (Segundos)
+        </span>
+
+        {/* Inicio */}
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-white/60">Tiempo de inicio</span>
+          <div className="flex items-center rounded-lg border border-white/[0.08] bg-white/[0.03] p-0.5">
+            <button
+              type="button"
+              onClick={() => updateClip(selectedClip.id, { start: Math.max(0, startSec - 0.5) })}
+              className="h-6 w-6 grid place-items-center text-[12px] font-bold text-white/40 hover:text-white transition-colors cursor-pointer"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={startSec}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) updateClip(selectedClip.id, { start: Math.max(0, val) });
+              }}
+              className="w-12 text-center bg-transparent border-0 p-0 text-[11px] font-mono text-white focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => updateClip(selectedClip.id, { start: startSec + 0.5 })}
+              className="h-6 w-6 grid place-items-center text-[12px] font-bold text-white/40 hover:text-white transition-colors cursor-pointer"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* Duración */}
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-white/60">Duración</span>
+          <div className="flex items-center rounded-lg border border-white/[0.08] bg-white/[0.03] p-0.5">
+            <button
+              type="button"
+              onClick={() => updateClip(selectedClip.id, { duration: Math.max(0.5, durSec - 0.5) })}
+              className="h-6 w-6 grid place-items-center text-[12px] font-bold text-white/40 hover:text-white transition-colors cursor-pointer"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              step="0.1"
+              min="0.5"
+              value={durSec}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) updateClip(selectedClip.id, { duration: Math.max(0.5, val) });
+              }}
+              className="w-12 text-center bg-transparent border-0 p-0 text-[11px] font-mono text-white focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => updateClip(selectedClip.id, { duration: durSec + 0.5 })}
+              className="h-6 w-6 grid place-items-center text-[12px] font-bold text-white/40 hover:text-white transition-colors cursor-pointer"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* Fin calculado */}
+        <div className="flex items-center justify-between pt-1 border-t border-white/[0.06] text-[10.5px]">
+          <span className="text-white/40">Punto final en línea de tiempo</span>
+          <span className="font-mono text-white/70">{endSec}s</span>
+        </div>
+      </div>
+
+      {/* 4. Propiedades contextuales por tipo */}
+      {selectedClip.track === "t1" || selectedClip.kind === "caption" ? (
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-medium text-white/40 uppercase tracking-wider">
+              Texto del Subtítulo
+            </span>
+            <span className="text-[9px] text-beam-300">Kinetic</span>
+          </div>
+          <textarea
+            rows={2}
+            value={selectedClip.label}
+            onChange={(e) => updateClip(selectedClip.id, { label: e.target.value })}
+            className="w-full rounded-xl border border-white/[0.08] bg-black/60 p-2 text-[11px] text-white/90 outline-none focus:border-beam-400/50 resize-none"
+            placeholder="Escribe el texto del subtítulo..."
+          />
+          <div className="flex items-center justify-between text-[10px] text-white/40 pt-1">
+            <span>Estilo activo:</span>
+            <span className="text-white/70 capitalize font-medium">{subtitleStyle || "Kinetic Bold"}</span>
+          </div>
+        </div>
+      ) : selectedClip.track === "a1" || selectedClip.kind === "voice" || selectedClip.kind === "music" ? (
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-medium text-white/40 uppercase tracking-wider">
+              Control de Audio
+            </span>
+            <span className="text-[9px] text-amber-300">Ducking -9dB</span>
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between text-[10px] text-white/50">
+              <span>Ganancia / Volumen</span>
+              <span className="font-mono text-white/80">100%</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="150"
+              defaultValue="100"
+              className="w-full accent-beam-400 h-1 bg-white/10 rounded-lg cursor-pointer"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-medium text-white/40 uppercase tracking-wider">
+              Ajuste Visual
+            </span>
+            <span className="text-[9px] text-beam-300">4K HDR</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-white/60">Encuadre</span>
+            <button
+              type="button"
+              onClick={toggleFitMode}
+              className="px-2 py-1 rounded-lg border border-white/10 bg-white/[0.03] text-[10px] font-medium text-white/80 hover:text-white transition-colors"
+            >
+              {fitMode === "cover" ? "Cover (Llenar pantalla)" : "Contain (Ajustar)"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bloqueo del clip */}
+      <div className="flex items-center justify-between p-2.5 rounded-xl border border-white/[0.06] bg-white/[0.015]">
+        <div className="flex items-center gap-2">
+          <IconLock className="h-3.5 w-3.5 text-white/40" />
+          <span className="text-[11px] text-white/70">Bloquear clip</span>
+        </div>
         <button
           type="button"
-          onClick={() => handleApply(true)}
-          className="w-full flex items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.08] hover:bg-white/[0.14] hover:border-white/25 py-2.5 text-[11px] font-medium text-white transition-all active:scale-98 cursor-pointer shadow-sm"
+          onClick={() => updateClip(selectedClip.id, { locked: !selectedClip.locked })}
+          className={cn(
+            "px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer",
+            selectedClip.locked
+              ? "bg-amber-500/20 text-amber-200 border border-amber-400/30"
+              : "bg-white/[0.05] text-white/40 hover:text-white border border-white/10",
+          )}
         >
-          <IconSparkle className="h-3.5 w-3.5 text-beam-200" />
-          <span>Aplicar y crear video ({producerPlan.recommended_duration_sec}s)</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setProducerPlan(null)}
-          className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] py-1.5 text-[10.5px] font-medium text-white/45 hover:text-white/80 transition-all text-center cursor-pointer"
-        >
-          Cerrar auditoría
+          {selectedClip.locked ? "Bloqueado" : "Desbloqueado"}
         </button>
       </div>
     </div>
@@ -651,16 +1156,24 @@ export function MetricsPanel() {
     setMetricsPanelCollapsed,
     activeChannelId,
     setActiveChannelId,
+    selected,
     flash,
   } = useEditor();
   const isHidden = metricsPanelCollapsed || theaterMode;
   const pf = PLATFORMS.find((p) => p.id === platform)!;
-  const [activeTab, setActiveTab] = useState<"viral" | "producer">("viral");
+  const [activeTab, setActiveTab] = useState<"inspector" | "analytics" | "producer">("inspector");
 
   const [overview, setOverview] = useState<MetricsOverviewData | null>(null);
   const [fbCorrelations, setFbCorrelations] = useState<Record<string, any>>({});
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [selectedChannelId, setSelectedChannelId] = useState<string>(activeChannelId || "UC_8-TffWIAoiUMMDfiMUm2Q");
+
+  // Al seleccionar un elemento en la línea de tiempo, el panel muestra automáticamente sus propiedades contextuales
+  useEffect(() => {
+    if (selected) {
+      setActiveTab("inspector");
+    }
+  }, [selected]);
 
   useEffect(() => {
     if (activeChannelId) setSelectedChannelId(activeChannelId);
@@ -736,44 +1249,61 @@ export function MetricsPanel() {
 
   if (isHidden) {
     return (
-      <aside className="hidden min-h-0 w-11 shrink-0 flex-col items-center border-l border-white/[0.08] bg-black py-3 xl:flex">
+      <aside className="hidden h-full min-h-0 w-11 shrink-0 flex-col items-center border-l border-white/[0.08] bg-black py-3 xl:flex">
         <button
           type="button"
           onClick={() => {
             setMetricsPanelCollapsed(false);
             if (theaterMode) setTheaterMode(false);
           }}
-          title="Mostrar escenario viral y auditoría de IA"
-          className="grid h-8 w-8 place-items-center rounded-lg border border-white/[0.09] text-white/60 transition-colors hover:border-beam-400/50 hover:text-beam-200"
+          title="Mostrar inspector y analítica"
+          className="grid h-8 w-8 place-items-center rounded-lg border border-white/[0.09] text-white/60 transition-colors hover:border-beam-400/50 hover:text-beam-200 cursor-pointer"
         >
           <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M15 6l-6 6 6 6" />
           </svg>
         </button>
         <span className="micro-sm mt-4 text-white/35 [writing-mode:vertical-rl]">
-          {producerPlan ? "Producción IA" : "Escenario viral"}
+          {selected ? "Inspector activo" : "Propiedades y analítica"}
         </span>
       </aside>
     );
   }
 
   return (
-    <aside className="hidden min-h-0 w-[340px] shrink-0 flex-col border-l border-white/[0.08] bg-black xl:flex">
+    <aside className="hidden h-full min-h-0 w-[340px] shrink-0 flex-col border-l border-white/[0.08] bg-black xl:flex">
       <div className="flex items-center justify-between px-3.5 pb-2.5 pt-3.5 shrink-0 border-b border-white/[0.06]">
-        {/* Pestañas de alternancia superior */}
+        {/* Pestañas de alternancia superior: Inspector vs Publicación y analítica */}
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setActiveTab("viral")}
+            onClick={() => setActiveTab("inspector")}
             className={cn(
-              "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer",
-              activeTab === "viral"
+              "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5",
+              activeTab === "inspector"
                 ? "bg-white/[0.10] text-white border border-white/15"
                 : "text-white/40 hover:text-white hover:bg-white/[0.04]",
             )}
           >
-            Escenario viral
+            <span>Inspector</span>
+            {selected && (
+              <span className="h-1.5 w-1.5 rounded-full bg-beam-400 animate-pulse" />
+            )}
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("analytics")}
+            className={cn(
+              "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer",
+              activeTab === "analytics"
+                ? "bg-white/[0.10] text-white border border-white/15"
+                : "text-white/40 hover:text-white hover:bg-white/[0.04]",
+            )}
+          >
+            Publicación y analítica
+          </button>
+
           {producerPlan && (
             <button
               type="button"
@@ -785,7 +1315,7 @@ export function MetricsPanel() {
                   : "text-white/40 hover:text-white hover:bg-white/[0.04]",
               )}
             >
-              <span>Producción IA</span>
+              <span>Auditoría IA</span>
               <span className="tnum text-[9px] px-1 py-0.2 rounded bg-white/[0.08] text-white/70 border border-white/10">
                 {producerPlan.retention_score}
               </span>
@@ -794,25 +1324,19 @@ export function MetricsPanel() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-full border border-white/[0.1] bg-black px-2 py-0.5">
-            <span
-              className={cn(
-                "h-1 w-1 rounded-full",
-                isSyncing
-                  ? "bg-beam-300 anim-ping"
-                  : activeTab === "viral"
-                  ? (running ? "bg-beam-300 anim-ping" : "bg-signal-400")
-                  : "bg-signal-400",
-              )}
-            />
-            <span className="micro-sm text-white/45">
-              {isSyncing
-                ? "Sincronizando..."
-                : activeTab === "viral"
-                ? (running ? "Recalculando" : "YouTube en vivo")
-                : "Datos web"}
-            </span>
-          </div>
+          {activeTab === "analytics" && (
+            <div className="flex items-center gap-1.5 rounded-full border border-white/[0.1] bg-black px-2 py-0.5">
+              <span
+                className={cn(
+                  "h-1 w-1 rounded-full",
+                  isSyncing ? "bg-beam-300 anim-ping" : (running ? "bg-beam-300 anim-ping" : "bg-signal-400"),
+                )}
+              />
+              <span className="micro-sm text-white/45">
+                {isSyncing ? "Sincronizando..." : (running ? "Recalculando" : "YouTube en vivo")}
+              </span>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setMetricsPanelCollapsed(true)}
@@ -826,29 +1350,34 @@ export function MetricsPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3.5 pb-5 pt-3 space-y-3">
-        {activeTab === "producer" && producerPlan ? (
+      <div className="min-h-0 flex-1 overflow-y-auto px-3.5 pb-10 pt-3 space-y-3 subtle-scrollbar overscroll-contain">
+        {activeTab === "inspector" ? (
+          <InspectorSection onGoToAnalytics={() => setActiveTab("analytics")} />
+        ) : activeTab === "producer" && producerPlan ? (
           <ProducerPlanSection />
         ) : (
           <>
             {/* 1. Selector de Canal Conectado & Botón Sincronizar en Vivo */}
-            <div className="rounded-xl border border-white/[0.09] bg-white/[0.02] p-2.5 space-y-2">
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="micro-sm text-white/35 font-medium">CANAL CONECTADO</span>
+                <div className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-signal-400 animate-pulse" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">Canal Conectado</span>
+                </div>
                 <button
                   type="button"
                   onClick={handleSyncYouTube}
                   disabled={isSyncing}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-beam-500/15 border border-beam-400/30 text-beam-200 hover:bg-beam-500/25 transition-all cursor-pointer disabled:opacity-50"
+                  className="flex items-center gap-1.5 h-6 px-2 rounded-lg text-[9.5px] font-medium border border-white/10 bg-white/[0.03] text-white/70 hover:text-white hover:bg-white/[0.08] hover:border-white/20 transition-all cursor-pointer disabled:opacity-50"
                   title="Sincronizar métricas en tiempo real con YouTube Data API"
                 >
-                  <IconRefresh className={cn("h-3 w-3", isSyncing && "animate-spin")} />
-                  <span>{isSyncing ? "Sincronizando..." : "Sincronizar YouTube"}</span>
+                  <IconRefresh className={cn("h-3 w-3 text-beam-300", isSyncing && "animate-spin")} />
+                  <span>{isSyncing ? "Sincronizando..." : "Sincronizar"}</span>
                 </button>
               </div>
 
-              {/* Botones de canales */}
-              <div className="grid grid-cols-2 gap-1.5">
+              {/* Bento Switcher de Canales YouTube */}
+              <div className="grid grid-cols-2 gap-2">
                 {[
                   {
                     id: "UC_8-TffWIAoiUMMDfiMUm2Q",
@@ -868,47 +1397,65 @@ export function MetricsPanel() {
                       type="button"
                       onClick={() => handleSelectChannel(c.id)}
                       className={cn(
-                        "flex flex-col text-left px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer",
+                        "group relative flex flex-col justify-between p-2.5 rounded-xl border transition-all cursor-pointer text-left select-none",
                         isSelected
-                          ? "border-beam-400/50 bg-beam-500/10 text-white"
-                          : "border-white/[0.06] bg-black hover:border-white/15 text-white/60",
+                          ? "border-beam-400/50 bg-gradient-to-b from-beam-500/[0.16] to-beam-500/[0.05] shadow-[0_0_20px_rgba(37,99,235,0.15)] ring-1 ring-beam-400/20"
+                          : "border-white/[0.06] bg-white/[0.015] hover:bg-white/[0.04] hover:border-white/15",
                       )}
                     >
-                      <span className="text-[11px] font-medium truncate">{c.title}</span>
-                      <span className="text-[9px] text-white/35 truncate">{c.tag}</span>
+                      <div className="flex items-center justify-between w-full mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <IconYouTube className="w-3.5 h-3.5 text-red-500" />
+                          <span className="text-[9px] font-mono text-white/40 uppercase">YT</span>
+                        </div>
+                        {isSelected ? (
+                          <div className="flex items-center gap-1">
+                            <span className="h-1.5 w-1.5 rounded-full bg-beam-400 shadow-[0_0_8px_rgba(59,130,246,0.9)]" />
+                            <span className="text-[8.5px] font-mono font-semibold text-beam-200">Activo</span>
+                          </div>
+                        ) : (
+                          <span className="text-[8.5px] font-mono text-white/25 group-hover:text-white/50">Cambiar</span>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <span className={cn("text-xs font-semibold tracking-tight truncate block", isSelected ? "text-white" : "text-white/75 group-hover:text-white")}>
+                          {c.title}
+                        </span>
+                        <span className="text-[9px] text-white/40 truncate block mt-0.5">
+                          {c.tag}
+                        </span>
+                      </div>
                     </button>
                   );
                 })}
               </div>
 
-              {/* Página Hermana Facebook */}
+              {/* Tarjeta Página Hermana Facebook */}
               {(() => {
                 const activeCid = currentChannel?.channel_id || selectedChannelId;
                 const fb = fbCorrelations[activeCid]?.facebook_page;
                 if (!fb || !fb.enabled) return null;
                 return (
-                  <div className="mt-2 rounded-lg border border-[#1877F2]/25 bg-[#1877F2]/[0.04] p-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-5 h-5 rounded-md bg-[#1877F2]/20 border border-[#1877F2]/40 flex items-center justify-center shrink-0">
-                        <svg className="w-3 h-3 fill-[#1877F2]" viewBox="0 0 24 24">
-                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                        </svg>
+                  <div className="rounded-xl border border-white/[0.07] bg-white/[0.015] p-2.5 flex items-center justify-between transition-all hover:bg-white/[0.03] hover:border-white/12">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-400/25 flex items-center justify-center shrink-0 text-blue-400">
+                        <IconFacebook className="w-3.5 h-3.5" />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[9px] text-white/40 uppercase tracking-wider font-semibold">Página Hermana Facebook</span>
-                          <span className="inline-flex items-center px-1.5 py-0.2 text-[8.5px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-full">
-                            Auto Reels ON
+                          <span className="text-[9px] uppercase tracking-wider font-semibold text-white/40 font-mono">
+                            Página Facebook
                           </span>
                         </div>
-                        <p className="text-[11px] font-medium text-white truncate">{fb.page_name}</p>
+                        <p className="text-xs font-semibold text-white truncate mt-0.5">
+                          {fb.page_name}
+                        </p>
                       </div>
                     </div>
-                    {fb.category && (
-                      <span className="text-[9px] text-white/40 shrink-0 border border-white/[0.08] px-1.5 py-0.5 rounded">
-                        {fb.category}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-signal-400/10 border border-signal-400/25 text-signal-400 text-[9.5px] font-medium font-mono shrink-0">
+                      <span className="h-1.5 w-1.5 rounded-full bg-signal-400 anim-ping" />
+                      <span>Auto Reels</span>
+                    </div>
                   </div>
                 );
               })()}

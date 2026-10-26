@@ -557,11 +557,14 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=400, detail="Debes indicar un tema para la transmisión.")
     style = str(payload.get("style", "divulgacion")).strip()
     raw_duration = payload.get("duration_sec")
+    raw_minutes = payload.get("duration_min")
     try:
-        raw_dur = int(raw_duration) if raw_duration is not None else 45
+        if raw_minutes is not None:
+            duration_sec = int(float(raw_minutes) * 60)
+        else:
+            duration_sec = int(raw_duration) if raw_duration is not None else 45
     except (ValueError, TypeError):
-        raw_dur = 45
-    duration_sec = raw_dur * 60 if 0 < raw_dur <= 40 else raw_dur
+        duration_sec = 45
     duration_sec = max(20, min(2400, duration_sec))
     aspect_ratio = str(payload.get("aspect_ratio", "16:9")).strip()
     card_theme = str(payload.get("card_theme", "dark")).strip()
@@ -581,7 +584,7 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
         "color_grade": str(payload.get("color_grade", "cinema")).strip().lower() or "cinema",
         "fps": max(24, min(60, int(payload.get("fps", 30)))),
         "crf": max(14, min(28, int(payload.get("crf", 18)))),
-        "bgm_volume": max(0.0, min(0.25, float(payload.get("bgm_volume", 0.06)))),
+        "bgm_volume": max(0.0, min(0.25, float(payload.get("bgm_volume", 0.12)))),
         "intro_style": str(payload.get("intro_style", "kai")).strip().lower() or "kai",
         "outro_enabled": bool(payload.get("outro_enabled", True)),
         "bgm_track": str(payload.get("bgm_track", "default")).strip().lower() or "default",
@@ -591,6 +594,7 @@ async def create_streamer_broadcast(payload: Dict[str, Any] = Body(...)):
         else None,
         # Publicación automática desatendida o preparación autónoma multi-canal
         "auto_publish": bool(payload.get("auto_publish", False)),
+        "origin": str(payload.get("origin", "manual")).strip() or "manual",
     }
 
     task_id = uuid.uuid4().hex[:8]
@@ -680,11 +684,12 @@ async def resume_project(task_id: str):
             color_grade=str(raw_options.get("color_grade", "cinema")),
             fps=int(raw_options.get("fps", 30)),
             crf=int(raw_options.get("crf", 18)),
-            bgm_volume=float(raw_options.get("bgm_volume", 0.06)),
+            bgm_volume=float(raw_options.get("bgm_volume", 0.12)),
             intro_style=str(raw_options.get("intro_style", "kai")),
             outro_enabled=bool(raw_options.get("outro_enabled", True)),
             bgm_track=str(raw_options.get("bgm_track", "default")),
             source_video_url=raw_options.get("source_video_url"),
+            origin=str(raw_options.get("origin", "manual")),
         )
         tasks_progress[task_id] = {
             "step": "render", "progress": 50.0, "message": f"Reanudando transmisión de «{topic}»...",
@@ -1390,7 +1395,7 @@ async def download_project_master(
 
     file_to_send = master_file
     if burn_subtitles:
-        file_to_send = _prepare_subtitled_master(task_id, master_file, style)
+        file_to_send = await asyncio.to_thread(_prepare_subtitled_master, task_id, master_file, style)
 
     import unicodedata
     import urllib.parse
@@ -1453,7 +1458,7 @@ async def export_project_to_downloads(
 
     file_to_send = master_file
     if burn_subtitles:
-        file_to_send = _prepare_subtitled_master(task_id, master_file, style)
+        file_to_send = await asyncio.to_thread(_prepare_subtitled_master, task_id, master_file, style)
 
     import unicodedata, shutil
     raw_title = custom_title or document.get("original_name") or (document.get("result") or {}).get("title") or f"KAI_{task_id}"
@@ -1464,7 +1469,7 @@ async def export_project_to_downloads(
     downloads_dir = get_downloads_folder()
     dest_path = downloads_dir / out_filename
 
-    shutil.copy2(file_to_send, dest_path)
+    await asyncio.to_thread(shutil.copy2, file_to_send, dest_path)
     safe_log(f"[Export] Video copiado exitosamente a: {dest_path} ({round(dest_path.stat().st_size / 1024 / 1024, 2)} MB)")
 
     return {
@@ -1474,27 +1479,6 @@ async def export_project_to_downloads(
         "size_mb": round(dest_path.stat().st_size / (1024 * 1024), 2),
         "message": f"¡Video exportado directamente a Descargas! ({dest_path.name})"
     }
-
-
-@app.get("/api/projects/{task_id}/clips")
-async def get_project_clips(task_id: str):
-    """Lista todos los clips / Shorts 9:16 generados para este proyecto."""
-    clips = []
-    pattern = f"short_{task_id}_*.mp4"
-    for p in sorted(settings.OUTPUTS_DIR.glob(pattern)):
-        try:
-            stat = p.stat()
-            clip_name = p.stem.replace(f"short_{task_id}_", "").replace("_", " ").title()
-            clips.append({
-                "filename": p.name,
-                "name": clip_name,
-                "url": f"/outputs/{p.name}",
-                "size_mb": round(stat.st_size / (1024 * 1024), 2),
-                "created_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
-            })
-        except OSError:
-            continue
-    return {"clips": clips}
 
 
 @app.post("/api/projects/{task_id}/extract-clips")
@@ -1646,7 +1630,7 @@ async def save_project_to_downloads(task_id: str):
     dest_path = downloads_dir / filename
 
     try:
-        shutil.copy2(str(master_file), str(dest_path))
+        await asyncio.to_thread(shutil.copy2, str(master_file), str(dest_path))
         # Abrir explorador seleccionando el archivo copiado en Downloads
         try:
             subprocess.Popen(["explorer.exe", f"/select,{str(dest_path.resolve())}"])
@@ -1726,17 +1710,20 @@ async def dispatch_project_webhook(task_id: str, payload: Dict[str, Any] = Body(
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    try:
+    def _post_webhook() -> int:
         req = urllib.request.Request(
             webhook_url,
             data=json.dumps(export_data).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": "AetherCut-Studio/2.0"}
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            status_code = resp.getcode()
-            return {"status": "ok", "http_status": status_code, "message": "Datos enviados exitosamente al Webhook."}
+            return resp.getcode()
+
+    try:
+        status_code = await asyncio.to_thread(_post_webhook)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Error despachando webhook: {exc}")
+    return {"status": "ok", "http_status": status_code, "message": "Datos enviados exitosamente al Webhook."}
 
 
 @app.put("/api/projects/{task_id}/timeline")
@@ -2068,13 +2055,6 @@ async def get_viral_niches():
     return viral_niches_crawler.get_snapshot()
 
 
-@app.post("/api/viral-niches/refresh")
-async def refresh_viral_niches(category: Optional[str] = Query(None)):
-    """Fuerza un rastreo de Internet inmediato para una categoría específica o una pasada general."""
-    await asyncio.to_thread(viral_niches_crawler.crawl_category_now, category)
-    return viral_niches_crawler.get_snapshot()
-
-
 @app.post("/api/viral-niches/stop")
 async def stop_viral_niches():
     """Detiene o pausa el rastreador de temas virales en segundo plano."""
@@ -2095,12 +2075,19 @@ async def enrich_and_audit_topic_endpoint(payload: dict = Body(...)):
     """Investiga fuentes reales en la web, audita la retención y fundamenta con datos duros y aprendizaje del canal."""
     topic = payload.get("topic", "").strip()
     format_mode = payload.get("format", "reel").strip()
+    duration_sec = payload.get("duration_sec")
     channel_id = payload.get("channel_id")
     if not topic:
         raise HTTPException(status_code=400, detail="El tema no puede estar vacío.")
 
     from core.ai_producer import ai_producer_engine
-    res = await asyncio.to_thread(ai_producer_engine.enrich_and_audit, topic, format_mode, channel_id=channel_id)
+    res = await asyncio.to_thread(
+        ai_producer_engine.enrich_and_audit,
+        topic,
+        format_mode,
+        duration_sec=duration_sec,
+        channel_id=channel_id,
+    )
     if "error" in res:
         raise HTTPException(status_code=400, detail=res["error"])
     return res
@@ -2192,6 +2179,61 @@ def facebook_generate_permanent_tokens_endpoint(payload: Dict[str, Any] = Body(.
     app_secret = str(payload.get("app_secret") or "").strip()
     user_token = str(payload.get("user_token") or payload.get("token") or "").strip()
     return generate_permanent_page_tokens(app_id, app_secret, user_token)
+
+
+# ===========================================================================
+# DIFUSIÓN MULTI-CANAL CON RECOMENDACIÓN ESTRATÉGICA DE IA
+# ===========================================================================
+@app.get("/api/publish/multichannel/channels")
+def multichannel_channels_endpoint(task_id: Optional[str] = None, topic: Optional[str] = None):
+    """Devuelve todos los canales y páginas conectadas con afinidad y recomendación de IA."""
+    from core.multichannel_recommender import evaluate_channel_recommendations
+    title = ""
+    extra_text = ""
+    resolved_topic = topic or ""
+    if task_id:
+        try:
+            from core.project_store import ProjectStore
+            doc = ProjectStore(task_id).read()
+            title = doc.get("original_name") or (doc.get("result") or {}).get("title") or ""
+            resolved_topic = resolved_topic or (doc.get("options") or {}).get("topic") or title
+            extra_text = str((doc.get("plan") or {}).get("topic") or "")
+        except Exception:
+            pass
+    return evaluate_channel_recommendations(topic=resolved_topic, title=title, extra_text=extra_text)
+
+
+@app.post("/api/publish/multichannel/dispatch")
+def multichannel_dispatch_endpoint(payload: Dict[str, Any] = Body(...)):
+    """Publica el video en los canales y páginas seleccionados con un solo clic."""
+    from core.multichannel_recommender import publish_to_selected_channels
+    task_id = str(payload.get("task_id") or "").strip()
+    channel_keys = payload.get("channel_keys") or []
+    if not task_id:
+        raise HTTPException(status_code=400, detail="Falta el task_id del proyecto a publicar.")
+    if not channel_keys:
+        raise HTTPException(status_code=400, detail="Debes seleccionar al menos un canal o página.")
+
+    title = str(payload.get("title") or "Video AetherCut").strip()
+    description = str(payload.get("description") or "").strip()
+    tags = payload.get("tags") or []
+    is_reel = bool(payload.get("is_reel", True))
+    privacy = str(payload.get("privacy", "public"))
+
+    try:
+        return publish_to_selected_channels(
+            task_id=task_id,
+            channel_keys=channel_keys,
+            title=title,
+            description=description,
+            tags=tags,
+            is_reel=is_reel,
+            privacy=privacy,
+        )
+    except Exception as exc:
+        safe_log(f"[MultiChannel] Error en despacho: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
 
 
 # ===========================================================================
@@ -2447,7 +2489,7 @@ async def tts_preview_endpoint(
     try:
         from utils.speechify_tts import synthesize_speechify, has_speechify_credits
         if has_speechify_credits():
-            sp_data = synthesize_speechify(content_text, target_sp_voice)
+            sp_data = await asyncio.to_thread(synthesize_speechify, content_text, target_sp_voice)
             if sp_data and len(sp_data) > 500:
                 clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_voice)
                 return StreamingResponse(io.BytesIO(sp_data), media_type="audio/mpeg", headers={
@@ -2485,7 +2527,9 @@ async def tts_preview_endpoint(
                     "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
                     "-i", "pipe:0", "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", "pipe:1"
                 ]
-                proc = subprocess.run(cmd, input=pcm, capture_output=True)
+                proc = await asyncio.to_thread(
+                    subprocess.run, cmd, input=pcm, capture_output=True
+                )
                 if proc.returncode == 0 and len(proc.stdout) > 500:
                     clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_voice)
                     return StreamingResponse(io.BytesIO(proc.stdout), media_type="audio/mpeg", headers={
@@ -3585,16 +3629,22 @@ async def replicate_trend_item(payload: Dict[str, Any] = Body(...)):
     style = str(payload.get("style", "divulgacion")).strip() or "divulgacion"
     # Duración: la que pida el usuario; si no, la que la IA recomienda según la profundidad del tema.
     raw_duration = payload.get("duration_sec")
-    if raw_duration is None:
-        raw_duration = brief.get("recommended_duration_sec") or (
-            360 if item.get("category") in ("descubrimiento", "ciencia", "espacio", "arqueologia", "tecnologia", "misterio") else 180
-        )
-    try:
-        raw_dur = int(raw_duration)
-    except (ValueError, TypeError):
-        raw_dur = 180
-    duration_sec = raw_dur * 60 if 0 < raw_dur <= 40 else raw_dur
-    duration_sec = max(45, min(2400, duration_sec))
+    raw_minutes = payload.get("duration_min")
+    if raw_minutes is not None:
+        try:
+            duration_sec = int(float(raw_minutes) * 60)
+        except (ValueError, TypeError):
+            duration_sec = 180
+    else:
+        if raw_duration is None:
+            raw_duration = brief.get("recommended_duration_sec") or (
+                360 if item.get("category") in ("descubrimiento", "ciencia", "espacio", "arqueologia", "tecnologia", "misterio") else 180
+            )
+        try:
+            duration_sec = int(raw_duration)
+        except (ValueError, TypeError):
+            duration_sec = 180
+    duration_sec = max(20, min(2400, duration_sec))
     creation = await create_streamer_broadcast({
         "topic": brief["topic"],
         "extra_notes": brief["extra_notes"],

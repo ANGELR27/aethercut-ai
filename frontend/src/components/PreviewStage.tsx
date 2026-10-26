@@ -1,6 +1,6 @@
 import { useMemo, useEffect } from "react";
 import { useEditor } from "@/lib/store";
-import { CAPTIONS, DURATION, captionAt, sceneAt, timecode, type Ratio } from "@/lib/data";
+import { CAPTIONS, DURATION, sceneAt, timecode, type Ratio } from "@/lib/data";
 import { cn } from "@/utils/cn";
 import { Hairline, IconButton, SectionLabel } from "./ui";
 import {

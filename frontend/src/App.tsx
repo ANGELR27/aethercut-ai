@@ -1,4 +1,5 @@
-import { AUTOMATIONS, BASE_RETENTION, compact, retentionAt } from "@/lib/data";
+import { useEffect } from "react";
+import { AUTOMATIONS } from "@/lib/data";
 import { EditorProvider, useEditor } from "@/lib/store";
 import { LeftPanel } from "@/components/LeftPanel";
 import { MetricsPanel, ActivityBar } from "@/components/MetricsPanel";
@@ -9,37 +10,6 @@ import { KeyboardShortcutsModal } from "@/components/KeyboardShortcutsModal";
 import { ImportModal } from "@/components/ImportModal";
 import { SilenceModal } from "@/components/SilenceModal";
 import { cn } from "@/utils/cn";
-
-/* compact strip: métricas esenciales en pantallas sin panel derecho */
-function CompactMetrics() {
-  const { score, metrics, boost } = useEditor();
-  const pts = BASE_RETENTION.map((_, i) => retentionAt(i, boost));
-  const d = pts
-    .map((v, i) => `${i === 0 ? "M" : "L"}${(i / (pts.length - 1)) * 90},${28 - v * 24}`)
-    .join(" ");
-  return (
-    <div className="glass-soft hidden h-[54px] shrink-0 items-center gap-4 overflow-x-auto rounded-none border-x-0 border-y-0 px-3 lg:flex xl:hidden">
-      <div className="flex shrink-0 items-baseline gap-1.5">
-        <span className="micro-sm text-white/30">Score</span>
-        <span className="tnum text-[16px] font-light text-beam-200">{score}</span>
-      </div>
-      <span className="h-6 w-px shrink-0 bg-white/[0.07]" />
-      <div className="flex shrink-0 items-baseline gap-1.5">
-        <span className="micro-sm text-white/30">Alcance</span>
-        <span className="tnum text-[14px] font-light text-white">{compact(metrics.reach)}</span>
-      </div>
-      <span className="h-6 w-px shrink-0 bg-white/[0.07]" />
-      <div className="flex shrink-0 items-baseline gap-1.5">
-        <span className="micro-sm text-white/30">Guardados</span>
-        <span className="tnum text-[14px] font-light text-white">{compact(metrics.saves)}</span>
-      </div>
-      <svg viewBox="0 0 90 30" className="h-6 w-24 shrink-0">
-        <path d={d} fill="none" stroke="#7ea3ff" strokeWidth="1.3" strokeLinecap="round" />
-      </svg>
-      <span className="micro-sm shrink-0 text-white/20">+{Math.round(boost * 100)} pts IA</span>
-    </div>
-  );
-}
 
 /* chips de IA para pantallas sin panel izquierdo */
 function CompactAI() {
@@ -82,7 +52,20 @@ function Shell() {
     setImportModalOpen,
     silenceModalOpen,
     setSilenceModalOpen,
+    theaterMode,
+    setTheaterMode,
   } = useEditor();
+
+  // Atajo de teclado para salir de Modo Cine con tecla Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && theaterMode) {
+        setTheaterMode(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [theaterMode, setTheaterMode]);
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-ink-1000 text-white">
@@ -91,20 +74,24 @@ function Shell() {
 
       <TopBar />
 
-      <main className="flex min-h-0 flex-1">
-        <div className="hidden md:flex">
+      <main className="flex min-h-0 flex-1 relative overflow-hidden">
+        {/* Panel Izquierdo: Oculto en Modo Cine para dar 100% de protagonismo al editor */}
+        <div className={cn("h-full min-h-0 hidden md:flex shrink-0 transition-all duration-300", theaterMode && "!hidden")}>
           <LeftPanel />
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        {/* Editor Central: Vista previa y Línea de tiempo son los protagonistas absolutos */}
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <PreviewStage />
           <CompactAI />
           <Transport />
-          <CompactMetrics />
           <Timeline />
         </div>
 
-        <MetricsPanel />
+        {/* Panel Derecho: Oculto en Modo Cine */}
+        <div className={cn("h-full min-h-0 flex shrink-0 transition-all duration-300", theaterMode && "!hidden")}>
+          <MetricsPanel />
+        </div>
       </main>
 
       {/* Mobile Drawer (LeftPanel con Proyectos, Generador IA, Nichos Virales, Subtítulos) */}

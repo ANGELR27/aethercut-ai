@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { ASSET_FOLDERS, PRESETS } from "@/lib/data";
+import { ASSET_FOLDERS, PRESETS, AUTOMATIONS, type Clip } from "@/lib/data";
 import {
   generateDailyTopics,
   getStoredPinnedIds,
@@ -12,9 +12,8 @@ import {
 } from "@/lib/viralTopics";
 import { useEditor } from "@/lib/store";
 import { cn } from "@/utils/cn";
-import { Collapsible, Hairline, IconButton, Meter, SectionLabel, Toggle } from "./ui";
+import { Hairline, IconButton, Meter, SectionLabel, Toggle } from "./ui";
 import {
-  IconCheck,
   IconChevron,
   IconCrop,
   IconLayers,
@@ -30,16 +29,17 @@ import {
   IconPlay,
   IconShare,
   IconMic,
+  IconFlame,
 } from "./Icons";
 import { ProjectDetailsModal } from "./ProjectDetailsModal";
 import { ClipsModal } from "./ClipsModal";
 
 const TABS = [
-  { id: "media", label: "Proyectos", icon: IconFolder },
+  { id: "project", label: "Proyecto", icon: IconFolder },
+  { id: "research", label: "Investigación", icon: IconFlame },
+  { id: "media", label: "Medios", icon: IconLayers },
   { id: "ai", label: "IA", icon: IconSparkle },
-  { id: "text", label: "Texto", icon: IconType },
-  { id: "audio", label: "Audio", icon: IconMusic },
-  { id: "fx", label: "Efectos", icon: IconCrop },
+  { id: "effects", label: "Efectos", icon: IconCrop },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -47,6 +47,8 @@ type TabId = (typeof TABS)[number]["id"];
 export function LeftPanel() {
   const [tab, setTab] = useState<TabId>("ai");
   const [panelWide, setPanelWide] = useState(false);
+  const [sharedPrompt, setSharedPrompt] = useState("");
+  const [sharedFormat, setSharedFormat] = useState<"long" | "reel">("long");
   const {
     importVideo,
     isUploading,
@@ -60,9 +62,9 @@ export function LeftPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="flex min-h-0 shrink-0">
+    <div className="flex h-full min-h-0 shrink-0">
       {/* ---- rail ---- */}
-      <nav className="flex w-[54px] shrink-0 flex-col items-center gap-1 border-r border-white/[0.05] bg-black/40 py-3">
+      <nav className="flex h-full min-h-0 w-[54px] shrink-0 flex-col items-center gap-1 border-r border-white/[0.05] bg-black/40 py-3">
         {/* Botón principal para expandir/ocultar el panel lateral */}
         <button
           type="button"
@@ -143,7 +145,7 @@ export function LeftPanel() {
             </button>
           )}
           <div className="micro-sm rotate-180 whitespace-nowrap text-white/15 [writing-mode:vertical-rl]">
-            Biblioteca
+            Estudio
           </div>
         </div>
       </nav>
@@ -151,7 +153,7 @@ export function LeftPanel() {
       {/* ---- panel ---- */}
       <aside
         className={cn(
-          "glass-soft min-h-0 flex flex-col rounded-none border-y-0 border-l-0 transition-all duration-300 ease-in-out",
+          "glass-soft h-full min-h-0 flex flex-col rounded-none border-y-0 border-l-0 transition-all duration-300 ease-in-out",
           isCollapsed
             ? "w-0 border-r-0 opacity-0 pointer-events-none overflow-hidden"
             : panelWide
@@ -166,11 +168,11 @@ export function LeftPanel() {
                 {TABS.find((t) => t.id === tab)?.label}
               </h2>
               <p className="micro-sm mt-1.5 text-white/25">
-                {tab === "ai" && "Automatización neuronal"}
-                {tab === "media" && "Recientes en disco (máx. 5)"}
-                {tab === "text" && "Subtítulos y titulares"}
-                {tab === "audio" && "Pista y locución"}
-                {tab === "fx" && "LUT, grano y reencuadre"}
+                {tab === "project" && "Proyectos recientes y escenas"}
+                {tab === "research" && "Catálogo de 1479 nichos virales e ideas"}
+                {tab === "media" && "Biblioteca de clips, b-roll y subidas"}
+                {tab === "ai" && "Generador asistido y pipeline neuronal"}
+                {tab === "effects" && "Subtítulos cinéticos, audio y LUTs"}
               </p>
             </div>
             <div className="flex items-center gap-1.5">
@@ -248,14 +250,29 @@ export function LeftPanel() {
           <div
             className={cn(
               "min-h-0 flex-1 px-3",
-              tab === "ai" ? "flex flex-col overflow-hidden pb-1" : "overflow-y-auto pb-4",
+              tab === "ai" || tab === "research" ? "flex flex-col overflow-hidden pb-1" : "overflow-y-auto pb-4",
             )}
           >
-            {tab === "ai" && <AITab />}
+            {tab === "project" && <ProjectTab />}
+            {tab === "research" && (
+              <ResearchTab
+                onUseTopic={(topicText, fmt) => {
+                  setSharedPrompt(topicText);
+                  if (fmt) setSharedFormat(fmt);
+                  setTab("ai");
+                }}
+              />
+            )}
             {tab === "media" && <MediaTab />}
-            {tab === "text" && <TextTab />}
-            {tab === "audio" && <AudioTab />}
-            {tab === "fx" && <FxTab />}
+            {tab === "ai" && (
+              <AITab
+                sharedPrompt={sharedPrompt}
+                setSharedPrompt={setSharedPrompt}
+                sharedFormat={sharedFormat}
+                setSharedFormat={setSharedFormat}
+              />
+            )}
+            {tab === "effects" && <EffectsTab />}
           </div>
         </div>
       </aside>
@@ -278,7 +295,17 @@ const NEURAL_VOICES = [
   { id: "clon-propio", n: "Clon de voz propio", d: "Muestra de estudio" },
 ];
 
-function AITab() {
+function AITab({
+  sharedPrompt,
+  setSharedPrompt: _setSharedPrompt,
+  sharedFormat,
+  setSharedFormat: _setSharedFormat,
+}: {
+  sharedPrompt: string;
+  setSharedPrompt?: (p: string) => void;
+  sharedFormat: "long" | "reel";
+  setSharedFormat?: (f: "long" | "reel") => void;
+}) {
   const {
     isCreating,
     createProgress,
@@ -298,21 +325,31 @@ function AITab() {
     producerPlan,
     isAuditingTopic,
     auditAndEnrichTopic,
+    progress,
+    applied,
+    run,
   } = useEditor();
 
-  const [topicPrompt, setTopicPrompt] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<ViralCategory | "all">("all");
-  const [videoFormat, setVideoFormat] = useState<"long" | "reel">("long");
+  const [topicPrompt, setTopicPrompt] = useState(sharedPrompt || "");
+  const [videoFormat, setVideoFormat] = useState<"long" | "reel">(sharedFormat || "long");
   const [targetDurationMin, setTargetDurationMin] = useState<number>(15);
   const [targetReelSec, setTargetReelSec] = useState<number>(60);
   const [isExtractingClips, setIsExtractingClips] = useState(false);
   const [clipsModalOpen, setClipsModalOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [pinnedIds, setPinnedIds] = useState<string[]>(() => getStoredPinnedIds());
-  const [topics, setTopics] = useState<ViralTopic[]>(() =>
-    generateDailyTopics(getStoredPinnedIds()),
-  );
-  const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (sharedPrompt) {
+      setTopicPrompt(sharedPrompt);
+    }
+  }, [sharedPrompt]);
+
+  useEffect(() => {
+    if (sharedFormat) {
+      setVideoFormat(sharedFormat);
+      setRatio(sharedFormat === "reel" ? "9:16" : "16:9");
+    }
+  }, [sharedFormat, setRatio]);
 
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -456,7 +493,8 @@ function AITab() {
       if (textareaRef.current) textareaRef.current.focus();
       return;
     }
-    auditAndEnrichTopic(rawTopic, videoFormat);
+    const targetDur = videoFormat === "reel" ? targetReelSec : targetDurationMin * 60;
+    auditAndEnrichTopic(rawTopic, videoFormat, targetDur);
   };
 
   const handlePromptSubmit = () => {
@@ -493,174 +531,6 @@ function AITab() {
     }
   };
 
-  const [isRefreshingTopics, setIsRefreshingTopics] = useState(false);
-  const [isCrawlerActive, setIsCrawlerActive] = useState(false);
-  const [isCrawlerPaused, setIsCrawlerPaused] = useState(false);
-  const [isTogglingCrawler, setIsTogglingCrawler] = useState(false);
-
-  // Sondeo y sincronización progresiva en tiempo real con el rastreador de Internet
-  useEffect(() => {
-    let isMounted = true;
-    let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const fetchSnapshot = async () => {
-      try {
-        const res = await fetch("/api/viral-niches");
-        if (res.ok && isMounted) {
-          const data = await res.json();
-          if (data && Array.isArray(data.topics)) {
-            const synced = syncLiveTopics(data.topics, pinnedIds);
-            setTopics(synced);
-            setIsCrawlerActive(Boolean(data.is_crawling));
-            setIsCrawlerPaused(Boolean(data.is_paused));
-          }
-        }
-      } catch (err) {
-        // Silencioso en caso de conexión inicial
-      }
-    };
-
-    // Consulta inicial inmediata
-    fetchSnapshot();
-
-    // Bucle de sondeo progresivo continuo: refleja temas en cuanto la IA los descubre en la web
-    const pollLoop = async () => {
-      await fetchSnapshot();
-      if (isMounted) {
-        // Sondeo rápido cada 2.5 segundos para reflejar nuevos temas en vivo
-        pollTimer = setTimeout(pollLoop, 2500);
-      }
-    };
-    pollTimer = setTimeout(pollLoop, 2500);
-
-    return () => {
-      isMounted = false;
-      if (pollTimer) clearTimeout(pollTimer);
-    };
-  }, [pinnedIds]);
-
-  const handleToggleCrawler = async () => {
-    if (isTogglingCrawler) return;
-    setIsTogglingCrawler(true);
-    try {
-      const shouldStop = isCrawlerActive || !isCrawlerPaused;
-      const endpoint = shouldStop ? "/api/viral-niches/stop" : "/api/viral-niches/resume";
-      const res = await fetch(endpoint, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        setIsCrawlerActive(Boolean(data.is_crawling));
-        setIsCrawlerPaused(Boolean(data.is_paused));
-        flash(
-          shouldStop
-            ? "⏹ Rastreo pausado: se conservan todos los temas descubiertos."
-            : "▶ Rastreo reanudado: buscando nuevos temas en la web..."
-        );
-      }
-    } catch (err) {
-      console.error("Error al pausar/reanudar rastreador:", err);
-    } finally {
-      setIsTogglingCrawler(false);
-    }
-  };
-
-  const handleRefresh = async () => {
-    if (isRefreshingTopics) return;
-    setIsRefreshingTopics(true);
-    const catParam = selectedCategory && selectedCategory !== "all" ? `?category=${encodeURIComponent(selectedCategory)}` : "";
-    flash(`Buscando tendencias ${selectedCategory !== "all" ? `de ${selectedCategory}` : "en Internet"} con IA...`);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-    try {
-      const res = await fetch(`/api/viral-niches/refresh${catParam}`, {
-        method: "POST",
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && Array.isArray(data.topics)) {
-          const synced = syncLiveTopics(data.topics, pinnedIds);
-          setTopics(synced);
-          setIsCrawlerActive(Boolean(data.is_crawling));
-          flash("✓ ¡Nuevas tendencias de Internet descubiertas e incorporadas!");
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn("Fallo en búsqueda en vivo de temas:", e);
-    } finally {
-      clearTimeout(timeoutId);
-      setIsRefreshingTopics(false);
-    }
-
-    const fresh = generateDailyTopics(pinnedIds, true);
-    setTopics(fresh);
-    flash("Temas sincronizados · Favoritos intactos");
-  };
-
-  const togglePin = (topic: ViralTopic) => {
-    const isPinned = pinnedIds.includes(topic.id);
-    const nextPinned = isPinned
-      ? pinnedIds.filter((id) => id !== topic.id)
-      : [topic.id, ...pinnedIds];
-
-    setPinnedIds(nextPinned);
-    savePinnedIds(nextPinned, topic, !isPinned);
-    flash(
-      isPinned
-        ? `«${topic.title.slice(0, 24)}...» desanclado`
-        : `«${topic.title.slice(0, 24)}...» anclado de primero`,
-    );
-  };
-
-  const handleIntegrate = (topic: ViralTopic) => {
-    const combined = `${topic.title}. ${topic.nuances}`;
-    setTopicPrompt(combined);
-    const isShort =
-      topic.durationMin <= 2 ||
-      topic.category === "motivacion" ||
-      topic.category === "cristiano_cine" ||
-      topic.category === "versiculos";
-    if (isShort) {
-      setVideoFormat("reel");
-      setRatio("9:16");
-      setTargetReelSec(Math.min(90, Math.max(30, (topic.durationMin || 1) * 60)));
-    } else if (videoFormat === "long") {
-      setTargetDurationMin(topic.durationMin || 15);
-    }
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
-    flash(`Tema integrado: «${topic.title.slice(0, 25)}...»`);
-  };
-
-  const handleGenerate = (
-    topic: ViralTopic,
-    format: "long" | "reel" = videoFormat,
-    overrideDurationSec?: number,
-  ) => {
-    if (isCreating) return;
-    const combined = `${topic.title}. ${topic.nuances}`;
-    if (format === "reel") {
-      const dur = overrideDurationSec || targetReelSec;
-      createVideo(combined, {
-        duration: dur,
-        style: "shorts",
-        aspect_ratio: "9:16",
-      });
-      flash(`Generando Reel 9:16 (${dur}s): «${topic.title.slice(0, 24)}...»`);
-    } else {
-      const dur = overrideDurationSec || targetDurationMin * 60;
-      const minLabel = Math.round(dur / 60);
-      createVideo(combined, {
-        duration: dur,
-        style: "divulgacion",
-        aspect_ratio: "16:9",
-      });
-      flash(`Generando video documental 16:9 (${minLabel}m): «${topic.title.slice(0, 24)}...»`);
-    }
-  };
-
   const handleExtractMasterClips = async () => {
     if (!activeProjectId || isExtractingClips) return;
     try {
@@ -680,23 +550,13 @@ function AITab() {
     }
   };
 
-  // Grupos activos según el filtro seleccionado
-  const activeCategories: ViralCategory[] =
-    selectedCategory === "all" ? ALL_CATEGORIES : [selectedCategory];
-
-  // Temas filtrados
-  const displayedTopics =
-    selectedCategory === "all"
-      ? topics
-      : topics.filter((t) => t.category === selectedCategory);
-
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* 1. SECCIÓN PRINCIPAL: Card de Prompt, Formato, Voz y Pipeline */}
       <div className="shrink-0 rounded-2xl border border-white/[0.08] bg-black/60 p-3 mb-2.5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.6)] flex flex-col gap-2.5">
         {/* Cabecera: Switcher de formato (Largo 16:9 vs Reel 9:16) y Stepper de Duración */}
         <div className="flex items-center justify-between gap-1.5">
-          <div className="flex items-center p-0.5 rounded-xl border border-white/[0.08] bg-white/[0.03]">
+          <div className="flex items-center p-0.5 rounded-xl border border-white/[0.08] bg-white/[0.03] shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -704,7 +564,7 @@ function AITab() {
                 setRatio("16:9");
               }}
               className={cn(
-                "px-2.5 py-1 rounded-lg text-[9.5px] font-medium transition-all select-none",
+                "px-2.5 py-1 rounded-lg text-[9.5px] font-medium transition-all select-none whitespace-nowrap",
                 videoFormat === "long"
                   ? "bg-white/[0.12] text-white shadow-sm font-semibold"
                   : "text-white/40 hover:text-white/80",
@@ -720,7 +580,7 @@ function AITab() {
                 setRatio("9:16");
               }}
               className={cn(
-                "px-2.5 py-1 rounded-lg text-[9.5px] font-medium transition-all select-none",
+                "px-2.5 py-1 rounded-lg text-[9.5px] font-medium transition-all select-none whitespace-nowrap",
                 videoFormat === "reel"
                   ? "bg-white/[0.12] text-white shadow-sm font-semibold"
                   : "text-white/40 hover:text-white/80",
@@ -732,7 +592,7 @@ function AITab() {
           </div>
 
           {/* Stepper de Duración */}
-          <div className="flex items-center rounded-xl border border-white/[0.08] bg-white/[0.03] px-1 py-0.5">
+          <div className="flex items-center rounded-xl border border-white/[0.08] bg-white/[0.03] px-1 py-0.5 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -941,24 +801,22 @@ function AITab() {
             />
 
             {/* Barra de herramientas inferior del prompt */}
-            <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-white/[0.04]">
+            <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-white/[0.04] min-w-0">
               {/* Botón de Micrófono (Dictado por Voz) y Botón Pulir con Datos */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 min-w-0">
                 <button
                   type="button"
                   onClick={toggleVoiceInput}
                   title={isListening ? "Detener dictado por voz" : "Hablar con micrófono (dictado por voz para prompts largos)"}
                   className={cn(
-                    "flex items-center gap-1.5 h-6 px-2 rounded-md text-[9.5px] font-medium transition-all select-none",
+                    "flex items-center gap-1 h-6 px-1.5 rounded-md text-[9.5px] font-medium transition-all select-none whitespace-nowrap shrink-0",
                     isListening
                       ? "border border-red-500/50 bg-red-500/20 text-red-200 shadow-[0_0_10px_rgba(239,68,68,0.35)] animate-pulse"
                       : "border border-white/[0.06] bg-white/[0.02] text-white/55 hover:text-white hover:border-white/15 hover:bg-white/[0.06]",
                   )}
                 >
                   <IconMic className={cn("h-3 w-3", isListening ? "text-red-300" : "text-white/50")} />
-                  <span>
-                    {isListening ? "Escuchando..." : "Hablar"}
-                  </span>
+                  <span>{isListening ? "Escuchando..." : "Hablar"}</span>
                 </button>
 
                 <button
@@ -967,7 +825,7 @@ function AITab() {
                   disabled={isAuditingTopic || isCreating}
                   title="Auditar tema con datos duros reales de la web en el panel de Escenario Viral"
                   className={cn(
-                    "flex items-center gap-1.5 h-6 px-2 rounded-md text-[9.5px] font-medium transition-all select-none whitespace-nowrap shrink-0",
+                    "flex items-center gap-1 h-6 px-1.5 rounded-md text-[9.5px] font-medium transition-all select-none whitespace-nowrap shrink-0",
                     isAuditingTopic
                       ? "border border-amber-500/50 bg-amber-500/20 text-amber-200 animate-pulse"
                       : producerPlan
@@ -975,17 +833,15 @@ function AITab() {
                         : "border border-white/[0.08] bg-white/[0.03] text-white/60 hover:text-white hover:border-white/18 hover:bg-white/[0.06]",
                   )}
                 >
-                  <svg viewBox="0 0 24 24" className="h-3 w-3 text-amber-400 shrink-0" fill="currentColor">
-                    <path d="M13 2L3 14h7v8l10-12h-7z" />
-                  </svg>
-                  <span>{isAuditingTopic ? "Auditando..." : "Pulir con Datos"}</span>
+                  <IconSparkle className="h-3 w-3 text-amber-400 shrink-0" />
+                  <span>{isAuditingTopic ? "Auditando..." : "Pulir"}</span>
                 </button>
 
                 {topicPrompt.trim().length > 0 && (
                   <button
                     type="button"
                     onClick={() => setTopicPrompt("")}
-                    className="h-6 w-6 grid place-items-center rounded-md text-white/30 hover:text-white/70 hover:bg-white/[0.06] text-[10px] transition-colors"
+                    className="h-6 w-5 grid place-items-center rounded-md text-white/30 hover:text-white/70 hover:bg-white/[0.06] text-[10px] transition-colors shrink-0"
                     title="Borrar texto del prompt"
                   >
                     ✕
@@ -998,15 +854,15 @@ function AITab() {
                 <button
                   type="button"
                   onClick={handlePromptSubmit}
-                  className="flex items-center gap-1.5 h-6 px-2.5 rounded-md bg-white/[0.10] hover:bg-white/[0.16] text-white text-[9.5px] font-semibold border border-white/15 shadow-sm transition-all active:scale-95 whitespace-nowrap"
+                  className="flex items-center gap-1 h-6 px-2 rounded-md bg-beam-500 hover:bg-beam-400 text-white text-[9.5px] font-semibold border border-beam-400/40 shadow-sm transition-all active:scale-95 whitespace-nowrap shrink-0"
                   title="Crear video con IA ahora"
                 >
-                  <span>{videoFormat === "reel" ? "Crear Reel" : "Crear video"}</span>
-                  <span className="text-white/40 text-[9px] font-mono">↵</span>
+                  <span>Crear</span>
+                  <span className="text-white/60 text-[9px] font-mono">↵</span>
                 </button>
               ) : (
-                <span className="text-[9px] text-white/25 select-none pr-1">
-                  {videoFormat === "reel" ? "Reel 9:16" : `${targetDurationMin} min`}
+                <span className="text-[9px] text-white/25 select-none pr-1 whitespace-nowrap shrink-0 font-mono">
+                  {videoFormat === "reel" ? "9:16" : `${targetDurationMin}m`}
                 </span>
               )}
             </div>
@@ -1078,19 +934,194 @@ function AITab() {
         )}
       </div>
 
-      {/* 2. CATÁLOGO EXPANDIBLE DE NICHOS VIRALES */}
-      <Collapsible
-        title="Catálogo de nichos virales"
-        right={
-          <span className="rounded-full bg-white/[0.05] border border-white/10 px-1.5 py-0.2 text-[8.5px] font-mono text-white/50">
-            {displayedTopics.length} temas
-          </span>
+      {/* 2. AUTOMATIZACIONES NEURONALES RÁPIDAS 1-CLIC */}
+      <div className="space-y-2 pt-2 border-t border-white/[0.06]">
+        <div className="flex items-center justify-between px-0.5">
+          <SectionLabel>Automatización Neuronal 1-Clic</SectionLabel>
+        </div>
+        <div className="grid grid-cols-1 gap-1.5">
+          {AUTOMATIONS.slice(0, 5).map((a) => {
+            const p = progress[a.id];
+            const done = applied.includes(a.id);
+            return (
+              <button
+                key={a.id}
+                onClick={() => run(a.id)}
+                disabled={done || p !== undefined}
+                className={cn(
+                  "flex items-center justify-between rounded-xl border p-2 text-left transition-all",
+                  done
+                    ? "border-signal-400/30 bg-signal-400/[0.06] text-signal-400/90"
+                    : p !== undefined
+                    ? "border-beam-400/40 bg-beam-500/15 text-beam-100"
+                    : "border-white/[0.06] bg-white/[0.015] hover:border-white/[0.14] text-white/70 hover:text-white cursor-pointer",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px]">{a.glyph}</span>
+                  <div>
+                    <span className="text-[10.5px] font-medium block">{a.name}</span>
+                    <span className="micro-sm text-white/30 block">{a.detail}</span>
+                  </div>
+                </div>
+                <span className="text-[9px] font-mono text-beam-300">
+                  {done ? "Listo" : p !== undefined ? `${Math.round(p)}%` : `+${Math.round(a.score)} pts`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Modal de visualización y descarga de Reels 9:16 */}
+      <ClipsModal
+        isOpen={clipsModalOpen}
+        onClose={() => setClipsModalOpen(false)}
+        projectId={activeProjectId}
+        projectTitle={activeProjectTitle}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ESPACIO DE TRABAJO: INVESTIGACIÓN (Catálogo de Nichos Virales)     */
+/* ------------------------------------------------------------------ */
+
+function ResearchTab({ onUseTopic }: { onUseTopic: (topicText: string, fmt?: "reel" | "long") => void }) {
+  const { createVideo, flash } = useEditor();
+  const [selectedCategory, setSelectedCategory] = useState<ViralCategory | "all">("all");
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => getStoredPinnedIds());
+  const [topics, setTopics] = useState<ViralTopic[]>(() =>
+    generateDailyTopics(getStoredPinnedIds()),
+  );
+  const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
+  const [isCrawlerActive, setIsCrawlerActive] = useState<boolean>(false);
+  const [isCrawlerPaused, setIsCrawlerPaused] = useState<boolean>(false);
+  const [isTogglingCrawler, setIsTogglingCrawler] = useState<boolean>(false);
+  const [isRefreshingTopics, setIsRefreshingTopics] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const fetchSnapshot = async () => {
+      try {
+        const res = await fetch("/api/viral-niches");
+        if (res.ok && isMounted) {
+          const data = await res.json();
+          if (data && Array.isArray(data.topics)) {
+            const synced = syncLiveTopics(data.topics, pinnedIds);
+            setTopics(synced);
+            setIsCrawlerActive(Boolean(data.is_crawling));
+            setIsCrawlerPaused(Boolean(data.is_paused));
+          }
         }
-        defaultOpen={true}
-        className="px-1"
-        bodyClassName="space-y-1.5 pb-2"
-      >
-        <div className="shrink-0 flex items-center justify-between px-1 mb-1">
+      } catch (err) {}
+    };
+
+    fetchSnapshot();
+
+    const pollLoop = async () => {
+      await fetchSnapshot();
+      if (isMounted) {
+        pollTimer = setTimeout(pollLoop, 2500);
+      }
+    };
+    pollTimer = setTimeout(pollLoop, 2500);
+
+    return () => {
+      isMounted = false;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+  }, [pinnedIds]);
+
+  const handleToggleCrawler = async () => {
+    if (isTogglingCrawler) return;
+    setIsTogglingCrawler(true);
+    try {
+      const shouldStop = isCrawlerActive || !isCrawlerPaused;
+      const endpoint = shouldStop ? "/api/viral-niches/stop" : "/api/viral-niches/resume";
+      const res = await fetch(endpoint, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setIsCrawlerActive(Boolean(data.is_crawling));
+        setIsCrawlerPaused(Boolean(data.is_paused));
+        flash(
+          shouldStop
+            ? "⏹ Rastreo pausado: se conservan todos los temas descubiertos."
+            : "▶ Rastreo reanudado: buscando nuevos temas en la web..."
+        );
+      }
+    } catch (err) {
+      console.error("Error al pausar/reanudar rastreador:", err);
+    } finally {
+      setIsTogglingCrawler(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (isRefreshingTopics) return;
+    setIsRefreshingTopics(true);
+    const catParam = selectedCategory && selectedCategory !== "all" ? `?category=${encodeURIComponent(selectedCategory)}` : "";
+    flash(`Buscando tendencias ${selectedCategory !== "all" ? `de ${selectedCategory}` : "en Internet"} con IA...`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    try {
+      const res = await fetch(`/api/viral-niches/refresh${catParam}`, {
+        method: "POST",
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.topics)) {
+          const synced = syncLiveTopics(data.topics, pinnedIds);
+          setTopics(synced);
+          setIsCrawlerActive(Boolean(data.is_crawling));
+          flash("✓ ¡Nuevas tendencias de Internet descubiertas e incorporadas!");
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Fallo en búsqueda en vivo de temas:", e);
+    } finally {
+      clearTimeout(timeoutId);
+      setIsRefreshingTopics(false);
+    }
+
+    const fresh = generateDailyTopics(pinnedIds, true);
+    setTopics(fresh);
+    flash("Temas sincronizados · Favoritos intactos");
+  };
+
+  const togglePin = (topic: ViralTopic) => {
+    const isPinned = pinnedIds.includes(topic.id);
+    const nextPinned = isPinned
+      ? pinnedIds.filter((id) => id !== topic.id)
+      : [topic.id, ...pinnedIds];
+
+    setPinnedIds(nextPinned);
+    savePinnedIds(nextPinned, topic, !isPinned);
+    flash(
+      isPinned
+        ? `«${topic.title.slice(0, 24)}...» desanclado`
+        : `«${topic.title.slice(0, 24)}...» anclado de primero`,
+    );
+  };
+
+  const activeCategories: ViralCategory[] =
+    selectedCategory === "all" ? ALL_CATEGORIES : [selectedCategory];
+
+  const displayedTopics =
+    selectedCategory === "all"
+      ? topics
+      : topics.filter((t) => t.category === selectedCategory);
+
+  return (
+    <div className="flex flex-col h-full min-h-0 space-y-2">
+      {/* Controles del Rastreador y Cabecera */}
+      <div className="shrink-0 flex items-center justify-between px-1">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="micro-sm text-white/35 font-medium tracking-wider">
             NICHOS VIRALES
@@ -1112,14 +1143,13 @@ function AITab() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          {/* Botón solicitado por el usuario: Parar/Reanudar cuando determine que hay lo suficiente */}
           <button
             type="button"
             onClick={handleToggleCrawler}
             disabled={isTogglingCrawler}
             title={isCrawlerPaused ? "Reanudar rastreo de temas en Internet" : "Parar búsqueda continua (ya hay suficientes temas)"}
             className={cn(
-              "flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded border transition-all duration-200",
+              "flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded border transition-all duration-200 cursor-pointer",
               isCrawlerPaused
                 ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-300 hover:bg-emerald-500/25"
                 : "bg-red-500/15 border-red-500/35 text-red-300 hover:bg-red-500/25",
@@ -1144,40 +1174,39 @@ function AITab() {
             onClick={handleRefresh}
             disabled={isRefreshingTopics}
             title="Buscar tendencias reales en Internet con IA y recalcular puntuaciones virales"
-            className="flex items-center gap-1 text-[9.5px] text-white/40 hover:text-beam-300 transition-colors px-1.5 py-0.5 rounded hover:bg-white/[0.04] disabled:opacity-50"
+            className="flex items-center gap-1 text-[9.5px] text-white/40 hover:text-beam-300 transition-colors px-1.5 py-0.5 rounded hover:bg-white/[0.04] disabled:opacity-50 cursor-pointer"
           >
             <IconRefresh className={cn("h-3 w-3", (isRefreshingTopics || isCrawlerActive) && "animate-spin text-beam-300")} />
-            <span>{isRefreshingTopics ? "Buscando en web..." : "Actualizar"}</span>
+            <span>{isRefreshingTopics ? "Buscando..." : "Actualizar"}</span>
           </button>
         </div>
       </div>
 
-      {/* 3. BOTÓN DE FILTRADO HORIZONTAL RÁPIDO POR NICHO */}
+      {/* Selector Horizontal de Categorías */}
       <div
         onWheel={(e) => {
           if (e.deltaY !== 0) {
             e.currentTarget.scrollLeft += e.deltaY;
           }
         }}
-        className="shrink-0 flex items-center gap-1 overflow-x-auto no-scrollbar py-1 px-0.5 mb-1.5 scroll-smooth"
+        className="shrink-0 flex items-center gap-1 overflow-x-auto no-scrollbar py-1 px-0.5 scroll-smooth"
       >
         <button
           type="button"
           onClick={() => setSelectedCategory("all")}
           className={cn(
-            "shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[9.5px] border transition-all duration-200",
+            "rounded-full px-2.5 py-0.8 text-[9px] font-medium transition-all duration-200 shrink-0 whitespace-nowrap cursor-pointer",
             selectedCategory === "all"
-              ? "bg-beam-500/20 border-beam-400/40 text-beam-100 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]"
-              : "bg-white/[0.025] border-white/[0.06] text-white/45 hover:text-white/80 hover:bg-white/[0.05]",
+              ? "bg-beam-500/20 text-beam-200 border border-beam-400/40 shadow-sm"
+              : "border border-white/[0.08] bg-white/[0.02] text-white/45 hover:text-white/80 hover:border-white/15",
           )}
         >
-          <span>Todos</span>
-          <span className="text-[8.5px] opacity-60">({topics.length})</span>
+          <span>Todos ({topics.length})</span>
         </button>
         {ALL_CATEGORIES.map((catKey) => {
           const catInfo = CATEGORY_LABELS[catKey];
           const count = topics.filter((t) => t.category === catKey).length;
-          const isActive = selectedCategory === catKey;
+          const isSelected = selectedCategory === catKey;
           return (
             <button
               key={catKey}
@@ -1185,78 +1214,27 @@ function AITab() {
               onClick={() => setSelectedCategory(catKey)}
               title={catInfo.desc}
               className={cn(
-                "shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[9.5px] border transition-all duration-200",
-                isActive
-                  ? "bg-beam-500/20 border-beam-400/40 text-beam-100 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]"
-                  : "bg-white/[0.025] border-white/[0.06] text-white/45 hover:text-white/80 hover:bg-white/[0.05]",
+                "rounded-full px-2.5 py-0.8 text-[9px] font-medium transition-all duration-200 shrink-0 whitespace-nowrap flex items-center gap-1 cursor-pointer",
+                isSelected
+                  ? "bg-beam-500/20 text-beam-200 border border-beam-400/40 shadow-sm"
+                  : "border border-white/[0.08] bg-white/[0.02] text-white/45 hover:text-white/80 hover:border-white/15",
               )}
             >
-              <span>{catInfo.icon}</span>
+              <IconFlame className="h-2.5 w-2.5 text-beam-400" />
               <span>{catInfo.label}</span>
-              <span className="text-[8.5px] opacity-60">({count})</span>
+              <span className="text-[8px] opacity-60 font-mono">({count})</span>
             </button>
           );
         })}
       </div>
 
-      {/* 4. LISTA SCROLLABLE DE TEMAS CON EFECTO DE DESAPARICIÓN */}
-      <div
-        className="min-h-0 flex-1 overflow-y-auto space-y-4 pr-1 pb-4 pt-1"
-        style={{
-          WebkitMaskImage:
-            "linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 16px), transparent 100%)",
-          maskImage:
-            "linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 16px), transparent 100%)",
-        }}
-      >
-        {/* Estado inicial mientras el rastreador puebla temas */}
-        {topics.length === 0 && (
-          <div className="rounded-xl border border-dashed border-beam-400/25 bg-beam-500/[0.03] p-5 text-center my-4">
-            <div className="flex items-center justify-center gap-2 mb-2 text-beam-300">
-              <IconRefresh className="h-4 w-4 animate-spin" />
-              <span className="text-[12px] font-medium">Descubriendo nichos en Internet...</span>
-            </div>
-            <p className="text-[10px] text-white/40 max-w-[220px] mx-auto leading-relaxed">
-              El rastreador neuronal está investigando noticias y tendencias reales en la web. Los temas irán apareciendo progresivamente aquí.
-            </p>
-          </div>
-        )}
-
+      {/* Lista Desplazable de Temas */}
+      <div className="min-h-0 flex-1 overflow-y-auto space-y-2.5 pr-1 pb-4 pt-1">
         {activeCategories.map((g) => {
           const items = topics.filter((a) => a.category === g);
           const catInfo = CATEGORY_LABELS[g];
+          if (!items.length) return null;
 
-          if (!items.length) {
-            if (selectedCategory === g) {
-              return (
-                <div key={g} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <SectionLabel>
-                      <span className="flex items-center gap-1.5">
-                        <span>{catInfo.icon}</span>
-                        <span>{catInfo.label}</span>
-                      </span>
-                    </SectionLabel>
-                    <span className="text-[9px] text-beam-300/60 font-medium">
-                      0 temas · investigando...
-                    </span>
-                  </div>
-                  <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.015] p-4 text-center">
-                    <div className="flex items-center justify-center gap-1.5 mb-1 text-beam-300">
-                      <IconRefresh className="h-3.5 w-3.5 animate-spin" />
-                      <span className="text-[11px] font-medium">Investigando {catInfo.label}...</span>
-                    </div>
-                    <p className="text-[9.5px] text-white/30">
-                      Buscando noticias y ganchos de alta retención. Aparecerán en vivo en unos segundos.
-                    </p>
-                  </div>
-                </div>
-              );
-            }
-            return null;
-          }
-
-          // Ordenar: anclados primero, luego temas nuevos en vivo generados por IA/Web, luego por puntuación
           const sortedItems = [...items].sort((a, b) => {
             const aPinned = pinnedIds.includes(a.id);
             const bPinned = pinnedIds.includes(b.id);
@@ -1276,8 +1254,8 @@ function AITab() {
                     <span>{catInfo.label}</span>
                   </span>
                 </SectionLabel>
-                <span className="text-[9px] text-white/30">
-                  {sortedItems.length} temas {sortedItems.length < 10 ? "(acumulando...)" : ""}
+                <span className="text-[9px] text-white/30 font-mono">
+                  {sortedItems.length} temas
                 </span>
               </div>
               {sortedItems.map((topic) => {
@@ -1303,177 +1281,96 @@ function AITab() {
                       <span className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-amber-400/40 via-amber-300/80 to-amber-400/40" />
                     )}
 
-                    {/* 1. FILA DE METADATOS Y BADGES (Glyph + Formato + En Vivo + Score + Pin) */}
                     <div className="flex items-center justify-between gap-1.5 text-[9px]">
                       <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                        {/* Glyph / Icono del nicho */}
-                        <span
-                          className={cn(
-                            "grid h-5 w-5 shrink-0 place-items-center rounded-md border text-[10px]",
-                            isPinned
-                              ? "border-amber-400/35 bg-amber-400/10 text-amber-300"
-                              : "border-beam-400/25 bg-beam-500/10 text-beam-200",
-                          )}
-                        >
-                          {topic.glyph || catInfo.icon}
-                        </span>
-
-                        {/* Badge de formato sugerido */}
-                        <span
-                          className="text-[8.5px] font-medium text-white/50 bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.06] shrink-0"
-                          title={`Formato sugerido: ${isShortTopic ? "Reel / Short vertical 9:16 (30-60s)" : `${topic.durationMin}m documental 16:9`}`}
-                        >
+                        <span className="text-[8.5px] font-medium text-white/50 bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.06]">
                           {isShortTopic ? "Reel 9:16" : `${topic.durationMin}m`}
                         </span>
-
-                        {/* Badge En Vivo IA */}
                         {topic.isLive && (
-                          <span
-                            className="text-[8px] font-semibold text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-400/30 shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.2)]"
-                            title="Tema investigado en vivo con IA a partir de noticias reales"
-                          >
+                          <span className="text-[8px] font-semibold text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-400/30">
                             En Vivo IA
                           </span>
                         )}
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        {/* Score de viralidad */}
-                        <span
-                          className="tnum text-[9.5px] font-semibold text-beam-200 bg-beam-500/15 px-1.5 py-0.5 rounded border border-beam-400/25"
-                          title="Puntuación de potencial viral estimado"
-                        >
+                        <span className="tnum text-[9.5px] font-semibold text-beam-200 bg-beam-500/15 px-1.5 py-0.5 rounded border border-beam-400/25">
                           +{topic.score}
                         </span>
-
-                        {/* Botón de favoritos / anclar */}
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             togglePin(topic);
                           }}
-                          title={
-                            isPinned
-                              ? "Anclado de primero en favoritos · Clic para desanclar"
-                              : "Guardar en favoritos y anclar de primero en esta categoría"
-                          }
                           className={cn(
-                            "p-1 rounded-md transition-all duration-200",
+                            "p-1 rounded-md transition-all cursor-pointer",
                             isPinned
                               ? "text-amber-400 bg-amber-400/15 border border-amber-400/35 shadow-[0_0_8px_rgba(251,191,36,0.25)]"
                               : "text-white/25 hover:text-amber-300/80 hover:bg-white/[0.06]",
                           )}
+                          title={isPinned ? "Quitar de favoritos" : "Guardar en favoritos"}
                         >
-                          <IconPin
-                            className={cn(
-                              "h-3 w-3 transition-transform",
-                              isPinned ? "rotate-[-45deg] scale-110" : "opacity-60",
-                            )}
-                            filled={isPinned}
-                          />
+                          <IconPin className={cn("h-3 w-3", isPinned ? "rotate-[-45deg] scale-110" : "opacity-60")} filled={isPinned} />
                         </button>
                       </div>
                     </div>
 
-                    {/* 2. FILA DEL TÍTULO: 100% ANCHO COMPLETO (NUNCA SE APLASTA EN LETRAS SUELTAS) */}
                     <h4
                       onClick={() => setExpandedTopicId(isExpanded ? null : topic.id)}
                       className="text-[11.5px] font-semibold leading-snug text-white/95 cursor-pointer hover:text-white transition-colors"
-                      title="Clic para ver o contraer detalles completos del tema"
                     >
                       {topic.title}
                     </h4>
 
-                    {/* 3. FILA DE MATICES O GANCHO VIRAL */}
                     <div className="relative">
-                      <p
-                        className={cn(
-                          "text-[10px] leading-relaxed text-white/50 transition-all",
-                          !isExpanded && "line-clamp-2",
-                        )}
-                      >
+                      <p className={cn("text-[10px] leading-relaxed text-white/50", !isExpanded && "line-clamp-2")}>
                         {topic.nuances}
                       </p>
                       {topic.nuances.length > 75 && (
                         <button
                           type="button"
                           onClick={() => setExpandedTopicId(isExpanded ? null : topic.id)}
-                          className="mt-0.5 text-[8.5px] text-beam-300/70 hover:text-beam-200 font-medium transition-colors"
+                          className="mt-0.5 text-[8.5px] text-beam-300/70 hover:text-beam-200 font-medium"
                         >
-                          {isExpanded ? "▲ Ver menos" : "▼ Ver más"}
+                          {isExpanded ? "▲ Menos" : "▼ Más"}
                         </button>
                       )}
                     </div>
 
-                    {/* 4. FILA DE ACCIONES LIMPIA Y SIN RECORTES DE TEXTO */}
                     <div className="flex items-center gap-1.5 pt-1.5 border-t border-white/[0.05]">
-                      {/* Integrar en el prompt */}
                       <button
                         type="button"
-                        onClick={() => handleIntegrate(topic)}
-                        className="rounded-lg border border-white/10 bg-white/[0.025] px-2 py-1 text-[9.5px] font-medium text-white/70 hover:border-white/20 hover:bg-white/[0.06] hover:text-white transition-all text-center shrink-0"
-                        title="Copiar título y matices en la caja de prompt superior"
+                        onClick={() => onUseTopic(`${topic.title}\n\nGancho: ${topic.nuances}`, isShortTopic ? "reel" : "long")}
+                        className="rounded-lg border border-beam-400/30 bg-beam-500/15 text-[9.5px] font-semibold text-beam-200 hover:bg-beam-500/25 px-2.5 py-1 transition-all flex items-center gap-1 cursor-pointer"
+                        title="Transferir este tema al generador de IA"
                       >
-                        Integrar
+                        <IconSparkle className="h-2.5 w-2.5" />
+                        <span>Cargar en IA</span>
                       </button>
 
-                      {/* Pulir con IA & Datos Reales */}
                       <button
                         type="button"
-                        onClick={() => handleAuditAndEnrich(`${topic.title}. ${topic.nuances}`)}
-                        disabled={isAuditingTopic}
-                        className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[9.5px] font-medium text-amber-300 hover:border-amber-500/50 hover:bg-amber-500/20 transition-all text-center flex items-center gap-1 shrink-0"
-                        title="Investigar en la web y avalar con datos reales antes de crear"
+                        onClick={() => {
+                          const promptText = `Crea un Reel vertical 9:16 de alto impacto sobre: ${topic.title}. Hook inicial: ${topic.nuances}`;
+                          createVideo(promptText, { duration: 60, aspect_ratio: "9:16", style: "shorts" });
+                          flash(`Generando Reel 9:16: «${topic.title.slice(0, 24)}...»`);
+                        }}
+                        className="flex-1 rounded-lg border border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.06] text-white/70 hover:text-white py-1 px-2 text-[9.5px] font-medium transition-all text-center truncate cursor-pointer"
                       >
-                        <svg viewBox="0 0 24 24" className="h-2.5 w-2.5 text-amber-400 shrink-0" fill="currentColor">
-                          <path d="M13 2L3 14h7v8l10-12h-7z" />
-                        </svg>
-                        <span>Pulir</span>
+                        Reel 9:16
                       </button>
-
-                      {/* Botón Principal de Creación (Reel o Documental) */}
-                      {isShortTopic || videoFormat === "reel" ? (
-                        <button
-                          type="button"
-                          onClick={() => handleGenerate(topic, "reel")}
-                          disabled={isCreating}
-                          className={cn(
-                            "flex-1 rounded-lg border py-1 px-2 text-[9.5px] font-semibold transition-all text-center truncate cursor-pointer",
-                            isCreating
-                              ? "opacity-50 cursor-not-allowed border-white/10 text-white/40"
-                              : "border-beam-400/40 bg-beam-500/20 text-beam-100 hover:border-beam-300/60 hover:bg-beam-500/30 hover:text-white shadow-sm",
-                          )}
-                          title={`Crear Reel vertical 9:16 (${targetReelSec}s) con IA`}
-                        >
-                          Reel ({targetReelSec}s)
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleGenerate(topic, "long", (topic.durationMin || targetDurationMin) * 60)}
-                          disabled={isCreating}
-                          className={cn(
-                            "flex-1 rounded-lg border py-1 px-2 text-[9.5px] font-semibold transition-all text-center truncate cursor-pointer",
-                            isCreating
-                              ? "opacity-50 cursor-not-allowed border-white/10 text-white/40"
-                              : "border-beam-400/40 bg-beam-500/20 text-beam-100 hover:border-beam-300/60 hover:bg-beam-500/30 hover:text-white shadow-sm",
-                          )}
-                          title={`Crear video documental de ${topic.durationMin || targetDurationMin}m en 16:9 con IA`}
-                        >
-                          Crear ({topic.durationMin || targetDurationMin}m)
-                        </button>
-                      )}
-
-                      {/* Chip compacto para formato alternativo */}
                       <button
                         type="button"
-                        onClick={() => handleGenerate(topic, (isShortTopic || videoFormat === "reel") ? "long" : "reel")}
-                        disabled={isCreating}
-                        className="rounded-lg border border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06] text-white/40 hover:text-white px-1.5 py-1 text-[8.5px] font-medium transition-all shrink-0"
-                        title={(isShortTopic || videoFormat === "reel") ? "Crear como documental largo 16:9" : "Crear como Reel vertical 9:16"}
+                        onClick={() => {
+                          const durSec = (topic.durationMin || 15) * 60;
+                          const promptText = `Crea un video documental 16:9 con investigación profunda sobre: ${topic.title}. Hook inicial: ${topic.nuances}`;
+                          createVideo(promptText, { duration: durSec, aspect_ratio: "16:9", style: "divulgacion" });
+                          flash(`Generando Documental 16:9 (${Math.round(durSec / 60)}m): «${topic.title.slice(0, 24)}...»`);
+                        }}
+                        className="rounded-lg border border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.06] text-white/70 hover:text-white py-1 px-2 text-[9.5px] font-medium transition-all text-center truncate cursor-pointer"
                       >
-                        {(isShortTopic || videoFormat === "reel") ? "16:9" : "9:16"}
+                        Largo 16:9
                       </button>
                     </div>
                   </div>
@@ -1483,20 +1380,15 @@ function AITab() {
           );
         })}
       </div>
-      </Collapsible>
-
-      {/* Modal de visualización y descarga de Reels 9:16 */}
-      <ClipsModal
-        isOpen={clipsModalOpen}
-        onClose={() => setClipsModalOpen(false)}
-        projectId={activeProjectId}
-        projectTitle={activeProjectTitle}
-      />
     </div>
   );
 }
 
-function MediaTab() {
+/* ------------------------------------------------------------------ */
+/*  ESPACIO DE TRABAJO: PROYECTO (Proyectos y Escenas en Disco)        */
+/* ------------------------------------------------------------------ */
+
+function ProjectTab() {
   const { seek, clips, projects, activeProjectId, selectProject, deleteProject, setImportModalOpen } = useEditor();
   const [detailsProject, setDetailsProject] = useState<any | null>(null);
   const [clipsProject, setClipsProject] = useState<any | null>(null);
@@ -1723,6 +1615,166 @@ function MediaTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ESPACIO DE TRABAJO: MEDIOS (B-Roll, Tomas Maestras y Biblioteca)   */
+/* ------------------------------------------------------------------ */
+
+function MediaTab() {
+  const { setImportModalOpen, addClip, select, time, flash } = useEditor();
+  const [activeFolder, setActiveFolder] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const allFolders = ASSET_FOLDERS;
+  const filteredFolders = allFolders
+    .map((f) => ({
+      ...f,
+      items: f.items.filter(
+        (item) =>
+          item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          item.meta.toLowerCase().includes(searchQuery.toLowerCase()),
+      ),
+    }))
+    .filter((f) => (activeFolder === "all" || f.name === activeFolder) && f.items.length > 0);
+
+  const handleInsertClip = (item: any, folderName: string) => {
+    const isAudio = folderName === "Audio";
+    const track = isAudio ? "a1" : folderName === "Generado por IA" ? "v2" : "v1";
+    const kind = isAudio ? "voice" : folderName === "Generado por IA" ? "broll" : "scene";
+    const newId = `asset-${Date.now().toString(36)}`;
+    const newClip: Clip = {
+      id: newId,
+      track,
+      start: Math.round(time * 10) / 10,
+      duration: isAudio ? 6 : 4,
+      label: item.name,
+      kind,
+      frame: item.frame,
+      ai: folderName === "Generado por IA",
+    };
+    addClip(newClip);
+    select(newId);
+    flash(`Insertado «${item.name}» en pista ${track.toUpperCase()} (${time.toFixed(1)}s)`);
+  };
+
+  return (
+    <div className="space-y-3.5">
+      {/* Botón rápido de importación / YouTube */}
+      <button
+        type="button"
+        onClick={() => setImportModalOpen(true)}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] p-2.5 text-[11px] font-medium text-white/70 hover:border-white/40 hover:bg-white/[0.05] hover:text-white transition-all cursor-pointer"
+      >
+        <span className="grid h-5 w-5 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-white font-mono text-[11px]">
+          +
+        </span>
+        <span>Subir archivo o pegar enlace YouTube</span>
+      </button>
+
+      {/* Buscador de medios */}
+      <div className="relative">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Buscar tomas, b-roll o audios..."
+          className="w-full rounded-lg border border-white/[0.08] bg-white/[0.025] px-2.5 py-1.5 text-[11px] text-white/90 placeholder:text-white/25 focus:border-beam-400/50 focus:outline-none transition-colors"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-white/40 hover:text-white"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      {/* Filtros de carpetas */}
+      <div className="flex items-center gap-1 overflow-x-auto pb-1 subtle-scrollbar">
+        <button
+          type="button"
+          onClick={() => setActiveFolder("all")}
+          className={cn(
+            "rounded-full px-2.5 py-0.5 text-[9.5px] font-medium transition-all shrink-0 cursor-pointer",
+            activeFolder === "all"
+              ? "bg-beam-500/20 text-beam-200 border border-beam-400/40 shadow-sm"
+              : "border border-white/[0.08] bg-white/[0.02] text-white/50 hover:text-white/80",
+          )}
+        >
+          Todos
+        </button>
+        {allFolders.map((f) => (
+          <button
+            key={f.name}
+            type="button"
+            onClick={() => setActiveFolder(f.name)}
+            className={cn(
+              "rounded-full px-2.5 py-0.5 text-[9.5px] font-medium transition-all shrink-0 cursor-pointer flex items-center gap-1",
+              activeFolder === f.name
+                ? "bg-beam-500/20 text-beam-200 border border-beam-400/40 shadow-sm"
+                : "border border-white/[0.08] bg-white/[0.02] text-white/50 hover:text-white/80",
+            )}
+          >
+            <span>{f.name}</span>
+            <span className="text-[8.5px] opacity-50 font-mono">({f.items.length})</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Listado de recursos */}
+      <div className="space-y-3">
+        {filteredFolders.map((f) => (
+          <div key={f.name} className="space-y-1.5">
+            <div className="flex items-center justify-between px-0.5">
+              <SectionLabel>{f.name}</SectionLabel>
+              <span className="text-[9px] text-white/30 font-mono">{f.items.length} clips</span>
+            </div>
+
+            <div className="space-y-1.5">
+              {f.items.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="group flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.015] p-2 transition-all duration-200 hover:border-beam-400/30 hover:bg-white/[0.035]"
+                >
+                  <div className="relative h-10 w-12 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-black/50">
+                    {item.frame ? (
+                      <img src={item.frame} alt="" className="h-full w-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center bg-gradient-to-br from-beam-950/40 to-ink-950">
+                        <IconMusic className="h-4 w-4 text-beam-300/60" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[11px] font-medium text-white/85 group-hover:text-white">
+                      {item.name}
+                    </div>
+                    <div className="text-[9.5px] text-white/35 truncate mt-0.5">
+                      {item.meta}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleInsertClip(item, f.name)}
+                    className="shrink-0 rounded-lg border border-beam-400/30 bg-beam-500/10 hover:bg-beam-500/20 text-beam-200 px-2 py-1 text-[9.5px] font-medium transition-all flex items-center gap-1 cursor-pointer"
+                    title={`Insertar en el cabezal (${time.toFixed(1)}s)`}
+                  >
+                    <span>+</span>
+                    <span>Insertar</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2115,3 +2167,66 @@ function FxTab() {
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  ESPACIO DE TRABAJO: EFECTOS (Subtítulos, Audio/Voz y Look & LUT)  */
+/* ------------------------------------------------------------------ */
+
+function EffectsTab() {
+  const [effectSubTab, setEffectSubTab] = useState<"subtitles" | "audio" | "lut">("subtitles");
+
+  return (
+    <div className="space-y-4">
+      {/* Sub-selector segmentado de efectos */}
+      <div className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.02] p-1">
+        <button
+          type="button"
+          onClick={() => setEffectSubTab("subtitles")}
+          className={cn(
+            "flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10px] font-medium transition-all cursor-pointer",
+            effectSubTab === "subtitles"
+              ? "bg-beam-500/20 text-beam-200 border border-beam-400/35 shadow-sm"
+              : "text-white/45 hover:text-white/80 hover:bg-white/[0.04]",
+          )}
+        >
+          <IconType className="h-3 w-3" />
+          <span>Subtítulos</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setEffectSubTab("audio")}
+          className={cn(
+            "flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10px] font-medium transition-all cursor-pointer",
+            effectSubTab === "audio"
+              ? "bg-beam-500/20 text-beam-200 border border-beam-400/35 shadow-sm"
+              : "text-white/45 hover:text-white/80 hover:bg-white/[0.04]",
+          )}
+        >
+          <IconMusic className="h-3 w-3" />
+          <span>Audio & Voz</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setEffectSubTab("lut")}
+          className={cn(
+            "flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10px] font-medium transition-all cursor-pointer",
+            effectSubTab === "lut"
+              ? "bg-beam-500/20 text-beam-200 border border-beam-400/35 shadow-sm"
+              : "text-white/45 hover:text-white/80 hover:bg-white/[0.04]",
+          )}
+        >
+          <IconCrop className="h-3 w-3" />
+          <span>Look & LUT</span>
+        </button>
+      </div>
+
+      {/* Vista según el subtab seleccionado */}
+      {effectSubTab === "subtitles" && <TextTab />}
+      {effectSubTab === "audio" && <AudioTab />}
+      {effectSubTab === "lut" && <FxTab />}
+    </div>
+  );
+}
+

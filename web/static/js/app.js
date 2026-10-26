@@ -3482,7 +3482,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // Parámetros de producción profesional
             const colorGrade = $("kaiColorGrade")?.value || "cinema";
             const videoFps = parseInt($("kaiVideoFps")?.value || "30", 10);
-            const bgmVolume = parseFloat($("kaiBgmVolume")?.value || "0.06");
+            const bgmVolume = parseFloat($("kaiBgmVolume")?.value || "0.12");
             const bgmTrack = $("kaiBgmTrack")?.value || "default";
             const audioNormalize = $("kaiAudioNormalize") ? $("kaiAudioNormalize").checked : true;
             const outroEnabled = $("kaiOutroEnabled") ? $("kaiOutroEnabled").checked : true;
